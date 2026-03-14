@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sticky-notes"
+version = "0.1.0"
+description = "A local todo/kanban app with TUI and MCP interfaces"
+requires-python = ">=3.12"
+dependencies = [
+    "textual>=0.50.0",
+    "fastmcp>=0.1.0",
+]
+
+[project.scripts]
+todo = "sticky_notes.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sticky_notes"]

@@ -1,0 +1,120 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from enum import StrEnum
+
+
+class TaskField(StrEnum):
+    TITLE = "title"
+    DESCRIPTION = "description"
+    COLUMN_ID = "column_id"
+    PROJECT_ID = "project_id"
+    PRIORITY = "priority"
+    DUE_DATE = "due_date"
+    POSITION = "position"
+    ARCHIVED = "archived"
+    START_DATE = "start_date"
+    FINISH_DATE = "finish_date"
+
+
+# ---- Pre-insert types (no id, no created_at) ----
+
+
+@dataclass(frozen=True)
+class NewBoard:
+    name: str
+
+
+@dataclass(frozen=True)
+class NewProject:
+    board_id: int
+    name: str
+    description: str | None = None
+
+
+@dataclass(frozen=True)
+class NewColumn:
+    board_id: int
+    name: str
+    position: int = 0
+    archived: bool = False
+
+
+@dataclass(frozen=True)
+class NewTask:
+    board_id: int
+    title: str
+    column_id: int
+    project_id: int | None = None
+    description: str | None = None
+    priority: int = 0
+    due_date: int | None = None
+    position: int = 0
+
+
+@dataclass(frozen=True)
+class NewTaskHistory:
+    task_id: int
+    field: TaskField
+    new_value: str
+    source: str
+    old_value: str | None = None
+
+
+# ---- Persisted types (full row from DB) ----
+
+
+@dataclass(frozen=True)
+class Board:
+    id: int
+    name: str
+    archived: bool
+    created_at: int
+
+
+@dataclass(frozen=True)
+class Project:
+    id: int
+    board_id: int
+    name: str
+    description: str | None
+    archived: bool
+    created_at: int
+
+
+@dataclass(frozen=True)
+class Column:
+    id: int
+    board_id: int
+    name: str
+    position: int
+    archived: bool
+
+
+@dataclass(frozen=True)
+class Task:
+    id: int
+    board_id: int
+    title: str
+    project_id: int | None
+    description: str | None
+    column_id: int
+    priority: int
+    due_date: int | None
+    position: int
+    archived: bool
+    created_at: int
+    start_date: int | None
+    finish_date: int | None
+
+
+@dataclass(frozen=True)
+class TaskHistory:
+    id: int
+    task_id: int
+    field: TaskField
+    old_value: str | None
+    new_value: str
+    source: str
+    changed_at: int
+
