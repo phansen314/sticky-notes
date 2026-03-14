@@ -38,7 +38,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     archived INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL DEFAULT (unixepoch()),
     start_date INTEGER,
-    finish_date INTEGER
+    finish_date INTEGER,
+    UNIQUE (board_id, title)
 );
 
 CREATE TABLE IF NOT EXISTS task_dependencies (
