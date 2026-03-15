@@ -12,7 +12,7 @@ from .active_board import get_active_board_id, set_active_board_id
 from .connection import DEFAULT_DB_PATH, get_connection, init_db
 from . import service
 from .export import export_markdown
-from .models import Board, Column, Project
+from .models import Board, Column, Project, TaskFilter
 
 type CommandHandler = Callable[[sqlite3.Connection, argparse.Namespace, Path], None]
 
@@ -151,7 +151,23 @@ def cmd_add(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -
 def cmd_ls(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> None:
     board = _resolve_board(conn, args, db_path)
     cols = service.list_columns(conn, board.id)
-    refs = service.list_task_refs(conn, board.id, include_archived=args.all)
+    # Build filter from CLI flags
+    column_id = None
+    if args.column:
+        column_id = _resolve_column(conn, board.id, args.column).id
+    project_id = None
+    if args.project:
+        project_id = _resolve_project(conn, board.id, args.project).id
+    priority = args.priority
+    search = args.search
+    task_filter = TaskFilter(
+        column_id=column_id,
+        project_id=project_id,
+        priority=priority,
+        search=search,
+        include_archived=args.all,
+    )
+    refs = service.list_task_refs_filtered(conn, board.id, task_filter=task_filter)
     # Group refs by column_id
     by_col: dict[int, list] = {c.id: [] for c in cols}
     for ref in refs:
@@ -450,6 +466,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_ls = sub.add_parser("ls", help="list tasks")
     p_ls.set_defaults(command="ls")
     p_ls.add_argument("--all", "-a", action="store_true", help="include archived")
+    p_ls.add_argument("--column", "-c", default=None, help="filter by column name")
+    p_ls.add_argument("--project", "-p", default=None, help="filter by project name")
+    p_ls.add_argument("--priority", "-P", type=int, default=None, help="filter by priority (1-5)")
+    p_ls.add_argument("--search", "-s", default=None, help="search title substring")
 
     p_show = sub.add_parser("show", help="show task detail")
     p_show.set_defaults(command="show")
