@@ -151,6 +151,16 @@ class TestColumnService:
         c2 = service.create_column(conn, bid, "done", position=1)
         assert service.list_columns(conn, bid) == (c1, c2)
 
+    def test_get_by_name(self, conn: sqlite3.Connection) -> None:
+        bid = insert_board(conn)
+        col = service.create_column(conn, bid, "todo")
+        assert service.get_column_by_name(conn, bid, "todo") == col
+
+    def test_get_by_name_missing_raises(self, conn: sqlite3.Connection) -> None:
+        bid = insert_board(conn)
+        with pytest.raises(LookupError, match="not found"):
+            service.get_column_by_name(conn, bid, "nope")
+
     def test_update(self, conn: sqlite3.Connection) -> None:
         bid = insert_board(conn)
         col = service.create_column(conn, bid, "old")
@@ -177,6 +187,16 @@ class TestProjectService:
     def test_get_missing_raises(self, conn: sqlite3.Connection) -> None:
         with pytest.raises(LookupError):
             service.get_project(conn, 999)
+
+    def test_get_by_name(self, conn: sqlite3.Connection) -> None:
+        bid = insert_board(conn)
+        proj = service.create_project(conn, bid, "alpha")
+        assert service.get_project_by_name(conn, bid, "alpha") == proj
+
+    def test_get_by_name_missing_raises(self, conn: sqlite3.Connection) -> None:
+        bid = insert_board(conn)
+        with pytest.raises(LookupError, match="not found"):
+            service.get_project_by_name(conn, bid, "nope")
 
     def test_get_ref(self, conn: sqlite3.Connection) -> None:
         bid = insert_board(conn)
