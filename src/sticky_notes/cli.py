@@ -12,6 +12,7 @@ from .active_board import get_active_board_id, set_active_board_id
 from .connection import DEFAULT_DB_PATH, get_connection, init_db
 from . import service
 from .export import export_markdown
+from .formatting import format_priority, format_task_num
 from .models import Board, Column, Project, TaskFilter
 
 type CommandHandler = Callable[[sqlite3.Connection, argparse.Namespace, Path], None]
@@ -46,16 +47,8 @@ def parse_date(raw: str) -> int:
     return int(dt.timestamp())
 
 
-def format_task_num(task_id: int) -> str:
-    return f"task-{task_id:04d}"
-
-
 def format_timestamp(epoch: int) -> str:
     return strftime("%Y-%m-%d", gmtime(epoch))
-
-
-def format_priority(p: int) -> str:
-    return f"[P{p}]"
 
 
 # ---- Helpers: resolution ----

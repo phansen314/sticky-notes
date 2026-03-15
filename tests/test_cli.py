@@ -9,13 +9,12 @@ from sticky_notes.active_board import (
     set_active_board_id,
 )
 from sticky_notes.cli import (
-    format_priority,
-    format_task_num,
     format_timestamp,
     main,
     parse_date,
     parse_task_num,
 )
+from sticky_notes.formatting import format_priority, format_task_num
 
 
 # ---- Fixtures ----
