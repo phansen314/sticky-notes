@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import re
 import sqlite3
 from typing import Any
 
@@ -46,6 +47,9 @@ _TASK_UPDATABLE: frozenset[str] = frozenset({
 # ---- Internal helpers ----
 
 
+_SAFE_COLUMN_RE = re.compile(r"^[a-z_]+$")
+
+
 def _build_update(
     table: str,
     row_id: int,
@@ -57,6 +61,9 @@ def _build_update(
     bad = changes.keys() - allowed
     if bad:
         raise ValueError(f"disallowed fields: {', '.join(sorted(bad))}")
+    for k in changes:
+        if not _SAFE_COLUMN_RE.match(k):
+            raise ValueError(f"invalid column name: {k!r}")
     set_clause = ", ".join(f"{k} = ?" for k in changes)
     params = (*changes.values(), row_id)
     return f"UPDATE {table} SET {set_clause} WHERE id = ?", params
@@ -385,6 +392,34 @@ def list_blocks_ids(
         (task_id,),
     ).fetchall()
     return tuple(r["task_id"] for r in rows)
+
+
+def batch_dependency_ids(
+    conn: sqlite3.Connection,
+    task_ids: tuple[int, ...],
+) -> tuple[dict[int, tuple[int, ...]], dict[int, tuple[int, ...]]]:
+    """Return (blocked_by_map, blocks_map) for a batch of task IDs.
+
+    Each map is {task_id: tuple_of_related_ids}.
+    """
+    if not task_ids:
+        return {}, {}
+    placeholders = ",".join("?" * len(task_ids))
+    rows = conn.execute(
+        f"SELECT task_id, depends_on_id FROM task_dependencies "
+        f"WHERE task_id IN ({placeholders}) OR depends_on_id IN ({placeholders})",
+        (*task_ids, *task_ids),
+    ).fetchall()
+    blocked_by: dict[int, list[int]] = {}
+    blocks: dict[int, list[int]] = {}
+    for r in rows:
+        tid, did = r["task_id"], r["depends_on_id"]
+        blocked_by.setdefault(tid, []).append(did)
+        blocks.setdefault(did, []).append(tid)
+    return (
+        {tid: tuple(blocked_by.get(tid, ())) for tid in task_ids},
+        {tid: tuple(blocks.get(tid, ())) for tid in task_ids},
+    )
 
 
 def list_blocked_by_tasks(

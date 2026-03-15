@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import sqlite3
 import sys
+from collections.abc import Callable
 from datetime import date, datetime, timezone
 from pathlib import Path
 from time import strftime, gmtime
@@ -11,6 +12,8 @@ from .connection import DEFAULT_DB_PATH, get_connection, init_db
 from . import service
 from .export import export_markdown
 from .models import Board, Column, Project
+
+type CommandHandler = Callable[[sqlite3.Connection, argparse.Namespace, Path], None]
 
 
 # ---- Helpers: parsing & formatting ----
@@ -88,6 +91,12 @@ def _resolve_board(conn: sqlite3.Connection, args: argparse.Namespace, db_path: 
 
 
 def _resolve_column(conn: sqlite3.Connection, board_id: int, name: str) -> Column:
+    # Try exact match first (fast, direct SQL lookup)
+    try:
+        return service.get_column_by_name(conn, board_id, name)
+    except LookupError:
+        pass
+    # Fall back to case-insensitive scan for CLI convenience
     cols = service.list_columns(conn, board_id)
     for col in cols:
         if col.name.lower() == name.lower():
@@ -96,6 +105,12 @@ def _resolve_column(conn: sqlite3.Connection, board_id: int, name: str) -> Colum
 
 
 def _resolve_project(conn: sqlite3.Connection, board_id: int, name: str) -> Project:
+    # Try exact match first (fast, direct SQL lookup)
+    try:
+        return service.get_project_by_name(conn, board_id, name)
+    except LookupError:
+        pass
+    # Fall back to case-insensitive scan for CLI convenience
     projects = service.list_projects(conn, board_id)
     for proj in projects:
         if proj.name.lower() == name.lower():
@@ -405,7 +420,7 @@ def cmd_export(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path
 # ---- Parser ----
 
 
-HANDLERS: dict[str, object] = {
+HANDLERS: dict[str, CommandHandler] = {
     "add": cmd_add,
     "ls": cmd_ls,
     "show": cmd_show,

@@ -19,6 +19,7 @@ from sticky_notes.models import (
 )
 from sticky_notes.repository import (
     add_dependency,
+    batch_dependency_ids,
     get_board,
     get_board_by_name,
     get_column,
@@ -107,6 +108,18 @@ class TestBoardRepository:
         board = insert_board(conn, NewBoard(name="x"))
         with pytest.raises(ValueError, match="empty"):
             update_board(conn, board.id, {})
+
+    def test_update_board_invalid_column_name(self, conn: sqlite3.Connection) -> None:
+        board = insert_board(conn, NewBoard(name="x"))
+        with pytest.raises(ValueError, match="invalid column name"):
+            # Bypass allowlist with a patched frozenset to test the regex guard
+            from sticky_notes import repository
+            orig = repository._BOARD_UPDATABLE
+            repository._BOARD_UPDATABLE = frozenset({"name; DROP TABLE boards--"})
+            try:
+                update_board(conn, board.id, {"name; DROP TABLE boards--": "pwned"})
+            finally:
+                repository._BOARD_UPDATABLE = orig
 
     def test_update_board_missing_id(self, conn: sqlite3.Connection) -> None:
         with pytest.raises(LookupError):
@@ -496,6 +509,23 @@ class TestTaskDependencyRepository:
     def test_list_all_dependencies_empty(self, conn: sqlite3.Connection) -> None:
         self._setup(conn)
         assert list_all_dependencies(conn) == ()
+
+    def test_batch_dependency_ids(self, conn: sqlite3.Connection) -> None:
+        t1, t2, t3 = self._setup(conn)
+        add_dependency(conn, t2.id, t1.id)
+        add_dependency(conn, t3.id, t1.id)
+        blocked_by, blocks = batch_dependency_ids(conn, (t1.id, t2.id, t3.id))
+        assert blocked_by[t1.id] == ()
+        assert blocked_by[t2.id] == (t1.id,)
+        assert blocked_by[t3.id] == (t1.id,)
+        assert set(blocks[t1.id]) == {t2.id, t3.id}
+        assert blocks[t2.id] == ()
+        assert blocks[t3.id] == ()
+
+    def test_batch_dependency_ids_empty(self, conn: sqlite3.Connection) -> None:
+        blocked_by, blocks = batch_dependency_ids(conn, ())
+        assert blocked_by == {}
+        assert blocks == {}
 
 
 # ---- Task history ----

@@ -117,6 +117,17 @@ def get_column(conn: sqlite3.Connection, column_id: int) -> Column:
     return col
 
 
+def get_column_by_name(
+    conn: sqlite3.Connection,
+    board_id: int,
+    name: str,
+) -> Column:
+    col = repo.get_column_by_name(conn, board_id, name)
+    if col is None:
+        raise LookupError(f"column {name!r} not found")
+    return col
+
+
 def list_columns(
     conn: sqlite3.Connection,
     board_id: int,
@@ -154,6 +165,17 @@ def get_project(conn: sqlite3.Connection, project_id: int) -> Project:
     project = repo.get_project(conn, project_id)
     if project is None:
         raise LookupError(f"project {project_id} not found")
+    return project
+
+
+def get_project_by_name(
+    conn: sqlite3.Connection,
+    board_id: int,
+    name: str,
+) -> Project:
+    project = repo.get_project_by_name(conn, board_id, name)
+    if project is None:
+        raise LookupError(f"project {name!r} not found")
     return project
 
 
@@ -269,12 +291,12 @@ def list_task_refs(
     include_archived: bool = False,
 ) -> tuple[TaskRef, ...]:
     tasks = repo.list_tasks(conn, board_id, include_archived=include_archived)
-    refs = []
-    for t in tasks:
-        blocked_by_ids = repo.list_blocked_by_ids(conn, t.id)
-        blocks_ids = repo.list_blocks_ids(conn, t.id)
-        refs.append(task_to_ref(t, blocked_by_ids, blocks_ids))
-    return tuple(refs)
+    task_ids = tuple(t.id for t in tasks)
+    blocked_by_map, blocks_map = repo.batch_dependency_ids(conn, task_ids)
+    return tuple(
+        task_to_ref(t, blocked_by_map.get(t.id, ()), blocks_map.get(t.id, ()))
+        for t in tasks
+    )
 
 
 def update_task(
