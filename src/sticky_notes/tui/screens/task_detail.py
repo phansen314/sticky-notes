@@ -6,7 +6,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Static
+from textual.widgets import Markdown, Static
 
 from sticky_notes import service
 from sticky_notes.formatting import format_priority, format_task_num, format_timestamp
@@ -68,7 +68,7 @@ class TaskDetailModal(ModalScreen[int | None]):
             yield Static(id="detail-meta", classes="detail-section")
             yield Static(id="detail-deps", classes="detail-section")
             yield Static("Description", id="detail-desc-label", classes="detail-label")
-            yield Static(id="detail-desc", classes="detail-section")
+            yield Markdown(id="detail-desc", classes="detail-section")
             yield Static("History", id="detail-history-label", classes="detail-label")
             yield Static(id="detail-history", classes="detail-history-entry")
 
@@ -105,12 +105,10 @@ class TaskDetailModal(ModalScreen[int | None]):
             self.query_one("#detail-deps", Static).display = False
 
         if detail.description:
-            self.query_one("#detail-desc", Static).update(
-                f"  {escape_markup(detail.description)}"
-            )
+            self.query_one("#detail-desc", Markdown).update(detail.description)
         else:
             self.query_one("#detail-desc-label", Static).display = False
-            self.query_one("#detail-desc", Static).display = False
+            self.query_one("#detail-desc", Markdown).display = False
 
         if detail.history:
             history_lines = []

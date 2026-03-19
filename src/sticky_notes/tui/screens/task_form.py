@@ -71,7 +71,8 @@ class TaskFormModal(ModalScreen[dict | None]):
     }
 
     TaskFormModal TextArea {
-        height: 5;
+        min-height: 10;
+        max-height: 20;
     }
     """
 
