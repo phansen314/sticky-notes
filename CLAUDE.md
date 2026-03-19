@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A local todo/kanban app (`todo` CLI) with three interfaces: CLI (argparse), TUI (Textual), and MCP server (FastMCP), all backed by SQLite storage. The CLI is the primary interface today. Repository, service, CLI, mappers, and export layers are fully implemented. TUI and MCP layers are not yet built.
+A local todo/kanban app (`todo` CLI) with three interfaces: CLI (argparse), TUI (Textual), and MCP server (FastMCP), all backed by SQLite storage. Repository, service, CLI, mappers, export, and TUI layers are fully implemented. MCP layer is not yet built.
 
 ## Architecture
 
@@ -21,26 +21,43 @@ MCP tool functions ──┘
 
 ```
 src/sticky_notes/
-  __main__.py      # entry point (todo command)
-  cli.py           # argparse CLI — commands, output formatting
-  service.py       # business logic, transaction boundaries
-  repository.py    # raw SQL queries, one function per operation
-  connection.py    # SQLite connection factory, schema init
-  models.py        # domain dataclasses (New*, persisted)
-  service_models.py# Ref/Detail dataclasses for service layer
-  mappers.py       # row→model, model→ref, ref→detail converters
-  export.py        # full-database Markdown + Mermaid export
-  schema.sql       # DDL
+  __main__.py        # entry point (todo command)
+  cli.py             # argparse CLI — commands, output formatting
+  formatting.py      # shared formatting: format_task_num, format_priority, parse_date, format_timestamp
+  service.py         # business logic, transaction boundaries
+  repository.py      # raw SQL queries, one function per operation
+  connection.py      # SQLite connection factory, schema init
+  models.py          # domain dataclasses (New*, persisted)
+  service_models.py  # Ref/Detail dataclasses for service layer
+  mappers.py         # row→model, model→ref, ref→detail converters
+  export.py          # full-database Markdown + Mermaid export
+  schema.sql         # DDL
+  tui/
+    app.py           # StickyNotesApp — main Textual app shell
+    config.py        # TuiConfig dataclass, TOML load/save
+    markup.py        # escape_markup helper for Textual rendering
+    sticky_notes.tcss# global stylesheet
+    screens/
+      settings.py    # SettingsScreen — theme, board, display preferences
+      confirm_dialog.py # ConfirmDialog(ModalScreen[bool]) — reusable yes/no
+      task_detail.py # TaskDetailModal(ModalScreen[int|None]) — read-only detail
+      task_form.py   # TaskFormModal(ModalScreen[dict|None]) — create/edit form
+    widgets/
+      board_view.py  # BoardView — kanban grid with navigation, CRUD handlers
+      column_widget.py # ColumnWidget — single column with header and task cards
+      task_card.py   # TaskCard — focusable card with keybindings and messages
 
 tests/
-  conftest.py      # fixtures (fresh DB, seeded board/columns/tasks)
-  helpers.py       # raw SQL insert helpers for test setup
-  test_cli.py      # CLI integration tests
+  conftest.py        # fixtures (fresh DB, seeded board/columns/tasks)
+  helpers.py         # raw SQL insert helpers for test setup
+  seed.py            # seed_board() for TUI test fixtures and manual testing
+  test_cli.py        # CLI integration tests
   test_connection.py
   test_export.py
   test_mappers.py
   test_repository.py
   test_service.py
+  test_tui.py        # TUI tests: config, app, settings, board, nav, move, archive, detail, create, edit
 ```
 
 ## CLI
@@ -52,6 +69,32 @@ Entry point: `todo = "sticky_notes.__main__:main"`.
 **Command structure:**
 - Top-level task commands: `add`, `ls`, `show`, `edit`, `mv`, `done`, `rm`, `log`
 - Subcommand groups: `board`, `col`, `project`, `dep`, `export`
+
+## TUI
+
+Entry point: `todo --tui` (or `todo --tui --db path/to/db`).
+
+**Architecture:** `StickyNotesApp` → `BoardView` (main widget) → `ColumnWidget` → `TaskCard`. Screens are `ModalScreen[T]` overlays that dismiss with typed results via callbacks.
+
+**Keybindings (on TaskCard focus):**
+- `enter` — task detail modal (read-only)
+- `e` — edit task (form pre-populated)
+- `d` / `delete` — archive task (with optional confirmation)
+- `n` — new task in focused column
+- Arrow keys — navigate grid; `shift+left`/`shift+right` — move task between columns
+
+**Screen patterns:**
+- `ConfirmDialog(ModalScreen[bool])` — generic yes/no, reusable for any destructive action
+- `TaskDetailModal(ModalScreen[int | None])` — dismisses with `None` (close) or task_id (edit transition)
+- `TaskFormModal(ModalScreen[dict | None])` — dual-mode (`Literal["create", "edit"]`), dismisses with field dict or `None` (cancel)
+
+**Key conventions:**
+- Deferred screen imports in `board_view.py` handler methods to avoid circular deps between widgets and screens
+- `BoardView.reload(focus_task_id=None)` is the single re-render path — all mutations call it
+- `BoardView._board_id` cached during `_load_board()` — handlers use it instead of fishing from column slots
+- `TaskFormModal` takes `conn` + `board_id` in constructor (pre-mount data fetching), `default_priority` as explicit param — no `typed_app` access before mount
+- Edit diffs form result against current DB state for minimal `update_task` changes dict
+- Config at `~/.config/sticky-notes/tui.toml` — theme, show_archived, confirm_archive, default_priority
 
 ## Key Design Conventions
 
@@ -65,8 +108,8 @@ Entry point: `todo = "sticky_notes.__main__:main"`.
 - **Repository update allowlists** — each entity has a `_*_UPDATABLE` frozenset guarding which fields can be passed to update functions.
 - **Task history / audit trail** — `_record_changes()` in the service layer auto-records `TaskHistory` entries for changed fields. `TaskField` enum defines trackable fields.
 - **Transaction context manager** — service layer controls transaction boundaries. Repository functions receive a connection and never commit/rollback. On rollback failure, `raise exc from rollback_exc` — the original error is primary, rollback failure is attached as `__cause__`. This is intentional.
-- **Timestamps as Unix epoch integers** — formatting happens at the edges only.
-- **Task numbers** — formatted as `task-{id:04d}` in the application layer, derived from autoincrement ID.
+- **Timestamps as Unix epoch integers** — formatting happens at the edges only. `parse_date` and `format_timestamp` live in `formatting.py` (shared by CLI and TUI).
+- **Task numbers** — formatted as `task-{id:04d}` in the application layer, derived from autoincrement ID. `format_task_num` and `format_priority` also live in `formatting.py`.
 - **Active board file** — persisted at `~/.local/share/sticky-notes/active-board`. CLI resolves board from `--board` flag or this file.
 - **Export** — `export.py` renders the full database to Markdown with Mermaid dependency graphs.
 - **DB path** — `~/.local/share/sticky-notes/sticky-notes.db` (XDG-compliant).
@@ -76,7 +119,9 @@ Entry point: `todo = "sticky_notes.__main__:main"`.
 
 - **pytest** with `pytest-cov`; fixtures in `conftest.py`, raw SQL insert helpers in `tests/helpers.py`
 - Fresh in-memory DB per test — no cross-test pollution
-- Test files cover all layers: connection, repository, service, mappers, export, CLI
+- Test files cover all layers: connection, repository, service, mappers, export, CLI, TUI
+- TUI tests use Textual's `app.run_test()` pilot API with `seeded_tui_db` fixture (from `tests/seed.py`)
+- `seed.py` also runnable standalone: `python tests/seed.py tmp/test.db` for manual smoke testing
 
 ## Python
 

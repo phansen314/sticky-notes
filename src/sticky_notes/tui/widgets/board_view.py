@@ -8,7 +8,7 @@ from textual.containers import Horizontal
 from textual.widgets import Static
 
 from sticky_notes import service
-from sticky_notes.active_board import get_active_board_id
+from sticky_notes.active_board import get_active_board_id, set_active_board_id
 from sticky_notes.models import Column, TaskFilter
 from sticky_notes.service_models import TaskRef
 from sticky_notes.tui.widgets.column_widget import ColumnWidget
@@ -31,6 +31,8 @@ class ColumnSlot(NamedTuple):
 
 
 class BoardView(Horizontal):
+    can_focus = True
+
     DEFAULT_CSS = """
     BoardView {
         height: 1fr;
@@ -40,6 +42,9 @@ class BoardView(Horizontal):
 
     BINDINGS = [
         Binding("n", "create_task", "New Task"),
+        Binding("b", "select_board", "Switch Board"),
+        Binding("p", "select_project", "Filter Project"),
+        Binding("a", "all_tasks", "All Tasks"),
     ]
 
     def __init__(self, *args, **kwargs) -> None:
@@ -49,6 +54,7 @@ class BoardView(Horizontal):
         self._task_idx: int = 0
         self._pending_focus_task_id: int | None = None
         self._board_id: int | None = None
+        self._project_filter_id: int | None = None
 
     @property
     def _has_cards(self) -> bool:
@@ -84,7 +90,10 @@ class BoardView(Horizontal):
             self.mount(Static("No columns on this board", id="no-columns-message"))
             return
 
-        task_filter = TaskFilter(include_archived=config.show_archived)
+        task_filter = TaskFilter(
+            include_archived=config.show_archived,
+            project_id=self._project_filter_id,
+        )
         tasks = service.list_task_refs_filtered(
             conn, self._board_id, task_filter=task_filter
         )
@@ -107,6 +116,8 @@ class BoardView(Horizontal):
                 self.call_after_refresh(self._restore_focus)
             else:
                 self.call_after_refresh(self._focus_current)
+        else:
+            self.call_after_refresh(self.focus)
 
     def _mount_from_model(self) -> None:
         self.mount(
@@ -135,9 +146,24 @@ class BoardView(Horizontal):
         if not self._columns:
             return
         self._col_idx = min(self._col_idx, len(self._columns) - 1)
+        # If current column is empty, search for first non-empty column
+        if not self._columns[self._col_idx].tasks:
+            found = False
+            for candidate in range(self._col_idx + 1, len(self._columns)):
+                if self._columns[candidate].tasks:
+                    self._col_idx = candidate
+                    found = True
+                    break
+            if not found:
+                for candidate in range(self._col_idx - 1, -1, -1):
+                    if self._columns[candidate].tasks:
+                        self._col_idx = candidate
+                        found = True
+                        break
+            if not found:
+                self.focus()
+                return
         tasks = self._columns[self._col_idx].tasks
-        if not tasks:
-            return
         self._task_idx = min(self._task_idx, len(tasks) - 1)
         columns = self._get_columns()
         self._get_cards(columns[self._col_idx])[self._task_idx].focus()
@@ -341,3 +367,52 @@ class BoardView(Horizontal):
             await self.reload(focus_task_id=remaining[idx].id)
         else:
             await self.reload()
+
+    def action_select_board(self) -> None:
+        from sticky_notes.tui.screens.board_select import BoardSelectModal
+
+        self.typed_app.push_screen(
+            BoardSelectModal(self.typed_app.conn, self._board_id),
+            callback=self._handle_board_select,
+        )
+
+    def _handle_board_select(self, result: int | None) -> None:
+        if result is None or result == self._board_id:
+            return
+        set_active_board_id(self.typed_app.db_path, result)
+        self._project_filter_id = None  # reset project filter on board switch
+        self.run_worker(self.reload())
+
+    def action_select_project(self) -> None:
+        if self._board_id is None:
+            return
+        from sticky_notes.tui.screens.project_select import (
+            ProjectSelectModal,
+            _CANCEL_SENTINEL,
+        )
+
+        self._cancel_sentinel = _CANCEL_SENTINEL
+        self.typed_app.push_screen(
+            ProjectSelectModal(
+                self.typed_app.conn,
+                self._board_id,
+                self._project_filter_id,
+            ),
+            callback=self._handle_project_select,
+        )
+
+    def _handle_project_select(self, result: int) -> None:
+        if result == self._cancel_sentinel:
+            return
+        new_filter = result if result != 0 else None
+        if new_filter == self._project_filter_id:
+            return
+        self._project_filter_id = new_filter
+        self.run_worker(self.reload())
+
+    def action_all_tasks(self) -> None:
+        if self._board_id is None:
+            return
+        from sticky_notes.tui.screens.all_tasks import AllTasksScreen
+
+        self.typed_app.push_screen(AllTasksScreen())
