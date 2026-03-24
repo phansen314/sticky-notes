@@ -4,13 +4,15 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, NamedTuple
 
 from textual.binding import Binding
-from textual.containers import Horizontal
+from textual.containers import Horizontal, Vertical
+from textual.timer import Timer
 from textual.widgets import Static
 
 from sticky_notes import service
 from sticky_notes.active_board import get_active_board_id, set_active_board_id
 from sticky_notes.models import Column, TaskFilter
 from sticky_notes.service_models import TaskRef
+from sticky_notes.tui.markup import escape_markup
 from sticky_notes.tui.widgets.column_widget import ColumnWidget
 from sticky_notes.tui.widgets.task_card import TaskCard
 
@@ -30,7 +32,7 @@ class ColumnSlot(NamedTuple):
     tasks: tuple[TaskRef, ...]
 
 
-class BoardView(Horizontal):
+class BoardView(Vertical):
     can_focus = True
 
     DEFAULT_CSS = """
@@ -45,6 +47,7 @@ class BoardView(Horizontal):
         Binding("b", "select_board", "Switch Board"),
         Binding("p", "select_project", "Filter Project"),
         Binding("a", "all_tasks", "All Tasks"),
+        Binding("r", "refresh_board", "Refresh"),
     ]
 
     def __init__(self, *args, **kwargs) -> None:
@@ -55,6 +58,7 @@ class BoardView(Horizontal):
         self._pending_focus_task_id: int | None = None
         self._board_id: int | None = None
         self._project_filter_id: int | None = None
+        self._refresh_timer: Timer | None = None
 
     @property
     def _has_cards(self) -> bool:
@@ -72,6 +76,24 @@ class BoardView(Horizontal):
 
     def on_mount(self) -> None:
         self._load_board()
+        self._start_auto_refresh_timer()
+
+    def _start_auto_refresh_timer(self) -> None:
+        if self._refresh_timer is not None:
+            self._refresh_timer.stop()
+            self._refresh_timer = None
+        seconds = self.typed_app.config.auto_refresh_seconds
+        if seconds > 0:
+            self._refresh_timer = self.set_interval(
+                seconds, self._do_auto_refresh, name="auto-refresh"
+            )
+
+    def _do_auto_refresh(self) -> None:
+        self.run_worker(self.reload())
+
+    def _reset_refresh_timer(self) -> None:
+        if self._refresh_timer is not None:
+            self._refresh_timer.reset()
 
     def _load_board(self) -> None:
         conn = self.typed_app.conn
@@ -84,10 +106,22 @@ class BoardView(Horizontal):
             self.mount(Static("No active board", id="no-board-message"))
             return
 
+        board = service.get_board(conn, self._board_id)
+        board_name = escape_markup(board.name)
+        if self._project_filter_id is not None:
+            project = service.get_project(conn, self._project_filter_id)
+            project_label = escape_markup(project.name)
+        else:
+            project_label = "All Projects"
+        self._header_text = f"{board_name} > {project_label}"
+
         columns = service.list_columns(conn, self._board_id)
         if not columns:
             self._columns = []
-            self.mount(Static("No columns on this board", id="no-columns-message"))
+            self.mount(
+                Static(self._header_text, id="board-header"),
+                Static("No columns on this board", id="no-columns-message"),
+            )
             return
 
         task_filter = TaskFilter(
@@ -121,11 +155,16 @@ class BoardView(Horizontal):
 
     def _mount_from_model(self) -> None:
         self.mount(
-            *[ColumnWidget(slot.column, slot.tasks) for slot in self._columns]
+            Static(self._header_text, id="board-header"),
+            Horizontal(
+                *[ColumnWidget(slot.column, slot.tasks) for slot in self._columns],
+                id="columns-container",
+            ),
         )
 
     def on_task_card_navigate(self, message: TaskCard.Navigate) -> None:
         message.stop()
+        self._reset_refresh_timer()
         match Direction(message.direction):
             case Direction.UP:
                 self._cursor_up()
@@ -204,6 +243,7 @@ class BoardView(Horizontal):
 
     def on_task_card_move_request(self, message: TaskCard.MoveRequest) -> None:
         message.stop()
+        self._reset_refresh_timer()
         match Direction(message.direction):
             case Direction.LEFT:
                 self.run_worker(self._move_task(-1))
@@ -250,6 +290,7 @@ class BoardView(Horizontal):
         self._focus_current()
 
     def action_create_task(self) -> None:
+        self._reset_refresh_timer()
         if not self._columns:
             return
         from sticky_notes.tui.screens.task_form import TaskFormModal
@@ -283,6 +324,7 @@ class BoardView(Horizontal):
 
     def on_task_card_show_request(self, message: TaskCard.ShowRequest) -> None:
         message.stop()
+        self._reset_refresh_timer()
         from sticky_notes.tui.screens.task_detail import TaskDetailModal
 
         self.typed_app.push_screen(
@@ -297,6 +339,7 @@ class BoardView(Horizontal):
 
     def on_task_card_edit_request(self, message: TaskCard.EditRequest) -> None:
         message.stop()
+        self._reset_refresh_timer()
         self._open_edit(message.task_id)
 
     def _open_edit(self, task_id: int) -> None:
@@ -338,8 +381,41 @@ class BoardView(Horizontal):
             service.update_task(self.typed_app.conn, task_id, changes, "tui")
         self.run_worker(self.reload(focus_task_id=task_id))
 
+    def on_task_card_move_board_request(self, message: TaskCard.MoveBoardRequest) -> None:
+        message.stop()
+        self._reset_refresh_timer()
+        self._open_move_board(message.task_id)
+
+    def _open_move_board(self, task_id: int) -> None:
+        from sticky_notes.tui.screens.move_task import MoveTaskModal
+
+        self.typed_app.push_screen(
+            MoveTaskModal(self.typed_app.conn, self._board_id, task_id),
+            callback=lambda r, tid=task_id: self._handle_move_board(tid, r),
+        )
+
+    def _handle_move_board(self, task_id: int, result: dict | None) -> None:
+        if result is None:
+            return
+        import sqlite3
+
+        try:
+            service.move_task_to_board(
+                self.typed_app.conn,
+                task_id,
+                result["target_board_id"],
+                result["target_column_id"],
+                project_id=result.get("project_id"),
+                source="tui",
+            )
+        except (ValueError, sqlite3.IntegrityError) as exc:
+            self.typed_app.notify(str(exc), severity="error")
+            return
+        self.run_worker(self.reload())
+
     def on_task_card_archive_request(self, message: TaskCard.ArchiveRequest) -> None:
         message.stop()
+        self._reset_refresh_timer()
         task_id = message.task_id
         if self.typed_app.config.confirm_archive:
             from sticky_notes.tui.screens.confirm_dialog import ConfirmDialog
@@ -369,6 +445,7 @@ class BoardView(Horizontal):
             await self.reload()
 
     def action_select_board(self) -> None:
+        self._reset_refresh_timer()
         from sticky_notes.tui.screens.board_select import BoardSelectModal
 
         self.typed_app.push_screen(
@@ -384,6 +461,7 @@ class BoardView(Horizontal):
         self.run_worker(self.reload())
 
     def action_select_project(self) -> None:
+        self._reset_refresh_timer()
         if self._board_id is None:
             return
         from sticky_notes.tui.screens.project_select import (
@@ -410,7 +488,12 @@ class BoardView(Horizontal):
         self._project_filter_id = new_filter
         self.run_worker(self.reload())
 
+    def action_refresh_board(self) -> None:
+        self._reset_refresh_timer()
+        self.run_worker(self.reload())
+
     def action_all_tasks(self) -> None:
+        self._reset_refresh_timer()
         if self._board_id is None:
             return
         from sticky_notes.tui.screens.all_tasks import AllTasksScreen

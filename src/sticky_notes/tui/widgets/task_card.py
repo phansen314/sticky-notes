@@ -30,6 +30,7 @@ class TaskCard(Static):
         Binding("shift+right", "move('right')", show=False),
         Binding("enter", "show_detail", "Detail"),
         Binding("e", "edit", "Edit"),
+        Binding("m", "move_board", "Move"),
         Binding("d", "archive", "Archive"),
         Binding("delete", "archive", "Archive", show=False),
     ]
@@ -69,6 +70,13 @@ class TaskCard(Static):
             self.task_id = task_id
             super().__init__()
 
+    class MoveBoardRequest(Message):
+        """Request to move a task to a different board."""
+
+        def __init__(self, task_id: int) -> None:
+            self.task_id = task_id
+            super().__init__()
+
     def __init__(self, task_ref: TaskRef) -> None:
         self.task_ref = task_ref
         label = (
@@ -92,3 +100,6 @@ class TaskCard(Static):
 
     def action_archive(self) -> None:
         self.post_message(self.ArchiveRequest(self.task_ref.id))
+
+    def action_move_board(self) -> None:
+        self.post_message(self.MoveBoardRequest(self.task_ref.id))

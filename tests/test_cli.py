@@ -594,6 +594,74 @@ class TestLsFilters:
         assert "not found" in err
 
 
+class TestMvBoard:
+    @pytest.fixture(autouse=True)
+    def _setup(self, cli):
+        cli("board", "create", "dev")
+        cli("col", "add", "todo", "--pos", "0")
+        cli("col", "add", "done", "--pos", "1")
+
+    def test_mv_to_board(self, cli):
+        cli("board", "create", "ops")
+        cli("board", "use", "ops")
+        cli("col", "add", "backlog")
+        cli("board", "use", "dev")
+        cli("add", "Task A")
+        out, _ = cli("mv", "1", "backlog", "--board", "ops")
+        assert 'board "ops"' in out
+        assert 'column "backlog"' in out
+
+    def test_mv_to_board_with_project(self, cli):
+        cli("board", "create", "ops")
+        cli("board", "use", "ops")
+        cli("col", "add", "backlog")
+        cli("project", "create", "infra")
+        cli("board", "use", "dev")
+        cli("add", "Task A")
+        out, _ = cli("mv", "1", "backlog", "--board", "ops", "-p", "infra")
+        assert 'board "ops"' in out
+
+    def test_mv_to_board_no_column_fails(self, cli):
+        cli("board", "create", "ops")
+        cli("board", "use", "dev")
+        cli("add", "Task A")
+        _, err = cli("mv", "1", "--board", "ops", expect_exit=1)
+        assert "column name required" in err
+
+    def test_mv_project_only(self, cli):
+        cli("project", "create", "backend")
+        cli("add", "Task A")
+        out, _ = cli("mv", "1", "-p", "backend")
+        assert "project -> backend" in out
+
+    def test_mv_no_args_fails(self, cli):
+        cli("add", "Task A")
+        _, err = cli("mv", "1", expect_exit=1)
+        assert "specify a column" in err
+
+    def test_mv_dry_run(self, cli):
+        cli("board", "create", "ops")
+        cli("board", "use", "ops")
+        cli("col", "add", "backlog")
+        cli("board", "use", "dev")
+        cli("add", "Task A")
+        out, _ = cli("mv", "1", "backlog", "--board", "ops", "--dry-run")
+        assert "dry-run" in out
+        assert "move OK" in out
+
+    def test_mv_dry_run_with_deps(self, cli):
+        cli("board", "create", "ops")
+        cli("board", "use", "ops")
+        cli("col", "add", "backlog")
+        cli("board", "use", "dev")
+        cli("add", "Task A")
+        cli("add", "Task B")
+        cli("dep", "add", "2", "1")
+        out, _ = cli("mv", "1", "backlog", "--board", "ops", "--dry-run")
+        assert "dependencies" in out
+        assert "FAIL" in out
+
+
 class TestHelp:
     def test_no_args_shows_help(self, capsys):
         try:

@@ -16,6 +16,7 @@ class TuiConfig:
     show_archived: bool = False
     confirm_archive: bool = True
     default_priority: int = 1
+    auto_refresh_seconds: int = 30
 
 
 def load_config(path: Path = DEFAULT_CONFIG_PATH) -> TuiConfig:

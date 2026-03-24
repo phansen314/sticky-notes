@@ -215,11 +215,58 @@ def cmd_edit(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) 
 
 def cmd_mv(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> None:
     task_id = _resolve_task(conn, args.task_num, args, db_path)
-    board = _resolve_board(conn, args, db_path)
-    col = _resolve_column(conn, board.id, args.column_name)
-    position = args.position if args.position is not None else 0
-    service.move_task(conn, task_id, col.id, position, source="cli")
-    print(f"moved {format_task_num(task_id)} -> {col.name}")
+    target_board_name = getattr(args, "target_board", None)
+
+    if target_board_name:
+        # Cross-board move
+        if not args.column_name:
+            print("column name required when moving to another board", file=sys.stderr)
+            sys.exit(1)
+        target_board = service.get_board_by_name(conn, target_board_name)
+        target_col = _resolve_column(conn, target_board.id, args.column_name)
+        project_id = None
+        if getattr(args, "project", None):
+            project_id = _resolve_project(conn, target_board.id, args.project).id
+
+        if getattr(args, "dry_run", False):
+            task = service.get_task(conn, task_id)
+            blocked_by = service.get_task_ref(conn, task_id).blocked_by_ids
+            blocks = service.get_task_ref(conn, task_id).blocks_ids
+            print(f"dry-run: would move {format_task_num(task_id)} ({task.title})")
+            print(f"  from board {task.board_id} -> board \"{target_board.name}\" / column \"{target_col.name}\"")
+            if blocked_by or blocks:
+                dep_ids = sorted({*blocked_by, *blocks})
+                print(f"  ⚠ has dependencies: {', '.join(format_task_num(d) for d in dep_ids)}")
+                print("  move would FAIL — remove dependencies first")
+            else:
+                print("  no dependencies — move OK")
+            return
+
+        new = service.move_task_to_board(
+            conn, task_id, target_board.id, target_col.id,
+            project_id=project_id, source="cli",
+        )
+        print(f"moved {format_task_num(task_id)} -> board \"{target_board.name}\" / column \"{target_col.name}\" (new {format_task_num(new.id)})")
+    else:
+        # Within-board move
+        project_name = getattr(args, "project", None)
+        if args.column_name:
+            board = _resolve_board(conn, args, db_path)
+            col = _resolve_column(conn, board.id, args.column_name)
+            position = args.position if args.position is not None else 0
+            service.move_task(conn, task_id, col.id, position, source="cli")
+            if project_name:
+                project_id = _resolve_project(conn, board.id, project_name).id
+                service.update_task(conn, task_id, {"project_id": project_id}, source="cli")
+            print(f"moved {format_task_num(task_id)} -> {col.name}")
+        elif project_name:
+            board = _resolve_board(conn, args, db_path)
+            project_id = _resolve_project(conn, board.id, project_name).id
+            service.update_task(conn, task_id, {"project_id": project_id}, source="cli")
+            print(f"updated {format_task_num(task_id)} project -> {project_name}")
+        else:
+            print("specify a column, --board, or --project", file=sys.stderr)
+            sys.exit(1)
 
 
 def cmd_done(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> None:
@@ -461,11 +508,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_edit.add_argument("--due", default=None, help="YYYY-MM-DD")
     p_edit.add_argument("--project", "-p", default=None)
 
-    p_mv = sub.add_parser("mv", help="move task to column")
+    p_mv = sub.add_parser("mv", help="move task to column or board")
     p_mv.set_defaults(command="mv")
     p_mv.add_argument("task_num")
-    p_mv.add_argument("column_name")
+    p_mv.add_argument("column_name", nargs="?", default=None, help="column name")
     p_mv.add_argument("position", type=int, nargs="?", default=None)
+    p_mv.add_argument("--board", dest="target_board", default=None, help="target board name")
+    p_mv.add_argument("--project", "-p", default=None, help="project name on target board")
+    p_mv.add_argument("--dry-run", action="store_true", default=False, help="preview move without executing")
 
     p_done = sub.add_parser("done", help="move task to last column")
     p_done.set_defaults(command="done")

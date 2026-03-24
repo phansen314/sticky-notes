@@ -5,19 +5,20 @@ from pathlib import Path
 import pytest
 
 from sticky_notes import service
-from sticky_notes.connection import DEFAULT_DB_PATH
+from sticky_notes.connection import DEFAULT_DB_PATH, get_connection, init_db
 from sticky_notes.tui.app import StickyNotesApp
 from sticky_notes.tui.config import TuiConfig, load_config, save_config
 from sticky_notes.tui.screens.all_tasks import AllTasksScreen
 from sticky_notes.tui.screens.board_select import BoardSelectModal
 from sticky_notes.tui.screens.column_filter import ColumnFilterModal
 from sticky_notes.tui.screens.confirm_dialog import ConfirmDialog
+from sticky_notes.tui.screens.move_task import MoveTaskModal
 from sticky_notes.tui.screens.project_select import ProjectSelectModal
 from sticky_notes.tui.screens.settings import SettingsScreen
 from sticky_notes.tui.screens.task_detail import TaskDetailModal
 from sticky_notes.tui.screens.task_form import TaskFormModal
 from sticky_notes.tui.widgets import BoardView, ColumnWidget, TaskCard
-from textual.widgets import Input, Markdown, Static
+from textual.widgets import Input, Markdown, Select, Static
 
 
 # ---- Config unit tests ----
@@ -1721,3 +1722,72 @@ class TestAllTasksScreen:
             await pilot.pause()
             # Column filter should be reset
             assert screen._column_filter_ids is None
+
+
+# ---- Move task to board modal ----
+
+
+def _seed_two_boards(tmp_path: Path) -> tuple[Path, dict]:
+    """Seed a DB with two boards: 'Coding' (seeded) and 'Ops' (empty columns only)."""
+    db_path = tmp_path / "tui-two-boards.db"
+    c = get_connection(db_path)
+    init_db(c)
+    from tests.seed import seed_board
+
+    ids = seed_board(c, db_path=db_path)
+    # Second board with columns
+    ops = service.create_board(c, "Ops")
+    ops_backlog = service.create_column(c, ops.id, "Backlog", position=0)
+    ops_doing = service.create_column(c, ops.id, "Doing", position=1)
+    ops_proj = service.create_project(c, ops.id, "infra")
+    c.close()
+    ids["ops_board_id"] = ops.id
+    ids["ops_column_ids"] = {"backlog": ops_backlog.id, "doing": ops_doing.id}
+    ids["ops_project_id"] = ops_proj.id
+    return db_path, ids
+
+
+class TestMoveTaskToBoard:
+    async def test_m_opens_move_modal(self, tmp_path: Path):
+        db_path, ids = _seed_two_boards(tmp_path)
+        app = StickyNotesApp(db_path=db_path)
+        async with app.run_test() as pilot:
+            await _wait_for_board(pilot)
+            await pilot.press("m")
+            await pilot.pause()
+            assert isinstance(app.screen, MoveTaskModal)
+
+    async def test_move_modal_cancel(self, tmp_path: Path):
+        db_path, ids = _seed_two_boards(tmp_path)
+        app = StickyNotesApp(db_path=db_path)
+        async with app.run_test() as pilot:
+            await _wait_for_board(pilot)
+            await pilot.press("m")
+            await pilot.pause()
+            assert isinstance(app.screen, MoveTaskModal)
+            await pilot.press("escape")
+            await pilot.pause()
+            assert not isinstance(app.screen, MoveTaskModal)
+
+    async def test_move_modal_same_board_error(self, tmp_path: Path):
+        db_path, ids = _seed_two_boards(tmp_path)
+        app = StickyNotesApp(db_path=db_path)
+        async with app.run_test() as pilot:
+            await _wait_for_board(pilot)
+            # Focus a task without deps (ci_pipeline in Done column)
+            board_view = app.query_one(BoardView)
+            # Navigate to scaffold task (done column, no deps)
+            cards = app.query(TaskCard)
+            scaffold_card = [c for c in cards if c.task_ref.title == "Scaffold project"][0]
+            scaffold_card.focus()
+            await pilot.pause()
+            await pilot.press("m")
+            await pilot.pause()
+            assert isinstance(app.screen, MoveTaskModal)
+            # Submit without changing board
+            await pilot.press("ctrl+s")
+            await pilot.pause()
+            # Should still be on modal with error
+            assert isinstance(app.screen, MoveTaskModal)
+            error_text = str(app.screen.query_one("#move-error", Static).render())
+            assert "already on this board" in error_text
