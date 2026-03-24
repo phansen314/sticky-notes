@@ -258,6 +258,7 @@ def create_server(lifespan: Lifespan | None = None) -> FastMCP:
         - list: requires `board_id`, optional `include_archived` (returns TaskRef[])
         - update: requires `task_id`; optional field kwargs build a changes dict; use `clear_fields` to set nullable fields to null (e.g. `["due_date", "description"]`)
         - move: requires `task_id`, `column_id`, optional `position`
+        - move_to_board: requires `task_id`, `board_id` (target), `column_id` (target); optional `project_id`. Creates a copy on the target board and archives the original. Fails if task has dependencies.
         """
         conn = _conn(ctx)
         try:
@@ -315,9 +316,17 @@ def create_server(lifespan: Lifespan | None = None) -> FastMCP:
                             conn, task_id, column_id, position if position is not None else 0, source="mcp"
                         )
                     )
+                case "move_to_board":
+                    _require("move_to_board", task_id=task_id, board_id=board_id, column_id=column_id)
+                    return to_dict(
+                        service.move_task_to_board(
+                            conn, task_id, board_id, column_id,
+                            project_id=project_id, source="mcp",
+                        )
+                    )
                 case _:
                     raise ToolError(f"unknown action {action!r}")
-        except (LookupError, sqlite3.IntegrityError) as exc:
+        except (LookupError, ValueError, sqlite3.IntegrityError) as exc:
             raise ToolError(str(exc)) from exc
 
     # ---- Dependency tool ----

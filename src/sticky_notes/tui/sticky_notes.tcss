@@ -39,6 +39,17 @@ Screen {
     width: auto;
 }
 
+#board-header {
+    text-style: bold;
+    text-align: center;
+    height: 1;
+    dock: top;
+}
+
+#columns-container {
+    height: 1fr;
+}
+
 #no-board-message, #no-columns-message {
     width: 100%;
     height: 100%;

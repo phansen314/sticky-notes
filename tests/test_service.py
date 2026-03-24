@@ -485,3 +485,128 @@ class TestListTaskRefsFiltered:
         refs = service.list_task_refs_filtered(conn, bid, task_filter=TaskFilter(search="login"))
         assert len(refs) == 1
         assert refs[0].title == "Fix login"
+
+
+# ---- Move task to board ----
+
+
+class TestMoveTaskToBoard:
+    def test_happy_path(self, conn: sqlite3.Connection) -> None:
+        b1 = insert_board(conn, "board1")
+        c1 = insert_column(conn, b1, "todo")
+        tid = insert_task(conn, b1, "my task", c1, priority=3)
+
+        b2 = insert_board(conn, "board2")
+        c2 = insert_column(conn, b2, "backlog")
+
+        new = service.move_task_to_board(conn, tid, b2, c2, source="test")
+        assert new.board_id == b2
+        assert new.column_id == c2
+        assert new.title == "my task"
+        assert new.priority == 3
+        assert new.archived == 0
+
+        old = service.get_task(conn, tid)
+        assert old.archived == 1
+
+    def test_with_project(self, conn: sqlite3.Connection) -> None:
+        b1 = insert_board(conn, "board1")
+        c1 = insert_column(conn, b1, "todo")
+        tid = insert_task(conn, b1, "task", c1)
+
+        b2 = insert_board(conn, "board2")
+        c2 = insert_column(conn, b2, "backlog")
+        pid = insert_project(conn, b2, "proj")
+
+        new = service.move_task_to_board(conn, tid, b2, c2, project_id=pid, source="test")
+        assert new.project_id == pid
+
+    def test_title_conflict(self, conn: sqlite3.Connection) -> None:
+        b1 = insert_board(conn, "board1")
+        c1 = insert_column(conn, b1, "todo")
+        insert_task(conn, b1, "dup", c1)
+
+        b2 = insert_board(conn, "board2")
+        c2 = insert_column(conn, b2, "backlog")
+        insert_task(conn, b2, "dup", c2)
+
+        t1 = service.get_task_by_title(conn, b1, "dup")
+        with pytest.raises(sqlite3.IntegrityError):
+            service.move_task_to_board(conn, t1.id, b2, c2, source="test")
+
+    def test_blocked_by_deps(self, conn: sqlite3.Connection) -> None:
+        bid = insert_board(conn)
+        cid = insert_column(conn, bid)
+        t1 = insert_task(conn, bid, "blocker", cid)
+        t2 = insert_task(conn, bid, "blocked", cid)
+        insert_task_dependency(conn, t2, t1)
+
+        b2 = insert_board(conn, "board2")
+        c2 = insert_column(conn, b2, "backlog")
+
+        with pytest.raises(ValueError, match="dependencies"):
+            service.move_task_to_board(conn, t2, b2, c2, source="test")
+
+    def test_blocks_deps(self, conn: sqlite3.Connection) -> None:
+        bid = insert_board(conn)
+        cid = insert_column(conn, bid)
+        t1 = insert_task(conn, bid, "blocker", cid)
+        t2 = insert_task(conn, bid, "blocked", cid)
+        insert_task_dependency(conn, t2, t1)
+
+        b2 = insert_board(conn, "board2")
+        c2 = insert_column(conn, b2, "backlog")
+
+        with pytest.raises(ValueError, match="dependencies"):
+            service.move_task_to_board(conn, t1, b2, c2, source="test")
+
+    def test_archived_task(self, conn: sqlite3.Connection) -> None:
+        bid = insert_board(conn)
+        cid = insert_column(conn, bid)
+        tid = insert_task(conn, bid, "task", cid)
+        service.update_task(conn, tid, {"archived": True}, source="test")
+
+        b2 = insert_board(conn, "board2")
+        c2 = insert_column(conn, b2, "backlog")
+
+        with pytest.raises(ValueError, match="archived"):
+            service.move_task_to_board(conn, tid, b2, c2, source="test")
+
+    def test_column_wrong_board(self, conn: sqlite3.Connection) -> None:
+        b1 = insert_board(conn, "board1")
+        c1 = insert_column(conn, b1, "todo")
+        tid = insert_task(conn, b1, "task", c1)
+
+        b2 = insert_board(conn, "board2")
+        insert_column(conn, b2, "backlog")
+
+        with pytest.raises(ValueError, match="does not belong"):
+            service.move_task_to_board(conn, tid, b2, c1, source="test")
+
+    def test_project_wrong_board(self, conn: sqlite3.Connection) -> None:
+        b1 = insert_board(conn, "board1")
+        c1 = insert_column(conn, b1, "todo")
+        p1 = insert_project(conn, b1, "proj1")
+        tid = insert_task(conn, b1, "task", c1)
+
+        b2 = insert_board(conn, "board2")
+        c2 = insert_column(conn, b2, "backlog")
+
+        with pytest.raises(ValueError, match="does not belong"):
+            service.move_task_to_board(conn, tid, b2, c2, project_id=p1, source="test")
+
+    def test_copies_dates(self, conn: sqlite3.Connection) -> None:
+        b1 = insert_board(conn, "board1")
+        c1 = insert_column(conn, b1, "todo")
+        task = service.create_task(
+            conn, b1, "dated", c1,
+            due_date=1700000000, start_date=1699000000, finish_date=1701000000,
+        )
+
+        b2 = insert_board(conn, "board2")
+        c2 = insert_column(conn, b2, "backlog")
+
+        new = service.move_task_to_board(conn, task.id, b2, c2, source="test")
+        assert new.due_date == 1700000000
+        assert new.start_date == 1699000000
+        assert new.finish_date == 1701000000

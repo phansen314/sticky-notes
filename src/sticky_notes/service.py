@@ -338,6 +338,62 @@ def move_task(
     return update_task(conn, task_id, {"column_id": column_id, "position": position}, source)
 
 
+def move_task_to_board(
+    conn: sqlite3.Connection,
+    task_id: int,
+    target_board_id: int,
+    target_column_id: int,
+    *,
+    project_id: int | None = None,
+    source: str,
+) -> Task:
+    with transaction(conn):
+        old = get_task(conn, task_id)
+        if old.archived:
+            raise ValueError(f"task {task_id} is archived")
+
+        blocked_by = repo.list_blocked_by_ids(conn, task_id)
+        blocks = repo.list_blocks_ids(conn, task_id)
+        if blocked_by or blocks:
+            dep_ids = sorted({*blocked_by, *blocks})
+            raise ValueError(
+                f"task {task_id} has dependencies ({', '.join(str(d) for d in dep_ids)}); "
+                "remove them before moving to another board"
+            )
+
+        target_col = repo.get_column(conn, target_column_id)
+        if target_col is None or target_col.board_id != target_board_id:
+            raise ValueError(
+                f"column {target_column_id} does not belong to board {target_board_id}"
+            )
+        if project_id is not None:
+            proj = repo.get_project(conn, project_id)
+            if proj is None or proj.board_id != target_board_id:
+                raise ValueError(
+                    f"project {project_id} does not belong to board {target_board_id}"
+                )
+
+        new = repo.insert_task(
+            conn,
+            NewTask(
+                board_id=target_board_id,
+                title=old.title,
+                column_id=target_column_id,
+                project_id=project_id,
+                description=old.description,
+                priority=old.priority,
+                due_date=old.due_date,
+                position=0,
+                start_date=old.start_date,
+                finish_date=old.finish_date,
+            ),
+        )
+
+        repo.update_task(conn, task_id, {"archived": True})
+        _record_changes(conn, task_id, old, {"archived": True}, source)
+        return new
+
+
 # ---- Dependency ----
 
 

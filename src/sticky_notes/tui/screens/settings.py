@@ -84,6 +84,16 @@ class SettingsScreen(Screen):
                 ),
                 classes="setting-row",
             ),
+            Horizontal(
+                Static("Auto-refresh (seconds):", classes="label"),
+                Select(
+                    [("Off", 0), ("15", 15), ("30", 30), ("60", 60), ("120", 120)],
+                    id="auto-refresh-select",
+                    value=config.auto_refresh_seconds,
+                    allow_blank=False,
+                ),
+                classes="setting-row",
+            ),
             id="settings-container",
         )
         yield Footer()
@@ -154,3 +164,13 @@ class SettingsScreen(Screen):
     def _on_confirm_archive_changed(self, event: Switch.Changed) -> None:
         self.typed_app.config.confirm_archive = event.value
         save_config(self.typed_app.config)
+
+    @on(Select.Changed, "#auto-refresh-select")
+    def _on_auto_refresh_changed(self, event: Select.Changed) -> None:
+        if event.value is not Select.BLANK:
+            config = self.typed_app.config
+            config.auto_refresh_seconds = event.value
+            save_config(config)
+            from sticky_notes.tui.widgets.board_view import BoardView
+
+            self.typed_app.query_one(BoardView)._start_auto_refresh_timer()
