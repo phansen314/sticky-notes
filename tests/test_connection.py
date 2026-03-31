@@ -39,6 +39,7 @@ class TestInitDb:
         assert tables == {
             "boards", "projects", "columns",
             "tasks", "task_dependencies", "task_history",
+            "groups", "task_groups",
         }
 
     def test_idempotent(self, conn: sqlite3.Connection) -> None:
