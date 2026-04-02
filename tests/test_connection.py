@@ -5,7 +5,13 @@ from pathlib import Path
 import pytest
 
 from helpers import insert_board, insert_column, insert_task
-from sticky_notes.connection import SCHEMA_VERSION, get_connection, init_db, transaction
+from sticky_notes.connection import (
+    SCHEMA_VERSION,
+    _run_migrations,
+    get_connection,
+    init_db,
+    transaction,
+)
 
 
 class TestGetConnection:
@@ -39,7 +45,7 @@ class TestInitDb:
         assert tables == {
             "boards", "projects", "columns",
             "tasks", "task_dependencies", "task_history",
-            "groups", "task_groups",
+            "groups",
         }
 
     def test_idempotent(self, conn: sqlite3.Connection) -> None:
@@ -246,6 +252,117 @@ class TestMigrations:
             "INSERT INTO task_history (task_id, field, new_value, source) "
             "VALUES (1, 'group_id', '5', 'test')"
         )
+        conn.close()
+
+    def test_migration_002_moves_task_groups_to_inline(self, tmp_path: Path) -> None:
+        """Simulate a v1 database with task_groups join table, verify migration inlines group_id."""
+        db_path = tmp_path / "v1.db"
+        conn = get_connection(db_path)
+        # Bootstrap v1 schema: tasks without group_id, task_groups join table
+        conn.executescript("""
+            CREATE TABLE boards (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL,
+                archived INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL DEFAULT (unixepoch())
+            );
+            CREATE TABLE projects (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                board_id INTEGER NOT NULL REFERENCES boards(id),
+                name TEXT NOT NULL,
+                archived INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                UNIQUE (board_id, name)
+            );
+            CREATE TABLE columns (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                board_id INTEGER NOT NULL REFERENCES boards(id),
+                name TEXT NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0,
+                archived INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                UNIQUE (board_id, name)
+            );
+            CREATE TABLE groups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL REFERENCES projects(id),
+                parent_id INTEGER REFERENCES groups(id),
+                title TEXT NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0,
+                archived INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                UNIQUE (project_id, title)
+            );
+            CREATE TABLE tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                board_id INTEGER NOT NULL REFERENCES boards(id),
+                project_id INTEGER REFERENCES projects(id),
+                title TEXT NOT NULL,
+                description TEXT,
+                column_id INTEGER NOT NULL REFERENCES columns(id),
+                priority INTEGER NOT NULL DEFAULT 1,
+                due_date INTEGER,
+                position INTEGER NOT NULL DEFAULT 0,
+                archived INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                start_date INTEGER,
+                finish_date INTEGER,
+                UNIQUE (board_id, title)
+            );
+            CREATE TABLE task_groups (
+                task_id INTEGER PRIMARY KEY REFERENCES tasks(id),
+                group_id INTEGER NOT NULL REFERENCES groups(id)
+            );
+            CREATE TABLE task_dependencies (
+                task_id INTEGER NOT NULL REFERENCES tasks(id),
+                depends_on_id INTEGER NOT NULL REFERENCES tasks(id),
+                PRIMARY KEY (task_id, depends_on_id),
+                CHECK (task_id != depends_on_id)
+            );
+            CREATE TABLE task_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id INTEGER NOT NULL REFERENCES tasks(id),
+                field TEXT NOT NULL CHECK (field IN (
+                    'title','description','column_id','project_id',
+                    'priority','due_date','position','archived',
+                    'start_date','finish_date','group_id'
+                )),
+                old_value TEXT,
+                new_value TEXT NOT NULL,
+                source TEXT NOT NULL,
+                changed_at INTEGER NOT NULL DEFAULT (unixepoch())
+            );
+        """)
+        # Seed data: board, project, column, group, tasks with join-table assignments
+        conn.execute("INSERT INTO boards (id, name) VALUES (1, 'b')")
+        conn.execute("INSERT INTO projects (id, board_id, name) VALUES (1, 1, 'p')")
+        conn.execute("INSERT INTO columns (id, board_id, name) VALUES (1, 1, 'c')")
+        conn.execute("INSERT INTO groups (id, project_id, title) VALUES (1, 1, 'g')")
+        conn.execute("INSERT INTO tasks (id, board_id, title, column_id, project_id) VALUES (1, 1, 'grouped', 1, 1)")
+        conn.execute("INSERT INTO tasks (id, board_id, title, column_id, project_id) VALUES (2, 1, 'ungrouped', 1, 1)")
+        conn.execute("INSERT INTO task_groups (task_id, group_id) VALUES (1, 1)")
+        conn.execute("PRAGMA user_version = 1")
+        conn.commit()
+
+        # Run migrations directly (not init_db, which would try to apply the
+        # current schema.sql — including indexes on columns that don't exist
+        # until migration 002 adds them).
+        _run_migrations(conn)
+
+        # Verify user_version is updated
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+        # Verify task_groups table is gone
+        tables = {
+            r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            ).fetchall()
+        }
+        assert "task_groups" not in tables
+        # Verify group_id inlined correctly
+        row = conn.execute("SELECT group_id FROM tasks WHERE id = 1").fetchone()
+        assert row["group_id"] == 1
+        row = conn.execute("SELECT group_id FROM tasks WHERE id = 2").fetchone()
+        assert row["group_id"] is None
         conn.close()
 
     def test_migration_skips_when_already_current(self, conn: sqlite3.Connection) -> None:

@@ -22,12 +22,9 @@ from sticky_notes.models import (
 )
 from sticky_notes.repository import (
     add_dependency,
-    assign_task_to_group,
     batch_child_ids_by_group,
     batch_dependency_ids,
-    batch_group_ids_by_task,
     batch_task_ids_by_group,
-    delete_task_groups_by_group,
     get_board,
     get_board_by_name,
     get_column,
@@ -39,7 +36,6 @@ from sticky_notes.repository import (
     get_subtree_group_ids,
     get_task,
     get_task_by_title,
-    get_task_group_id,
     insert_board,
     insert_column,
     insert_group,
@@ -68,7 +64,8 @@ from sticky_notes.repository import (
     list_ungrouped_task_ids,
     remove_dependency,
     reparent_children,
-    unassign_task_from_group,
+    set_task_group_id,
+    unassign_tasks_from_group,
     update_board,
     update_column,
     update_group,
@@ -800,35 +797,35 @@ class TestTaskGroupRepository:
     def test_assign_and_get(self, conn: sqlite3.Connection) -> None:
         board, col, proj, grp = self._setup(conn)
         task = insert_task(conn, NewTask(board_id=board.id, title="t", column_id=col.id))
-        assign_task_to_group(conn, task.id, grp.id)
-        assert get_task_group_id(conn, task.id) == grp.id
+        set_task_group_id(conn, task.id, grp.id)
+        assert get_task(conn, task.id).group_id == grp.id
 
     def test_get_unassigned_returns_none(self, conn: sqlite3.Connection) -> None:
         board, col, _, _ = self._setup(conn)
         task = insert_task(conn, NewTask(board_id=board.id, title="t", column_id=col.id))
-        assert get_task_group_id(conn, task.id) is None
+        assert get_task(conn, task.id).group_id is None
 
-    def test_upsert_replaces_group(self, conn: sqlite3.Connection) -> None:
+    def test_update_replaces_group(self, conn: sqlite3.Connection) -> None:
         board, col, proj, grp1 = self._setup(conn)
         grp2 = insert_group(conn, NewGroup(project_id=proj.id, title="g2"))
         task = insert_task(conn, NewTask(board_id=board.id, title="t", column_id=col.id))
-        assign_task_to_group(conn, task.id, grp1.id)
-        assign_task_to_group(conn, task.id, grp2.id)
-        assert get_task_group_id(conn, task.id) == grp2.id
+        set_task_group_id(conn, task.id, grp1.id)
+        set_task_group_id(conn, task.id, grp2.id)
+        assert get_task(conn, task.id).group_id == grp2.id
 
     def test_unassign(self, conn: sqlite3.Connection) -> None:
         board, col, _, grp = self._setup(conn)
         task = insert_task(conn, NewTask(board_id=board.id, title="t", column_id=col.id))
-        assign_task_to_group(conn, task.id, grp.id)
-        unassign_task_from_group(conn, task.id)
-        assert get_task_group_id(conn, task.id) is None
+        set_task_group_id(conn, task.id, grp.id)
+        set_task_group_id(conn, task.id, None)
+        assert get_task(conn, task.id).group_id is None
 
     def test_list_task_ids_by_group(self, conn: sqlite3.Connection) -> None:
         board, col, _, grp = self._setup(conn)
         t1 = insert_task(conn, NewTask(board_id=board.id, title="t1", column_id=col.id))
         t2 = insert_task(conn, NewTask(board_id=board.id, title="t2", column_id=col.id))
-        assign_task_to_group(conn, t1.id, grp.id)
-        assign_task_to_group(conn, t2.id, grp.id)
+        set_task_group_id(conn, t1.id, grp.id)
+        set_task_group_id(conn, t2.id, grp.id)
         ids = list_task_ids_by_group(conn, grp.id)
         assert set(ids) == {t1.id, t2.id}
 
@@ -842,19 +839,19 @@ class TestTaskGroupRepository:
             conn,
             NewTask(board_id=board.id, title="ungrouped", column_id=col.id, project_id=proj.id),
         )
-        assign_task_to_group(conn, t1.id, grp.id)
+        set_task_group_id(conn, t1.id, grp.id)
         ids = list_ungrouped_task_ids(conn, proj.id)
         assert ids == (t2.id,)
 
-    def test_delete_task_groups_by_group(self, conn: sqlite3.Connection) -> None:
+    def test_bulk_unassign_by_group(self, conn: sqlite3.Connection) -> None:
         board, col, _, grp = self._setup(conn)
         t1 = insert_task(conn, NewTask(board_id=board.id, title="t1", column_id=col.id))
         t2 = insert_task(conn, NewTask(board_id=board.id, title="t2", column_id=col.id))
-        assign_task_to_group(conn, t1.id, grp.id)
-        assign_task_to_group(conn, t2.id, grp.id)
-        delete_task_groups_by_group(conn, grp.id)
-        assert get_task_group_id(conn, t1.id) is None
-        assert get_task_group_id(conn, t2.id) is None
+        set_task_group_id(conn, t1.id, grp.id)
+        set_task_group_id(conn, t2.id, grp.id)
+        unassign_tasks_from_group(conn, grp.id)
+        assert get_task(conn, t1.id).group_id is None
+        assert get_task(conn, t2.id).group_id is None
 
 
 class TestGroupTreeRepository:
@@ -972,8 +969,8 @@ class TestBatchGroupQueries:
         g2 = insert_group(conn, NewGroup(project_id=proj.id, title="g2"))
         t1 = insert_task(conn, NewTask(board_id=board.id, title="t1", column_id=col.id))
         t2 = insert_task(conn, NewTask(board_id=board.id, title="t2", column_id=col.id))
-        assign_task_to_group(conn, t1.id, g1.id)
-        assign_task_to_group(conn, t2.id, g1.id)
+        set_task_group_id(conn, t1.id, g1.id)
+        set_task_group_id(conn, t2.id, g1.id)
         result = batch_task_ids_by_group(conn, (g1.id, g2.id))
         assert set(result[g1.id]) == {t1.id, t2.id}
         assert result[g2.id] == ()
@@ -1014,24 +1011,6 @@ class TestBatchGroupQueries:
 
     def test_batch_child_ids_by_group_empty(self, conn: sqlite3.Connection) -> None:
         assert batch_child_ids_by_group(conn, ()) == {}
-
-    # -- batch_group_ids_by_task --
-
-    def test_batch_group_ids_by_task(self, conn: sqlite3.Connection) -> None:
-        board, col, proj = self._setup(conn)
-        grp = insert_group(conn, NewGroup(project_id=proj.id, title="g"))
-        t1 = insert_task(conn, NewTask(board_id=board.id, title="t1", column_id=col.id))
-        t2 = insert_task(conn, NewTask(board_id=board.id, title="t2", column_id=col.id))
-        t3 = insert_task(conn, NewTask(board_id=board.id, title="ungrouped", column_id=col.id))
-        assign_task_to_group(conn, t1.id, grp.id)
-        assign_task_to_group(conn, t2.id, grp.id)
-        result = batch_group_ids_by_task(conn, (t1.id, t2.id, t3.id))
-        assert result[t1.id] == grp.id
-        assert result[t2.id] == grp.id
-        assert t3.id not in result
-
-    def test_batch_group_ids_by_task_empty(self, conn: sqlite3.Connection) -> None:
-        assert batch_group_ids_by_task(conn, ()) == {}
 
     # -- list_groups_by_board --
 

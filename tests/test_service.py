@@ -714,8 +714,7 @@ class TestGroupService:
         tid = insert_task(conn, bid, "t", cid, project_id=pid)
         service.assign_task_to_group(conn, tid, grp.id)
         service.archive_group(conn, grp.id)
-        from sticky_notes import repository as repo
-        assert repo.get_task_group_id(conn, tid) is None
+        assert service.get_task(conn, tid).group_id is None
 
     def test_archive_reparents_children(self, conn: sqlite3.Connection) -> None:
         _, _, pid = self._setup(conn)
@@ -767,8 +766,7 @@ class TestTaskGroupAssignment:
         grp = service.create_group(conn, pid, "g")
         tid = insert_task(conn, bid, "t", cid, project_id=pid)
         service.assign_task_to_group(conn, tid, grp.id)
-        from sticky_notes import repository as repo
-        assert repo.get_task_group_id(conn, tid) == grp.id
+        assert service.get_task(conn, tid).group_id == grp.id
 
     def test_assign_auto_sets_project_id(self, conn: sqlite3.Connection) -> None:
         bid, cid, pid = self._setup(conn)
@@ -792,8 +790,7 @@ class TestTaskGroupAssignment:
         tid = insert_task(conn, bid, "t", cid, project_id=pid)
         service.assign_task_to_group(conn, tid, grp.id)
         service.unassign_task_from_group(conn, tid)
-        from sticky_notes import repository as repo
-        assert repo.get_task_group_id(conn, tid) is None
+        assert service.get_task(conn, tid).group_id is None
 
 
 class TestTaskGroupHistory:

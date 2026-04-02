@@ -12,8 +12,8 @@ from helpers import (
     insert_project,
     insert_task,
     insert_task_dependency,
-    insert_task_group,
 )
+from sticky_notes.repository import set_task_group_id
 from sticky_notes.connection import transaction
 from sticky_notes.export import export_markdown
 
@@ -171,7 +171,7 @@ class TestExportGroups:
             pid = insert_project(conn, bid, "P")
             gid = insert_group(conn, pid, "Frontend")
             tid = insert_task(conn, bid, "Fix UI", col, project_id=pid)
-            insert_task_group(conn, tid, gid)
+            set_task_group_id(conn, tid, gid)
         md = export_markdown(conn)
         assert "### Groups" in md
         assert "**Frontend**" in md

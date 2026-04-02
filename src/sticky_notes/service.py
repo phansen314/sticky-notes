@@ -559,7 +559,7 @@ def archive_group(conn: sqlite3.Connection, group_id: int) -> None:
                     source="archive_group",
                 ),
             )
-        repo.delete_task_groups_by_group(conn, group_id)
+        repo.unassign_tasks_from_group(conn, group_id)
         repo.reparent_children(conn, group_id, group.parent_id)
         repo.update_group(conn, group_id, {"archived": True})
 
@@ -582,8 +582,8 @@ def assign_task_to_group(
                 f"task belongs to project {task.project_id}, "
                 f"group belongs to project {group.project_id}"
             )
-        old_group_id = repo.get_task_group_id(conn, task_id)
-        repo.assign_task_to_group(conn, task_id, group_id)
+        old_group_id = task.group_id
+        repo.set_task_group_id(conn, task_id, group_id)
         repo.insert_task_history(
             conn,
             NewTaskHistory(
@@ -601,8 +601,9 @@ def unassign_task_from_group(
     task_id: int,
 ) -> None:
     with transaction(conn):
-        old_group_id = repo.get_task_group_id(conn, task_id)
-        repo.unassign_task_from_group(conn, task_id)
+        task = get_task(conn, task_id)
+        old_group_id = task.group_id
+        repo.set_task_group_id(conn, task_id, None)
         if old_group_id is not None:
             repo.insert_task_history(
                 conn,
@@ -617,13 +618,6 @@ def unassign_task_from_group(
 
 
 # ---- Task-group queries ----
-
-
-def get_task_group_id(
-    conn: sqlite3.Connection,
-    task_id: int,
-) -> int | None:
-    return repo.get_task_group_id(conn, task_id)
 
 
 def list_task_ids_by_group(
@@ -645,13 +639,6 @@ def list_tasks_by_ids(
     task_ids: tuple[int, ...],
 ) -> tuple[Task, ...]:
     return repo.list_tasks_by_ids(conn, task_ids)
-
-
-def batch_group_ids_by_task(
-    conn: sqlite3.Connection,
-    task_ids: tuple[int, ...],
-) -> dict[int, int]:
-    return repo.batch_group_ids_by_task(conn, task_ids)
 
 
 def list_groups_for_board(

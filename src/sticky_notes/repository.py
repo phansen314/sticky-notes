@@ -34,6 +34,9 @@ from .models import (
 _BOARD_UPDATABLE: frozenset[str] = frozenset({"name", "archived"})
 _COLUMN_UPDATABLE: frozenset[str] = frozenset({"name", "position", "archived"})
 _PROJECT_UPDATABLE: frozenset[str] = frozenset({"name", "description", "archived"})
+# group_id is intentionally excluded — assignment goes through
+# set_task_group_id / assign_task_to_group which enforce project-matching
+# invariants and record history that update_task would skip.
 _TASK_UPDATABLE: frozenset[str] = frozenset({
     "title",
     "description",
@@ -617,35 +620,24 @@ def update_group(
     return row_to_group(row)
 
 
-# ---- Task-group membership functions ----
+# ---- Task-group functions ----
 
 
-def assign_task_to_group(
+def set_task_group_id(
     conn: sqlite3.Connection,
     task_id: int,
+    group_id: int | None,
+) -> None:
+    cur = conn.execute("UPDATE tasks SET group_id = ? WHERE id = ?", (group_id, task_id))
+    if cur.rowcount == 0:
+        raise LookupError(f"task {task_id} not found")
+
+
+def unassign_tasks_from_group(
+    conn: sqlite3.Connection,
     group_id: int,
 ) -> None:
-    conn.execute(
-        "INSERT OR REPLACE INTO task_groups (task_id, group_id) VALUES (?, ?)",
-        (task_id, group_id),
-    )
-
-
-def unassign_task_from_group(
-    conn: sqlite3.Connection,
-    task_id: int,
-) -> None:
-    conn.execute("DELETE FROM task_groups WHERE task_id = ?", (task_id,))
-
-
-def get_task_group_id(
-    conn: sqlite3.Connection,
-    task_id: int,
-) -> int | None:
-    row = conn.execute(
-        "SELECT group_id FROM task_groups WHERE task_id = ?", (task_id,)
-    ).fetchone()
-    return row["group_id"] if row else None
+    conn.execute("UPDATE tasks SET group_id = NULL WHERE group_id = ?", (group_id,))
 
 
 def list_task_ids_by_group(
@@ -653,9 +645,9 @@ def list_task_ids_by_group(
     group_id: int,
 ) -> tuple[int, ...]:
     rows = conn.execute(
-        "SELECT task_id FROM task_groups WHERE group_id = ?", (group_id,)
+        "SELECT id FROM tasks WHERE group_id = ?", (group_id,)
     ).fetchall()
-    return tuple(r["task_id"] for r in rows)
+    return tuple(r["id"] for r in rows)
 
 
 def batch_task_ids_by_group(
@@ -667,13 +659,12 @@ def batch_task_ids_by_group(
         return {}
     placeholders = ",".join("?" * len(group_ids))
     rows = conn.execute(
-        f"SELECT group_id, task_id FROM task_groups "
-        f"WHERE group_id IN ({placeholders})",
+        f"SELECT group_id, id FROM tasks WHERE group_id IN ({placeholders})",
         group_ids,
     ).fetchall()
     mapping: dict[int, list[int]] = {}
     for r in rows:
-        mapping.setdefault(r["group_id"], []).append(r["task_id"])
+        mapping.setdefault(r["group_id"], []).append(r["id"])
     return {gid: tuple(mapping.get(gid, ())) for gid in group_ids}
 
 
@@ -700,22 +691,6 @@ def batch_child_ids_by_group(
     return {gid: tuple(mapping.get(gid, ())) for gid in group_ids}
 
 
-def batch_group_ids_by_task(
-    conn: sqlite3.Connection,
-    task_ids: tuple[int, ...],
-) -> dict[int, int]:
-    """Return {task_id: group_id} for tasks that have a group assignment."""
-    if not task_ids:
-        return {}
-    placeholders = ",".join("?" * len(task_ids))
-    rows = conn.execute(
-        f"SELECT task_id, group_id FROM task_groups "
-        f"WHERE task_id IN ({placeholders})",
-        task_ids,
-    ).fetchall()
-    return {r["task_id"]: r["group_id"] for r in rows}
-
-
 def list_groups_by_board(
     conn: sqlite3.Connection,
     board_id: int,
@@ -739,10 +714,8 @@ def list_ungrouped_task_ids(
     project_id: int,
 ) -> tuple[int, ...]:
     rows = conn.execute(
-        "SELECT t.id FROM tasks t "
-        "LEFT JOIN task_groups tg ON t.id = tg.task_id "
-        "WHERE t.project_id = ? AND t.archived = 0 "
-        "AND tg.task_id IS NULL",
+        "SELECT id FROM tasks "
+        "WHERE project_id = ? AND archived = 0 AND group_id IS NULL",
         (project_id,),
     ).fetchall()
     return tuple(r["id"] for r in rows)
@@ -798,8 +771,3 @@ def reparent_children(
     )
 
 
-def delete_task_groups_by_group(
-    conn: sqlite3.Connection,
-    group_id: int,
-) -> None:
-    conn.execute("DELETE FROM task_groups WHERE group_id = ?", (group_id,))

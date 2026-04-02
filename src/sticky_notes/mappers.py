@@ -74,6 +74,7 @@ def row_to_task(row: Row) -> Task:
         created_at=row["created_at"],
         start_date=row["start_date"],
         finish_date=row["finish_date"],
+        group_id=row["group_id"],
     )
 
 
