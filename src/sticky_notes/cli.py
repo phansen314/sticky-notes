@@ -253,13 +253,12 @@ def cmd_ls(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) ->
 def cmd_show(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
     task_id = _resolve_task(conn, args.task_num, args, db_path)
     detail = service.get_task_detail(conn, task_id)
-    group_id = service.get_task_group_id(conn, task_id)
     lines = [f"{format_task_num(detail.id)}  {detail.title}"]
     lines.append(f"  Column:      {detail.column.name}")
     if detail.project:
         lines.append(f"  Project:     {detail.project.name}")
-    if group_id is not None:
-        grp = service.get_group(conn, group_id)
+    if detail.group_id is not None:
+        grp = service.get_group(conn, detail.group_id)
         lines.append(f"  Group:       {grp.title} ({format_group_num(grp.id)})")
     lines.append(f"  Priority:    {detail.priority}")
     if detail.due_date:
@@ -278,7 +277,7 @@ def cmd_show(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) 
         for h in detail.history:
             old_str = h.old_value if h.old_value is not None else "(none)"
             lines.append(f"    {format_timestamp(h.changed_at)}  {h.field}: {old_str} -> {h.new_value}  ({h.source})")
-    return Data(payload={**to_dict(detail), "group_id": group_id}, text="\n".join(lines))
+    return Data(payload=detail, text="\n".join(lines))
 
 
 def cmd_edit(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:

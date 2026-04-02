@@ -126,6 +126,7 @@ class Task:
     created_at: int
     start_date: int | None
     finish_date: int | None
+    group_id: int | None
 
 
 @dataclass(frozen=True)

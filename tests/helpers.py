@@ -81,17 +81,6 @@ def insert_group(
     return cur.lastrowid  # type: ignore[return-value]
 
 
-def insert_task_group(
-    conn: sqlite3.Connection,
-    task_id: int,
-    group_id: int,
-) -> None:
-    conn.execute(
-        "INSERT INTO task_groups (task_id, group_id) VALUES (?, ?)",
-        (task_id, group_id),
-    )
-
-
 def insert_task_history(
     conn: sqlite3.Connection,
     task_id: int,

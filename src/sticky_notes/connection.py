@@ -9,9 +9,9 @@ from typing import Generator
 
 DEFAULT_DB_PATH = Path.home() / ".local" / "share" / "sticky-notes" / "sticky-notes.db"
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
-type Migration = tuple[int, Callable[[sqlite3.Connection], None]]
+type Migration = tuple[int, Callable[[sqlite3.Connection, int], None]]
 
 
 def read_schema() -> str:
@@ -50,14 +50,16 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
     current = conn.execute("PRAGMA user_version").fetchone()[0]
     for target_version, migrate_fn in MIGRATIONS:
         if current < target_version:
-            migrate_fn(conn)
-            conn.execute(f"PRAGMA user_version = {target_version}")
+            migrate_fn(conn, target_version)
             current = target_version
     if current < SCHEMA_VERSION:
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
 
-def _migrate_001_task_history_group_id(conn: sqlite3.Connection) -> None:
+def _migrate_001_task_history_group_id(
+    conn: sqlite3.Connection,
+    target_version: int,
+) -> None:
     """Recreate task_history if its CHECK constraint is missing 'group_id'.
 
     The CREATE TABLE DDL below is a point-in-time snapshot of the task_history
@@ -68,9 +70,11 @@ def _migrate_001_task_history_group_id(conn: sqlite3.Connection) -> None:
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='task_history'"
     ).fetchone()
     if row is None:
+        conn.execute(f"PRAGMA user_version = {target_version}")
         return
     ddl: str = row[0]
     if "'group_id'" in ddl:
+        conn.execute(f"PRAGMA user_version = {target_version}")
         return
     conn.execute("PRAGMA foreign_keys = OFF")
     with transaction(conn):
@@ -98,11 +102,43 @@ def _migrate_001_task_history_group_id(conn: sqlite3.Connection) -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_task_history_task_id ON task_history(task_id)"
         )
+        conn.execute(f"PRAGMA user_version = {target_version}")
+    conn.execute("PRAGMA foreign_keys = ON")
+
+
+def _migrate_002_inline_group_id(
+    conn: sqlite3.Connection,
+    target_version: int,
+) -> None:
+    """Move group assignment from task_groups join table to tasks.group_id column."""
+    conn.execute("PRAGMA foreign_keys = OFF")
+    with transaction(conn):
+        # Add group_id column if missing
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(tasks)").fetchall()}
+        if "group_id" not in cols:
+            conn.execute("ALTER TABLE tasks ADD COLUMN group_id INTEGER REFERENCES groups(id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_group_id ON tasks(group_id)")
+        # Migrate data from task_groups (task_id was PRIMARY KEY, so at most
+        # one group per task) and drop the join table.
+        tables = {
+            r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        if "task_groups" in tables:
+            conn.execute(
+                "UPDATE tasks SET group_id = ("
+                "  SELECT group_id FROM task_groups WHERE task_id = tasks.id"
+                ")"
+            )
+            conn.execute("DROP TABLE task_groups")
+        conn.execute(f"PRAGMA user_version = {target_version}")
     conn.execute("PRAGMA foreign_keys = ON")
 
 
 MIGRATIONS: list[Migration] = [
     (1, _migrate_001_task_history_group_id),
+    (2, _migrate_002_inline_group_id),
 ]
 
 

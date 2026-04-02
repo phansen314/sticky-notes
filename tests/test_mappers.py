@@ -227,20 +227,20 @@ class TestShallowFields:
         task = Task(
             id=1, board_id=1, title="t", project_id=None, description=None,
             column_id=1, priority=1, due_date=None, position=0,
-            archived=False, created_at=0, start_date=None, finish_date=None,
+            archived=False, created_at=0, start_date=None, finish_date=None, group_id=None,
         )
         fields = shallow_fields(task, Task)
         assert set(fields.keys()) == {
             "id", "board_id", "title", "project_id", "description",
             "column_id", "priority", "due_date", "position",
-            "archived", "created_at", "start_date", "finish_date",
+            "archived", "created_at", "start_date", "finish_date", "group_id",
         }
 
     def test_filters_subclass_fields_when_parent_specified(self) -> None:
         ref = TaskRef(
             id=1, board_id=1, title="t", project_id=None, description=None,
             column_id=1, priority=1, due_date=None, position=0,
-            archived=False, created_at=0, start_date=None, finish_date=None,
+            archived=False, created_at=0, start_date=None, finish_date=None, group_id=None,
             blocked_by_ids=(2,), blocks_ids=(3,),
         )
         fields = shallow_fields(ref, Task)
@@ -251,7 +251,7 @@ class TestShallowFields:
         ref = TaskRef(
             id=1, board_id=1, title="t", project_id=None, description=None,
             column_id=1, priority=1, due_date=None, position=0,
-            archived=False, created_at=0, start_date=None, finish_date=None,
+            archived=False, created_at=0, start_date=None, finish_date=None, group_id=None,
             blocked_by_ids=(2,), blocks_ids=(3,),
         )
         fields = shallow_fields(ref, TaskRef)
@@ -276,7 +276,7 @@ class TestTaskToRef:
         task = Task(
             id=1, board_id=1, title="t", project_id=None, description=None,
             column_id=1, priority=1, due_date=None, position=0,
-            archived=False, created_at=0, start_date=None, finish_date=None,
+            archived=False, created_at=0, start_date=None, finish_date=None, group_id=None,
         )
         ref = task_to_ref(task, blocked_by_ids=(2,), blocks_ids=(3,))
         assert isinstance(ref, TaskRef)
@@ -289,7 +289,7 @@ class TestTaskToRef:
         ref = TaskRef(
             id=1, board_id=1, title="t", project_id=None, description=None,
             column_id=1, priority=1, due_date=None, position=0,
-            archived=False, created_at=0, start_date=None, finish_date=None,
+            archived=False, created_at=0, start_date=None, finish_date=None, group_id=None,
             blocked_by_ids=(99,), blocks_ids=(88,),
         )
         new_ref = task_to_ref(ref, blocked_by_ids=(2,), blocks_ids=(3,))
@@ -306,7 +306,7 @@ class TestTaskRefToDetail:
         ref = TaskRef(
             id=1, board_id=1, title="t", project_id=None, description=None,
             column_id=1, priority=1, due_date=None, position=0,
-            archived=False, created_at=0, start_date=None, finish_date=None,
+            archived=False, created_at=0, start_date=None, finish_date=None, group_id=None,
             blocked_by_ids=(), blocks_ids=(),
         )
         detail = task_ref_to_detail(
@@ -384,7 +384,7 @@ class TestTaskDetailColumn:
         ref = TaskRef(
             id=1, board_id=1, title="t", project_id=None, description=None,
             column_id=1, priority=1, due_date=None, position=0,
-            archived=False, created_at=0, start_date=None, finish_date=None,
+            archived=False, created_at=0, start_date=None, finish_date=None, group_id=None,
             blocked_by_ids=(), blocks_ids=(),
         )
         with pytest.raises(TypeError, match="column is required"):
@@ -398,7 +398,7 @@ class TestTaskDetailColumn:
         ref = TaskRef(
             id=1, board_id=1, title="t", project_id=None, description=None,
             column_id=1, priority=1, due_date=None, position=0,
-            archived=False, created_at=0, start_date=None, finish_date=None,
+            archived=False, created_at=0, start_date=None, finish_date=None, group_id=None,
             blocked_by_ids=(), blocks_ids=(),
         )
         detail = TaskDetail(**shallow_fields(ref, TaskRef), column=col)
@@ -457,11 +457,13 @@ class TestNewColumnFieldsMatchSchema:
 
 class TestNewTaskFieldsMatchSchema:
     def test_new_task_covers_insertable_columns(self, conn: sqlite3.Connection) -> None:
-        """NewTask fields + DB-defaulted columns should cover all tasks columns."""
+        """NewTask fields + DB-defaulted/service-managed columns should cover all tasks columns."""
         schema_cols = _schema_columns(conn, "tasks")
         db_defaulted = {"id", "created_at", "archived"}
+        # group_id is managed by assign_task_to_group, not at insert time
+        service_managed = {"group_id"}
         new_task_fields = {f.name for f in dataclasses.fields(NewTask)}
-        assert new_task_fields | db_defaulted == schema_cols
+        assert new_task_fields | db_defaulted | service_managed == schema_cols
 
 
 class TestNewTaskHistoryFieldsMatchSchema:
