@@ -576,6 +576,55 @@ class TestBoardTaskMovement:
             columns = board._get_columns()
             assert len(board._get_cards(columns[1])) == 1
 
+    async def test_click_then_shift_move(
+        self, seeded_tui_db: tuple[Path, dict]
+    ):
+        """Clicking a card then shift+right should move the clicked card."""
+        db_path, ids = seeded_tui_db
+        app = StickyNotesApp(db_path=db_path)
+        async with app.run_test() as pilot:
+            await _wait_for_board(pilot)
+            # Default focus is (0, 0). Click a card in In Progress (col 1).
+            board = _board(app)
+            columns = board._get_columns()
+            target_card = board._get_cards(columns[1])[0]
+            target_task_id = target_card.task_ref.id
+            await pilot.click(target_card)
+            await pilot.pause()
+            # Indices should have synced to (1, 0)
+            assert board.focused_position == (1, 0)
+            # Shift+right should move THIS card, not the one at (0, 0)
+            await pilot.press("shift+right")
+            await pilot.pause()
+            await pilot.pause()
+            board = _board(app)
+            # Task moved to Done (col 2) — focus follows it
+            assert board.focused_position is not None
+            assert board.focused_position[0] == 2
+            focused = app.focused
+            assert isinstance(focused, TaskCard)
+            assert focused.task_ref.id == target_task_id
+
+    async def test_click_then_arrow_navigates_from_clicked_card(
+        self, seeded_tui_db: tuple[Path, dict]
+    ):
+        """After clicking a card, arrow keys should navigate relative to it."""
+        db_path, ids = seeded_tui_db
+        app = StickyNotesApp(db_path=db_path)
+        async with app.run_test() as pilot:
+            await _wait_for_board(pilot)
+            # Click the second card in Todo (col 0, task 1)
+            board = _board(app)
+            columns = board._get_columns()
+            card_1 = board._get_cards(columns[0])[1]
+            await pilot.click(card_1)
+            await pilot.pause()
+            assert board.focused_position == (0, 1)
+            # Down should go to (0, 2), not from stale (0, 0) -> (0, 1)
+            await pilot.press("down")
+            await pilot.pause()
+            assert board.focused_position == (0, 2)
+
 
 # ---- Archive tests ----
 
