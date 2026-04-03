@@ -77,6 +77,13 @@ class TaskCard(Static):
             self.task_id = task_id
             super().__init__()
 
+    class FocusChanged(Message):
+        """Notify parent that this card received focus (click or keyboard)."""
+
+        def __init__(self, task_id: int) -> None:
+            self.task_id = task_id
+            super().__init__()
+
     def __init__(self, task_ref: TaskRef) -> None:
         self.task_ref = task_ref
         label = (
@@ -103,3 +110,6 @@ class TaskCard(Static):
 
     def action_move_board(self) -> None:
         self.post_message(self.MoveBoardRequest(self.task_ref.id))
+
+    def on_focus(self) -> None:
+        self.post_message(self.FocusChanged(self.task_ref.id))

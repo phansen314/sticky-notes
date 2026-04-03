@@ -162,6 +162,10 @@ class BoardView(Vertical):
             ),
         )
 
+    def on_task_card_focus_changed(self, message: TaskCard.FocusChanged) -> None:
+        message.stop()
+        self._sync_indices_from_task_id(message.task_id)
+
     def on_task_card_navigate(self, message: TaskCard.Navigate) -> None:
         message.stop()
         self._reset_refresh_timer()
@@ -276,17 +280,21 @@ class BoardView(Vertical):
 
         await self.reload(focus_task_id=task_id)
 
-    def _restore_focus(self) -> None:
+    def _sync_indices_from_task_id(self, task_id: int) -> bool:
+        """Update _col_idx/_task_idx to match the given task_id. Returns True if found."""
         for col_idx, slot in enumerate(self._columns):
             for task_idx, task_ref in enumerate(slot.tasks):
-                if task_ref.id == self._pending_focus_task_id:
+                if task_ref.id == task_id:
                     self._col_idx = col_idx
                     self._task_idx = task_idx
-                    self._pending_focus_task_id = None
-                    self._focus_current()
-                    return
-        # Fallback: task not found, focus current position
+                    return True
+        return False
+
+    def _restore_focus(self) -> None:
+        task_id = self._pending_focus_task_id
         self._pending_focus_task_id = None
+        if task_id is not None:
+            self._sync_indices_from_task_id(task_id)
         self._focus_current()
 
     def action_create_task(self) -> None:
