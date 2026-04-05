@@ -9,6 +9,7 @@ from .models import (
     Column,
     Group,
     Project,
+    Tag,
     Task,
     TaskField,
     TaskHistory,
@@ -17,9 +18,8 @@ from .service_models import (
     GroupDetail,
     GroupRef,
     ProjectDetail,
-    ProjectRef,
     TaskDetail,
-    TaskRef,
+    TaskListItem,
 )
 
 type Row = sqlite3.Row
@@ -90,6 +90,16 @@ def row_to_group(row: Row) -> Group:
     )
 
 
+def row_to_tag(row: Row) -> Tag:
+    return Tag(
+        id=row["id"],
+        board_id=row["board_id"],
+        name=row["name"],
+        archived=bool(row["archived"]),
+        created_at=row["created_at"],
+    )
+
+
 def row_to_task_history(row: Row) -> TaskHistory:
     return TaskHistory(
         id=row["id"],
@@ -102,7 +112,7 @@ def row_to_task_history(row: Row) -> TaskHistory:
     )
 
 
-# ---- Persisted model -> ref ----
+# ---- Utility ----
 
 
 def shallow_fields(instance: object, cls: type) -> dict[str, Any]:
@@ -113,30 +123,25 @@ def shallow_fields(instance: object, cls: type) -> dict[str, Any]:
     return {f.name: getattr(instance, f.name) for f in dataclasses.fields(cls)}
 
 
-def task_to_ref(
+# ---- Domain model -> list / ref ----
+
+
+def task_to_list_item(
     task: Task,
-    blocked_by_ids: tuple[int, ...],
-    blocks_ids: tuple[int, ...],
-) -> TaskRef:
-    return TaskRef(
+    *,
+    project_name: str | None,
+    tag_names: tuple[str, ...],
+) -> TaskListItem:
+    return TaskListItem(
         **shallow_fields(task, Task),
-        blocked_by_ids=blocked_by_ids,
-        blocks_ids=blocks_ids,
-    )
-
-
-def project_to_ref(
-    project: Project,
-    task_ids: tuple[int, ...],
-) -> ProjectRef:
-    return ProjectRef(
-        **shallow_fields(project, Project),
-        task_ids=task_ids,
+        project_name=project_name,
+        tag_names=tag_names,
     )
 
 
 def group_to_ref(
     group: Group,
+    *,
     task_ids: tuple[int, ...],
     child_ids: tuple[int, ...],
 ) -> GroupRef:
@@ -147,45 +152,52 @@ def group_to_ref(
     )
 
 
-# ---- Ref -> hydrated ----
+# ---- Domain model -> hydrated ----
 
 
-def task_ref_to_detail(
-    ref: TaskRef,
+def task_to_detail(
+    task: Task,
+    *,
     column: Column,
     project: Project | None,
+    group: Group | None,
     blocked_by: tuple[Task, ...],
     blocks: tuple[Task, ...],
     history: tuple[TaskHistory, ...],
+    tags: tuple[Tag, ...] = (),
 ) -> TaskDetail:
     return TaskDetail(
-        **shallow_fields(ref, TaskRef),
+        **shallow_fields(task, Task),
         column=column,
         project=project,
+        group=group,
         blocked_by=blocked_by,
         blocks=blocks,
         history=history,
+        tags=tags,
     )
 
 
-def project_ref_to_detail(
-    ref: ProjectRef,
+def project_to_detail(
+    project: Project,
+    *,
     tasks: tuple[Task, ...],
 ) -> ProjectDetail:
     return ProjectDetail(
-        **shallow_fields(ref, ProjectRef),
+        **shallow_fields(project, Project),
         tasks=tasks,
     )
 
 
-def group_ref_to_detail(
-    ref: GroupRef,
+def group_to_detail(
+    group: Group,
+    *,
     tasks: tuple[Task, ...],
     children: tuple[Group, ...],
     parent: Group | None,
 ) -> GroupDetail:
     return GroupDetail(
-        **shallow_fields(ref, GroupRef),
+        **shallow_fields(group, Group),
         tasks=tasks,
         children=children,
         parent=parent,

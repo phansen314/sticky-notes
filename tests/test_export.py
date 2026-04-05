@@ -10,12 +10,14 @@ from helpers import (
     insert_column,
     insert_group,
     insert_project,
+    insert_tag,
     insert_task,
     insert_task_dependency,
+    insert_task_tag,
 )
 from sticky_notes.repository import set_task_group_id
 from sticky_notes.connection import transaction
-from sticky_notes.export import export_markdown
+from sticky_notes.export import export_markdown, _md_escape
 
 
 # ---- Helpers ----
@@ -84,9 +86,9 @@ class TestExportFull:
         md = export_markdown(conn)
         assert "### Tasks" in md
         assert "#### Todo" in md
-        assert "| task-0001 | Set up CI | P2 | Backend | 2026-05-01 |" in md
+        assert "| task-0001 | Set up CI | P2 | Backend |  | 2026-05-01 |" in md
         assert "#### Done" in md
-        assert "| task-0002 | Write docs | P1 |  |  |" in md
+        assert "| task-0002 | Write docs | P1 |  |  |  |" in md
 
     def test_dependency_mermaid(self, conn: sqlite3.Connection) -> None:
         md = export_markdown(conn)
@@ -148,8 +150,8 @@ class TestExportEdgeCases:
         assert "## Board: Alpha" in md
         assert "## Board: Beta" in md
 
-    def test_cross_board_deps_excluded(self, conn: sqlite3.Connection) -> None:
-        """A dependency linking tasks on different boards should not appear."""
+    def test_cross_board_deps_prevented(self, conn: sqlite3.Connection) -> None:
+        """Composite FK prevents dependencies between tasks on different boards."""
         with transaction(conn):
             b1 = insert_board(conn, "B1")
             b2 = insert_board(conn, "B2")
@@ -157,10 +159,40 @@ class TestExportEdgeCases:
             c2 = insert_column(conn, b2, "C", position=0)
             t1 = insert_task(conn, b1, "T1", c1)
             t2 = insert_task(conn, b2, "T2", c2)
-            insert_task_dependency(conn, t2, t1)
+        with pytest.raises(sqlite3.IntegrityError):
+            with transaction(conn):
+                insert_task_dependency(conn, t2, t1)
+
+
+class TestExportTags:
+    def test_tags_section(self, conn: sqlite3.Connection) -> None:
+        with transaction(conn):
+            bid = insert_board(conn, "B")
+            col = insert_column(conn, bid, "Col", position=0)
+            tid = insert_task(conn, bid, "Fix bug", col)
+            tag_id = insert_tag(conn, bid, "bug")
+            insert_task_tag(conn, tid, tag_id)
         md = export_markdown(conn)
-        # Neither board section should show a dependencies block
-        assert "### Dependencies" not in md
+        assert "### Tags" in md
+        assert "| bug | 1 |" in md
+
+    def test_tags_in_task_table(self, conn: sqlite3.Connection) -> None:
+        with transaction(conn):
+            bid = insert_board(conn, "B")
+            col = insert_column(conn, bid, "Col", position=0)
+            tid = insert_task(conn, bid, "Fix bug", col)
+            tag_id = insert_tag(conn, bid, "bug")
+            insert_task_tag(conn, tid, tag_id)
+        md = export_markdown(conn)
+        assert "| task-0001 | Fix bug | P1 |  | bug |  |" in md
+
+    def test_no_tags_section_when_none_exist(self, conn: sqlite3.Connection) -> None:
+        with transaction(conn):
+            bid = insert_board(conn, "B")
+            col = insert_column(conn, bid, "Col", position=0)
+            insert_task(conn, bid, "Task", col)
+        md = export_markdown(conn)
+        assert "### Tags" not in md
 
 
 class TestExportGroups:
@@ -205,3 +237,46 @@ class TestExportGroups:
             insert_task(conn, bid, "Ungrouped", col, project_id=pid)
         md = export_markdown(conn)
         assert "1 ungrouped task" in md
+
+
+class TestMdEscape:
+    def test_pipe_escaped(self) -> None:
+        assert _md_escape("foo | bar") == r"foo \| bar"
+
+    def test_backtick_escaped(self) -> None:
+        assert _md_escape("foo `bar`") == r"foo \`bar\`"
+
+    def test_newline_replaced(self) -> None:
+        assert _md_escape("line1\nline2") == "line1<br>line2"
+
+    def test_plain_unchanged(self) -> None:
+        assert _md_escape("hello world") == "hello world"
+
+
+class TestExportMdEscaping:
+    def test_pipe_in_title_escaped(self, conn: sqlite3.Connection) -> None:
+        with transaction(conn):
+            bid = insert_board(conn, "B")
+            col = insert_column(conn, bid, "Col", position=0)
+            insert_task(conn, bid, "foo | bar", col)
+        md = export_markdown(conn)
+        assert r"foo \| bar" in md
+        assert "foo | bar |" not in md  # raw pipe must not appear in table cell
+
+    def test_newline_in_title_replaced(self, conn: sqlite3.Connection) -> None:
+        with transaction(conn):
+            bid = insert_board(conn, "B")
+            col = insert_column(conn, bid, "Col", position=0)
+            insert_task(conn, bid, "line1\nline2", col)
+        md = export_markdown(conn)
+        assert "line1<br>line2" in md
+
+    def test_backtick_in_project_description_escaped(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        with transaction(conn):
+            bid = insert_board(conn, "B")
+            insert_column(conn, bid, "Col", position=0)
+            insert_project(conn, bid, "P", description="use `cmd` here")
+        md = export_markdown(conn)
+        assert r"use \`cmd\` here" in md
