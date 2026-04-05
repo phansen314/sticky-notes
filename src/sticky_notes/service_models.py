@@ -57,6 +57,15 @@ class BoardListView:
     columns: tuple[BoardListColumn, ...]
 
 
+@dataclass(frozen=True)
+class BoardContext:
+    """Aggregated board state for one-call session startup."""
+    view: BoardListView
+    projects: tuple[Project, ...]
+    tags: tuple[Tag, ...]
+    groups: tuple[GroupRef, ...]
+
+
 # ---- Hydrated types (relationships as full objects) ----
 
 

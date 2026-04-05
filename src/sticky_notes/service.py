@@ -34,6 +34,7 @@ from .models import (
     TaskHistory,
 )
 from .service_models import (
+    BoardContext,
     BoardListColumn,
     BoardListView,
     GroupDetail,
@@ -571,6 +572,17 @@ def get_board_list_view(
     return BoardListView(board=board, columns=columns)
 
 
+def get_board_context(conn: sqlite3.Connection, board_id: int) -> BoardContext:
+    """Aggregated board state: view + projects + tags + all groups. Active items only."""
+    view = get_board_list_view(conn, board_id)
+    projects = list_projects(conn, board_id)
+    tags = list_tags(conn, board_id)
+    groups: list[GroupRef] = []
+    for proj in projects:
+        groups.extend(list_groups(conn, proj.id))
+    return BoardContext(view=view, projects=projects, tags=tags, groups=tuple(groups))
+
+
 def update_task(
     conn: sqlite3.Connection,
     task_id: int,
@@ -983,7 +995,7 @@ def update_group(
         return repo.update_group(conn, group_id, changes)
 
 
-def archive_group(conn: sqlite3.Connection, group_id: int) -> Group:
+def archive_group(conn: sqlite3.Connection, group_id: int, *, source: str) -> Group:
     with transaction(conn), _friendly_errors():
         group = get_group(conn, group_id)
         task_ids = repo.list_task_ids_by_group(conn, group_id)
@@ -998,7 +1010,7 @@ def archive_group(conn: sqlite3.Connection, group_id: int) -> Group:
                     field=TaskField.GROUP_ID,
                     old_value=str(group_id),
                     new_value=None,
-                    source="archive_group",
+                    source=source,
                 ),
             )
         repo.unassign_tasks_from_group(conn, group_id)
@@ -1013,6 +1025,8 @@ def assign_task_to_group(
     conn: sqlite3.Connection,
     task_id: int,
     group_id: int,
+    *,
+    source: str,
 ) -> Task:
     with transaction(conn), _friendly_errors():
         task = get_task(conn, task_id)
@@ -1029,18 +1043,20 @@ def assign_task_to_group(
                 f"group belongs to project {group.project_id}"
             )
         repo.set_task_group_id(conn, task_id, group_id)
-        _record_changes(conn, task_id, task, changes, "assign_task_to_group")
+        _record_changes(conn, task_id, task, changes, source)
         return get_task(conn, task_id)
 
 
 def unassign_task_from_group(
     conn: sqlite3.Connection,
     task_id: int,
+    *,
+    source: str,
 ) -> Task:
     with transaction(conn), _friendly_errors():
         task = get_task(conn, task_id)
         repo.set_task_group_id(conn, task_id, None)
-        _record_changes(conn, task_id, task, {"group_id": None}, "unassign_task_from_group")
+        _record_changes(conn, task_id, task, {"group_id": None}, source)
         return get_task(conn, task_id)
 
 

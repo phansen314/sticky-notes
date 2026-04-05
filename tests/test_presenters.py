@@ -12,6 +12,7 @@ from sticky_notes.models import (
     TaskHistory,
 )
 from sticky_notes.service_models import (
+    BoardContext,
     BoardListColumn,
     BoardListView,
     GroupDetail,
@@ -299,6 +300,47 @@ class TestFormatBoardListView:
         out = presenters.format_board_list_view(view)
         assert out.endswith("bare")  # no trailing @proj or [tags] segment
         assert "@" not in out
+
+
+# ---- format_board_context ----
+
+
+class TestFormatBoardContext:
+    def _ctx(self, *, name="dev", projects=(), tags=(), groups=()) -> BoardContext:
+        view = BoardListView(board=_board(1, name), columns=())
+        return BoardContext(view=view, projects=projects, tags=tags, groups=groups)
+
+    def _ref(self, id: int, proj_id: int, title: str) -> GroupRef:
+        return GroupRef(id=id, project_id=proj_id, title=title, parent_id=None,
+                        position=0, archived=False, created_at=0)
+
+    def test_board_header(self):
+        out = presenters.format_board_context(self._ctx(name="work"))
+        assert out.startswith("== work ==")
+
+    def test_no_projects_no_line(self):
+        out = presenters.format_board_context(self._ctx())
+        assert "Projects:" not in out
+
+    def test_projects_line(self):
+        out = presenters.format_board_context(
+            self._ctx(projects=(_project(1, "sprint1"), _project(2, "sprint2")))
+        )
+        assert "Projects: sprint1, sprint2" in out
+
+    def test_tags_line(self):
+        out = presenters.format_board_context(self._ctx(tags=(_tag(1, "bug"),)))
+        assert "Tags: bug" in out
+
+    def test_groups_line(self):
+        p = _project(1, "sprint1")
+        g = self._ref(1, 1, "G1")
+        out = presenters.format_board_context(self._ctx(projects=(p,), groups=(g,)))
+        assert "Groups: G1 (sprint1)" in out
+
+    def test_no_tags_no_line(self):
+        out = presenters.format_board_context(self._ctx())
+        assert "Tags:" not in out
 
 
 # ---- format_group_list ----

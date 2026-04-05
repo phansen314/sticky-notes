@@ -6,6 +6,7 @@ import pytest
 
 from sticky_notes.models import Board, Column, Group, Project, Tag, Task, TaskFilter, TaskHistory
 from sticky_notes.service_models import (
+    BoardContext,
     BoardListView,
     GroupDetail,
     GroupRef,
@@ -410,7 +411,7 @@ class TestTaskService:
         pid = insert_project(conn, bid)
         grp = service.create_group(conn, pid, "Auth")
         task = service.create_task(conn, bid, "t", cid, project_id=pid)
-        service.assign_task_to_group(conn, task.id, grp.id)
+        service.assign_task_to_group(conn, task.id, grp.id, source="test")
         detail = service.get_task_detail(conn, task.id)
         assert detail.group is not None
         assert detail.group.id == grp.id
@@ -678,10 +679,10 @@ class TestTaskService:
         cid = insert_column(conn, bid)
         pid = insert_project(conn, bid)
         gid = insert_group(conn, pid, "g1")
-        service.archive_group(conn, gid)
+        service.archive_group(conn, gid, source="test")
         tid = insert_task(conn, bid, "t", cid)
         with pytest.raises(ValueError, match="archived"):
-            service.assign_task_to_group(conn, tid, gid)
+            service.assign_task_to_group(conn, tid, gid, source="test")
 
 
 # ---- Dependency ----
@@ -1182,7 +1183,7 @@ class TestGroupService:
         grp = service.create_group(conn, pid, "g")
         t1 = insert_task(conn, bid, "t1", cid, project_id=pid)
         insert_task(conn, bid, "t2", cid, project_id=pid)
-        service.assign_task_to_group(conn, t1, grp.id)
+        service.assign_task_to_group(conn, t1, grp.id, source="test")
         tree = service.build_group_tree(conn, pid)
         assert tree.ungrouped_task_count == 1
 
@@ -1190,7 +1191,7 @@ class TestGroupService:
         _, _, pid = self._setup(conn)
         service.create_group(conn, pid, "live")
         arch = service.create_group(conn, pid, "arch")
-        service.archive_group(conn, arch.id)
+        service.archive_group(conn, arch.id, source="test")
         tree_default = service.build_group_tree(conn, pid)
         assert len(tree_default.roots) == 1
         tree_all = service.build_group_tree(conn, pid, include_archived=True)
@@ -1220,8 +1221,8 @@ class TestGroupService:
         bid, cid, pid = self._setup(conn)
         grp = service.create_group(conn, pid, "g")
         tid = insert_task(conn, bid, "t", cid, project_id=pid)
-        service.assign_task_to_group(conn, tid, grp.id)
-        service.archive_group(conn, grp.id)
+        service.assign_task_to_group(conn, tid, grp.id, source="test")
+        service.archive_group(conn, grp.id, source="test")
         assert service.get_task(conn, tid).group_id is None
 
     def test_archive_reparents_children(self, conn: sqlite3.Connection) -> None:
@@ -1229,14 +1230,14 @@ class TestGroupService:
         parent = service.create_group(conn, pid, "parent")
         mid = service.create_group(conn, pid, "mid", parent_id=parent.id)
         child = service.create_group(conn, pid, "child", parent_id=mid.id)
-        service.archive_group(conn, mid.id)
+        service.archive_group(conn, mid.id, source="test")
         refreshed_child = service.get_group(conn, child.id)
         assert refreshed_child.parent_id == parent.id
 
     def test_archive_group_is_archived(self, conn: sqlite3.Connection) -> None:
         _, _, pid = self._setup(conn)
         grp = service.create_group(conn, pid, "g")
-        service.archive_group(conn, grp.id)
+        service.archive_group(conn, grp.id, source="test")
         assert service.get_group(conn, grp.id).archived is True
 
     def test_get_group_detail(self, conn: sqlite3.Connection) -> None:
@@ -1244,7 +1245,7 @@ class TestGroupService:
         parent = service.create_group(conn, pid, "parent")
         child = service.create_group(conn, pid, "child", parent_id=parent.id)
         tid = insert_task(conn, bid, "t", cid, project_id=pid)
-        service.assign_task_to_group(conn, tid, parent.id)
+        service.assign_task_to_group(conn, tid, parent.id, source="test")
         detail = service.get_group_detail(conn, parent.id)
         assert isinstance(detail, GroupDetail)
         assert len(detail.tasks) == 1
@@ -1273,7 +1274,7 @@ class TestGroupService:
             )
         monkeypatch.setattr(repo_mod, "update_group", raise_integrity)
         with pytest.raises(ValueError):
-            service.archive_group(conn, grp.id)
+            service.archive_group(conn, grp.id, source="test")
 
 
 class TestTaskGroupAssignment:
@@ -1287,14 +1288,14 @@ class TestTaskGroupAssignment:
         bid, cid, pid = self._setup(conn)
         grp = service.create_group(conn, pid, "g")
         tid = insert_task(conn, bid, "t", cid, project_id=pid)
-        service.assign_task_to_group(conn, tid, grp.id)
+        service.assign_task_to_group(conn, tid, grp.id, source="test")
         assert service.get_task(conn, tid).group_id == grp.id
 
     def test_assign_auto_sets_project_id(self, conn: sqlite3.Connection) -> None:
         bid, cid, pid = self._setup(conn)
         grp = service.create_group(conn, pid, "g")
         tid = insert_task(conn, bid, "t", cid)  # no project_id
-        service.assign_task_to_group(conn, tid, grp.id)
+        service.assign_task_to_group(conn, tid, grp.id, source="test")
         updated = service.get_task(conn, tid)
         assert updated.project_id == pid
 
@@ -1304,14 +1305,14 @@ class TestTaskGroupAssignment:
         grp = service.create_group(conn, pid1, "g")
         tid = insert_task(conn, bid, "t", cid, project_id=pid2)
         with pytest.raises(ValueError, match="project"):
-            service.assign_task_to_group(conn, tid, grp.id)
+            service.assign_task_to_group(conn, tid, grp.id, source="test")
 
     def test_unassign_task(self, conn: sqlite3.Connection) -> None:
         bid, cid, pid = self._setup(conn)
         grp = service.create_group(conn, pid, "g")
         tid = insert_task(conn, bid, "t", cid, project_id=pid)
-        service.assign_task_to_group(conn, tid, grp.id)
-        service.unassign_task_from_group(conn, tid)
+        service.assign_task_to_group(conn, tid, grp.id, source="test")
+        service.unassign_task_from_group(conn, tid, source="test")
         assert service.get_task(conn, tid).group_id is None
 
 
@@ -1326,21 +1327,34 @@ class TestTaskGroupHistory:
         bid, cid, pid = self._setup(conn)
         grp = service.create_group(conn, pid, "g")
         tid = insert_task(conn, bid, "t", cid, project_id=pid)
-        service.assign_task_to_group(conn, tid, grp.id)
+        service.assign_task_to_group(conn, tid, grp.id, source="test")
         history = service.list_task_history(conn, tid)
         group_entries = [h for h in history if h.field.value == "group_id"]
         assert len(group_entries) == 1
         assert group_entries[0].old_value is None
         assert group_entries[0].new_value == str(grp.id)
-        assert group_entries[0].source == "assign_task_to_group"
+        assert group_entries[0].source == "test"
+
+    def test_source_forwarded_to_history(self, conn: sqlite3.Connection) -> None:
+        bid, cid, pid = self._setup(conn)
+        grp = service.create_group(conn, pid, "g")
+        tid = insert_task(conn, bid, "t", cid, project_id=pid)
+        service.assign_task_to_group(conn, tid, grp.id, source="cli")
+        history = service.list_task_history(conn, tid)
+        entry = next(h for h in history if h.field.value == "group_id")
+        assert entry.source == "cli"
+        service.unassign_task_from_group(conn, tid, source="tui")
+        history2 = service.list_task_history(conn, tid)
+        unassign = next(h for h in history2 if h.field.value == "group_id" and h.new_value is None)
+        assert unassign.source == "tui"
 
     def test_reassign_records_old_and_new(self, conn: sqlite3.Connection) -> None:
         bid, cid, pid = self._setup(conn)
         g1 = service.create_group(conn, pid, "g1")
         g2 = service.create_group(conn, pid, "g2")
         tid = insert_task(conn, bid, "t", cid, project_id=pid)
-        service.assign_task_to_group(conn, tid, g1.id)
-        service.assign_task_to_group(conn, tid, g2.id)
+        service.assign_task_to_group(conn, tid, g1.id, source="test")
+        service.assign_task_to_group(conn, tid, g2.id, source="test")
         history = service.list_task_history(conn, tid)
         group_entries = [h for h in history if h.field.value == "group_id"]
         assert len(group_entries) == 2
@@ -1352,8 +1366,8 @@ class TestTaskGroupHistory:
         bid, cid, pid = self._setup(conn)
         grp = service.create_group(conn, pid, "g")
         tid = insert_task(conn, bid, "t", cid, project_id=pid)
-        service.assign_task_to_group(conn, tid, grp.id)
-        service.unassign_task_from_group(conn, tid)
+        service.assign_task_to_group(conn, tid, grp.id, source="test")
+        service.unassign_task_from_group(conn, tid, source="test")
         history = service.list_task_history(conn, tid)
         group_entries = [h for h in history if h.field.value == "group_id"]
         assert len(group_entries) == 2
@@ -1361,12 +1375,12 @@ class TestTaskGroupHistory:
         unassign = group_entries[0]
         assert unassign.old_value == str(grp.id)
         assert unassign.new_value is None
-        assert unassign.source == "unassign_task_from_group"
+        assert unassign.source == "test"
 
     def test_unassign_no_op_no_history(self, conn: sqlite3.Connection) -> None:
         bid, cid, pid = self._setup(conn)
         tid = insert_task(conn, bid, "t", cid, project_id=pid)
-        service.unassign_task_from_group(conn, tid)
+        service.unassign_task_from_group(conn, tid, source="test")
         history = service.list_task_history(conn, tid)
         assert not [h for h in history if h.field.value == "group_id"]
 
@@ -1375,13 +1389,13 @@ class TestTaskGroupHistory:
         grp = service.create_group(conn, pid, "g")
         # Task with NO project: assignment should auto-set project_id AND record it.
         tid = insert_task(conn, bid, "t", cid)
-        service.assign_task_to_group(conn, tid, grp.id)
+        service.assign_task_to_group(conn, tid, grp.id, source="test")
         history = service.list_task_history(conn, tid)
         proj_entries = [h for h in history if h.field.value == "project_id"]
         assert len(proj_entries) == 1
         assert proj_entries[0].old_value is None
         assert proj_entries[0].new_value == str(pid)
-        assert proj_entries[0].source == "assign_task_to_group"
+        assert proj_entries[0].source == "test"
         # group_id history is still recorded alongside
         group_entries = [h for h in history if h.field.value == "group_id"]
         assert len(group_entries) == 1
@@ -1390,8 +1404,8 @@ class TestTaskGroupHistory:
         bid, cid, pid = self._setup(conn)
         grp = service.create_group(conn, pid, "g")
         tid = insert_task(conn, bid, "t", cid, project_id=pid)
-        service.assign_task_to_group(conn, tid, grp.id)
-        service.assign_task_to_group(conn, tid, grp.id)
+        service.assign_task_to_group(conn, tid, grp.id, source="test")
+        service.assign_task_to_group(conn, tid, grp.id, source="test")
         history = service.list_task_history(conn, tid)
         group_entries = [h for h in history if h.field.value == "group_id"]
         # The second call is a no-op (group_id already matches); _record_changes skips it.
@@ -1402,16 +1416,16 @@ class TestTaskGroupHistory:
         grp = service.create_group(conn, pid, "g")
         t1 = insert_task(conn, bid, "t1", cid, project_id=pid)
         t2 = insert_task(conn, bid, "t2", cid, project_id=pid)
-        service.assign_task_to_group(conn, t1, grp.id)
-        service.assign_task_to_group(conn, t2, grp.id)
-        service.archive_group(conn, grp.id)
+        service.assign_task_to_group(conn, t1, grp.id, source="test")
+        service.assign_task_to_group(conn, t2, grp.id, source="test")
+        service.archive_group(conn, grp.id, source="test")
         for tid in (t1, t2):
             history = service.list_task_history(conn, tid)
             group_entries = [h for h in history if h.field.value == "group_id"]
-            archive_entry = [h for h in group_entries if h.source == "archive_group"]
+            archive_entry = [h for h in group_entries if h.new_value is None]
             assert len(archive_entry) == 1
             assert archive_entry[0].old_value == str(grp.id)
-            assert archive_entry[0].new_value is None
+            assert archive_entry[0].source == "test"
 
 
 # ---- Tag ----
@@ -1744,3 +1758,71 @@ class TestGetBoardListView:
     def test_missing_board_raises(self, conn: sqlite3.Connection) -> None:
         with pytest.raises(LookupError):
             service.get_board_list_view(conn, 9999)
+
+
+# ---- Board context ----
+
+
+class TestGetBoardContext:
+    def test_empty_board(self, conn: sqlite3.Connection) -> None:
+        bid = insert_board(conn, "ctx-board")
+        ctx = service.get_board_context(conn, bid)
+        assert isinstance(ctx, BoardContext)
+        assert ctx.view.board.id == bid
+        assert ctx.projects == ()
+        assert ctx.tags == ()
+        assert ctx.groups == ()
+
+    def test_includes_projects(self, conn: sqlite3.Connection) -> None:
+        bid = insert_board(conn)
+        insert_project(conn, bid, "alpha")
+        insert_project(conn, bid, "beta")
+        ctx = service.get_board_context(conn, bid)
+        names = {p.name for p in ctx.projects}
+        assert names == {"alpha", "beta"}
+
+    def test_includes_tags(self, conn: sqlite3.Connection) -> None:
+        bid = insert_board(conn)
+        insert_tag(conn, bid, "bug")
+        ctx = service.get_board_context(conn, bid)
+        assert len(ctx.tags) == 1
+        assert ctx.tags[0].name == "bug"
+
+    def test_includes_groups(self, conn: sqlite3.Connection) -> None:
+        bid = insert_board(conn)
+        pid = insert_project(conn, bid, "proj")
+        grp = service.create_group(conn, pid, "sprint-1")
+        ctx = service.get_board_context(conn, bid)
+        assert len(ctx.groups) == 1
+        assert ctx.groups[0].id == grp.id
+        assert ctx.groups[0].title == "sprint-1"
+
+    def test_groups_from_multiple_projects(self, conn: sqlite3.Connection) -> None:
+        bid = insert_board(conn)
+        p1 = insert_project(conn, bid, "p1")
+        p2 = insert_project(conn, bid, "p2")
+        service.create_group(conn, p1, "g1")
+        service.create_group(conn, p2, "g2")
+        ctx = service.get_board_context(conn, bid)
+        assert len(ctx.groups) == 2
+        titles = {g.title for g in ctx.groups}
+        assert titles == {"g1", "g2"}
+
+    def test_archived_excluded(self, conn: sqlite3.Connection) -> None:
+        bid = insert_board(conn)
+        pid = insert_project(conn, bid, "proj")
+        insert_tag(conn, bid, "tag1")
+        service.create_group(conn, pid, "grp")
+        # archive all three via raw SQL
+        conn.execute("UPDATE projects SET archived=1 WHERE id=?", (pid,))
+        conn.execute("UPDATE tags SET archived=1 WHERE board_id=?", (bid,))
+        conn.execute("UPDATE groups SET archived=1 WHERE project_id=?", (pid,))
+        conn.commit()
+        ctx = service.get_board_context(conn, bid)
+        assert ctx.projects == ()
+        assert ctx.tags == ()
+        assert ctx.groups == ()
+
+    def test_missing_board_raises(self, conn: sqlite3.Connection) -> None:
+        with pytest.raises(LookupError):
+            service.get_board_context(conn, 9999)

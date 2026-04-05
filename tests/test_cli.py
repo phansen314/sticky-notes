@@ -953,6 +953,34 @@ class TestHelp:
             assert exc.code == 0
 
 
+# ---- Context command ----
+
+
+class TestContext:
+    def test_context_text_output(self, cli):
+        cli("board", "create", "dev")
+        cli("col", "create", "todo")
+        cli("project", "create", "backend")
+        cli("tag", "create", "bug")
+        cli("group", "create", "G1", "-p", "backend")
+        out, _ = cli("context")
+        assert "== dev ==" in out
+        assert "Projects:" in out
+        assert "backend" in out
+        assert "Tags:" in out
+        assert "bug" in out
+        assert "Groups:" in out
+        assert "G1" in out
+
+    def test_context_empty_board_text(self, cli):
+        cli("board", "create", "empty")
+        out, _ = cli("context")
+        assert "== empty ==" in out
+        assert "Projects:" not in out
+        assert "Tags:" not in out
+        assert "Groups:" not in out
+
+
 # ---- JSON output ----
 
 
@@ -1257,6 +1285,37 @@ class TestJsonOutput:
         data = self._json(cli, "group", "unassign", "1")
         assert data["ok"] is True
         assert data["data"]["id"] == 1
+
+    # -- Context --
+
+    def test_context(self, cli):
+        cli("board", "create", "B")
+        cli("col", "create", "Todo")
+        cli("project", "create", "P1")
+        cli("tag", "create", "bug")
+        cli("group", "create", "G1", "-p", "P1")
+        cli("create", "T1", "-c", "todo")
+        data = self._json(cli, "context")
+        assert data["ok"] is True
+        payload = data["data"]
+        assert payload["view"]["board"]["name"] == "B"
+        assert len(payload["view"]["columns"]) == 1
+        assert len(payload["projects"]) == 1
+        assert payload["projects"][0]["name"] == "P1"
+        assert len(payload["tags"]) == 1
+        assert payload["tags"][0]["name"] == "bug"
+        assert len(payload["groups"]) == 1
+        assert payload["groups"][0]["title"] == "G1"
+
+    def test_context_empty_board(self, cli):
+        cli("board", "create", "Empty")
+        data = self._json(cli, "context")
+        assert data["ok"] is True
+        payload = data["data"]
+        assert payload["view"]["board"]["name"] == "Empty"
+        assert payload["projects"] == []
+        assert payload["tags"] == []
+        assert payload["groups"] == []
 
     # -- Error in JSON mode --
 

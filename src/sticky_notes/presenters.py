@@ -7,6 +7,7 @@ from __future__ import annotations
 from .formatting import format_group_num, format_priority, format_task_num, format_timestamp
 from .models import Board, Column, Project, Tag, Task, TaskHistory
 from .service_models import (
+    BoardContext,
     BoardListView,
     GroupDetail,
     GroupRef,
@@ -125,6 +126,22 @@ def format_board_list_view(view: BoardListView) -> str:
             if item.tag_names:
                 parts.append(f"  [{', '.join(item.tag_names)}]")
             lines.append("".join(parts))
+    return "\n".join(lines)
+
+
+def format_board_context(ctx: BoardContext) -> str:
+    lines: list[str] = [f"== {ctx.view.board.name} =="]
+    view_str = format_board_list_view(ctx.view)
+    if view_str:
+        lines.append(view_str)
+    if ctx.projects:
+        lines.append(f"Projects: {', '.join(p.name for p in ctx.projects)}")
+    if ctx.tags:
+        lines.append(f"Tags: {', '.join(t.name for t in ctx.tags)}")
+    if ctx.groups:
+        proj_name = {p.id: p.name for p in ctx.projects}
+        group_strs = [f"{g.title} ({proj_name.get(g.project_id, '?')})" for g in ctx.groups]
+        lines.append(f"Groups: {', '.join(group_strs)}")
     return "\n".join(lines)
 
 

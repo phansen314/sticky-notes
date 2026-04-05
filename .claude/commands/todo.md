@@ -96,9 +96,10 @@ todo tag ls [--all]
 todo tag rm NAME [--unassign]    # archives tag; --unassign also removes from active tasks
 ```
 
-### Export & TUI
+### Context & Export & TUI
 
 ```
+todo context [--json]            # one-call board summary: columns + tasks + projects + tags + groups
 todo export [-o FILE] [--json]
 todo tui [--db PATH]
 ```
@@ -151,6 +152,7 @@ Successes write to **stdout**. Errors write to **stderr** (in both text and JSON
 | `project show` | ProjectDetail with `tasks` array |
 | `group show` | GroupDetail with `tasks` and `children` arrays |
 | `log` | array of TaskHistory objects |
+| `context` | `{"view": {"board": {...}, "columns": [...]}, "projects": [...], "tags": [...], "groups": [...]}` |
 | `export` | `{"markdown": "..."}` or `{"output_path": "...", "bytes": N}` when `-o FILE` |
 
 ### Examples

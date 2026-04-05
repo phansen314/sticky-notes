@@ -78,6 +78,7 @@ Use `--by-title` on any task command to resolve `<task>` by title string instead
 | `todo dep ...` | `create`, `rm` |
 | `todo tag ...` | `create`, `ls`, `rm [--unassign]` |
 | `todo group ...` | `create`, `ls [--tree]`, `show`, `rename`, `rm`, `mv`, `assign`, `unassign` |
+| `todo context` | One-call board summary: columns, tasks, projects, tags, groups |
 | `todo export` | Export database to Markdown with Mermaid dependency graphs |
 
 ### Cross-Board Transfer

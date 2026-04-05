@@ -443,7 +443,7 @@ def cmd_group_rename(conn: sqlite3.Connection, args: argparse.Namespace, db_path
 def cmd_group_rm(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
     board = _resolve_board(conn, args, db_path)
     grp = service.resolve_group(conn, board.id, args.title, project_name=args.project)
-    archived = service.archive_group(conn, grp.id)
+    archived = service.archive_group(conn, grp.id, source="cli")
     return Ok(data=archived, text=f"archived group '{grp.title}'")
 
 
@@ -463,7 +463,7 @@ def cmd_group_assign(conn: sqlite3.Connection, args: argparse.Namespace, db_path
     board = _resolve_board(conn, args, db_path)
     task_id = _resolve_task(conn, board, args.task, by_title=args.by_title)
     grp = service.resolve_group(conn, board.id, args.group_title, project_name=args.project)
-    updated = service.assign_task_to_group(conn, task_id, grp.id)
+    updated = service.assign_task_to_group(conn, task_id, grp.id, source="cli")
     return Ok(
         data={"task": updated, "group_id": grp.id},
         text=f"assigned {format_task_num(task_id)} to group '{grp.title}'",
@@ -476,7 +476,7 @@ def cmd_group_unassign(conn: sqlite3.Connection, args: argparse.Namespace, db_pa
     # Get the group title before unassigning for the output message
     detail = service.get_task_detail(conn, task_id)
     group_name = detail.group.title if detail.group else None
-    updated = service.unassign_task_from_group(conn, task_id)
+    updated = service.unassign_task_from_group(conn, task_id, source="cli")
     suffix = f" from group '{group_name}'" if group_name else " from group"
     return Ok(data=updated, text=f"unassigned {format_task_num(task_id)}{suffix}")
 
@@ -501,6 +501,15 @@ def cmd_tag_rm(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path
     tag = service.get_tag_by_name(conn, board.id, args.name)
     archived = service.archive_tag(conn, tag.id, unassign=args.unassign)
     return Ok(data=archived, text=f"archived tag '{tag.name}'")
+
+
+# ---- Context ----
+
+
+def cmd_context(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
+    board = _resolve_board(conn, args, db_path)
+    ctx = service.get_board_context(conn, board.id)
+    return Ok(data=ctx, text=presenters.format_board_context(ctx))
 
 
 # ---- Export ----
@@ -568,6 +577,7 @@ HANDLERS: dict[str, CommandHandler] = {
     "tag_create": cmd_tag_create,
     "tag_ls": cmd_tag_ls,
     "tag_rm": cmd_tag_rm,
+    "context": cmd_context,
     "export": cmd_export,
     "tui": cmd_tui,
 }
@@ -807,6 +817,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_tr.set_defaults(command="tag_rm")
     p_tr.add_argument("name")
     p_tr.add_argument("--unassign", action="store_true", help="also remove tag from all tasks")
+
+    # ---- Context ----
+
+    p_ctx = sub.add_parser("context", help="board summary: columns, tasks, projects, tags, groups")
+    p_ctx.set_defaults(command="context")
 
     # ---- Export ----
 
