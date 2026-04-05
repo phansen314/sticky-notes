@@ -139,17 +139,40 @@ Accessible via `s` key. Stored at `~/.config/sticky-notes/tui.toml`.
 - **Task Form** — create/edit task modal with validation
 - **Move to Board** — select target board, column, and optional project
 
-## Claude Code Integration
+## Claude Code Plugin
 
-The `todo` CLI can be used by Claude Code to persistently track multi-step plans. Use the `/todo` command for the full CLI reference.
+The repo ships a Claude Code plugin that exposes the `todo` CLI as a model-invoked skill. Claude auto-triggers on task/kanban/plan-tracking intent and constructs `todo` commands directly.
 
-Setup:
+### Development / testing
+
+Load the plugin directly from your local clone:
+
+```bash
+claude --plugin-dir /path/to/sticky-notes
+```
+
+### Permanent install
+
+Add this repo as a marketplace, then install the plugin:
+
+```
+/plugin marketplace add phansen314/sticky-notes
+/plugin install sticky-notes@sticky-notes
+```
+
+If `todo` is not found, the skill will ask how you'd like to install it. Install the CLI with `pip install -e .` (see Quick Start) or directly from GitHub:
+
+```sh
+pip install git+https://github.com/phansen314/sticky-notes.git
+```
+
+## Workflow Tracking (manual setup)
+
+If you prefer not to install the plugin, seed a board and paste the workflow snippet into your `~/.claude/CLAUDE.md`:
 
 ```sh
 todo board create claude --columns Backlog,"In Progress",Done
 ```
-
-Then add to your `~/.claude/CLAUDE.md`:
 
 ```markdown
 ## Workflow Tracking with sticky-notes
