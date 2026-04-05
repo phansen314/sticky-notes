@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from .active_board import clear_active_board_id, get_active_board_id, set_active_board_id
+from .active_board import active_board_path, clear_active_board_id, get_active_board_id, set_active_board_id
 from .connection import DEFAULT_DB_PATH, get_connection, init_db
 from . import presenters, service
 from .export import export_markdown
@@ -528,6 +528,37 @@ def cmd_export(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path
     return Ok(data={"markdown": md}, text=md)
 
 
+# ---- Info ----
+
+
+def cmd_info(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
+    ab_path = active_board_path(db_path)
+    wal = db_path.with_name(db_path.name + "-wal")
+    shm = db_path.with_name(db_path.name + "-shm")
+    entries = [
+        ("database", db_path),
+        ("wal sidecar", wal),
+        ("shm sidecar", shm),
+        ("active-board pointer", ab_path),
+    ]
+    data = {
+        "db": str(db_path),
+        "wal": str(wal),
+        "shm": str(shm),
+        "active_board": str(ab_path),
+        "existing": [str(p) for _, p in entries if p.exists()],
+        "reset_command": "python scripts/wipe_db.py",
+    }
+    width = max(len(label) for label, _ in entries)
+    lines = ["sticky-notes files:"]
+    for label, p in entries:
+        marker = "exists" if p.exists() else "missing"
+        lines.append(f"  {label:<{width}}  {p}  [{marker}]")
+    lines.append("")
+    lines.append("To wipe all state: python scripts/wipe_db.py")
+    return Ok(data=data, text="\n".join(lines))
+
+
 # ---- TUI ----
 
 
@@ -579,6 +610,7 @@ HANDLERS: dict[str, CommandHandler] = {
     "tag_rm": cmd_tag_rm,
     "context": cmd_context,
     "export": cmd_export,
+    "info": cmd_info,
     "tui": cmd_tui,
 }
 
@@ -828,6 +860,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_export = sub.add_parser("export", help="export database to markdown")
     p_export.set_defaults(command="export")
     p_export.add_argument("-o", "--output", help="write to file instead of stdout")
+
+    # ---- Info ----
+
+    p_info = sub.add_parser("info", help="show sticky-notes file locations")
+    p_info.set_defaults(command="info")
 
     # ---- TUI ----
 

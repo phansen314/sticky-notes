@@ -1388,3 +1388,30 @@ class TestExportParentDir:
         out, _ = cli("export", "-o", str(output))
         assert output.exists()
         assert "# Sticky Notes Export" in output.read_text()
+
+
+# ---- Info command ----
+
+
+class TestInfo:
+    def test_info_text_labels(self, cli):
+        out, _ = cli("info")
+        for label in ["database", "wal sidecar", "shm sidecar", "active-board pointer"]:
+            assert label in out
+        assert "wipe_db.py" in out
+
+    def test_info_text_existence_markers(self, cli, db_path):
+        cli("board", "create", "X")
+        cli("col", "create", "todo")
+        out, _ = cli("info")
+        assert "[exists]" in out
+        assert str(db_path) in out
+
+    def test_info_json(self, cli, db_path):
+        import json
+        out, _ = cli("--json", "info")
+        data = json.loads(out)
+        assert data["ok"] is True
+        assert data["data"]["db"] == str(db_path)
+        assert "reset_command" in data["data"]
+        assert isinstance(data["data"]["existing"], list)
