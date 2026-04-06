@@ -70,6 +70,14 @@ CREATE TABLE IF NOT EXISTS task_dependencies (
     FOREIGN KEY (depends_on_id, board_id) REFERENCES tasks(id, board_id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS group_dependencies (
+    group_id      INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    depends_on_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    board_id      INTEGER NOT NULL REFERENCES boards(id),
+    PRIMARY KEY (group_id, depends_on_id),
+    CHECK (group_id != depends_on_id)
+);
+
 CREATE TABLE IF NOT EXISTS tags (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     board_id INTEGER NOT NULL REFERENCES boards(id) ON DELETE RESTRICT,
@@ -137,6 +145,8 @@ CREATE INDEX IF NOT EXISTS idx_tasks_project_archived_group
 -- FK indexes on junction/audit tables (PK covers the leading column)
 CREATE INDEX IF NOT EXISTS idx_task_dependencies_depends_on_id
     ON task_dependencies(depends_on_id);
+CREATE INDEX IF NOT EXISTS idx_group_dependencies_depends_on_id
+    ON group_dependencies(depends_on_id);
 CREATE INDEX IF NOT EXISTS idx_task_tags_tag_id
     ON task_tags(tag_id);
 

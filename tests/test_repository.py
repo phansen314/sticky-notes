@@ -24,6 +24,7 @@ from sticky_notes.models import (
 )
 from sticky_notes.repository import (
     add_dependency,
+    add_group_dependency,
     add_tag_to_task,
     batch_child_ids_by_group,
     batch_dependency_ids,
@@ -38,6 +39,7 @@ from sticky_notes.repository import (
     get_project,
     get_project_by_name,
     get_group_ancestry,
+    get_reachable_group_dep_ids,
     get_reachable_task_ids,
     get_subtree_group_ids,
     get_tag,
@@ -52,6 +54,7 @@ from sticky_notes.repository import (
     insert_task,
     insert_task_history,
     list_all_dependencies,
+    list_all_group_dependencies,
     list_blocked_by_ids,
     list_blocked_by_tasks,
     list_blocks_ids,
@@ -75,7 +78,9 @@ from sticky_notes.repository import (
     list_tasks_by_project,
     list_tasks_filtered,
     list_ungrouped_task_ids,
+    list_group_blocked_by_ids,
     remove_dependency,
+    remove_group_dependency,
     remove_tag_from_task,
     reparent_children,
     set_task_group_id,
@@ -632,6 +637,70 @@ class TestTaskDependencyRepository:
     def test_get_reachable_task_ids_no_deps(self, conn: sqlite3.Connection) -> None:
         t1, _, _ = self._setup(conn)
         assert get_reachable_task_ids(conn, t1.id) == ()
+
+
+# ---- Group dependencies ----
+
+
+class TestGroupDependencyRepository:
+    def _setup(self, conn: sqlite3.Connection) -> tuple[int, int, int]:
+        board = insert_board(conn, NewBoard(name="b"))
+        proj = insert_project(conn, NewProject(board_id=board.id, name="p"))
+        g1 = insert_group(conn, NewGroup(project_id=proj.id, title="g1")).id
+        g2 = insert_group(conn, NewGroup(project_id=proj.id, title="g2")).id
+        g3 = insert_group(conn, NewGroup(project_id=proj.id, title="g3")).id
+        return g1, g2, g3
+
+    def test_add_and_list_blocked_by_ids(self, conn: sqlite3.Connection) -> None:
+        g1, g2, g3 = self._setup(conn)
+        add_group_dependency(conn, g1, g2)
+        add_group_dependency(conn, g1, g3)
+        ids = list_group_blocked_by_ids(conn, g1)
+        assert set(ids) == {g2, g3}
+
+    def test_remove_group_dependency(self, conn: sqlite3.Connection) -> None:
+        g1, g2, _ = self._setup(conn)
+        add_group_dependency(conn, g1, g2)
+        remove_group_dependency(conn, g1, g2)
+        assert list_group_blocked_by_ids(conn, g1) == ()
+
+    def test_remove_nonexistent_is_silent(self, conn: sqlite3.Connection) -> None:
+        g1, g2, _ = self._setup(conn)
+        remove_group_dependency(conn, g1, g2)  # no-op, no error
+
+    def test_duplicate_raises(self, conn: sqlite3.Connection) -> None:
+        g1, g2, _ = self._setup(conn)
+        add_group_dependency(conn, g1, g2)
+        with pytest.raises(sqlite3.IntegrityError):
+            add_group_dependency(conn, g1, g2)
+
+    def test_self_dependency_raises(self, conn: sqlite3.Connection) -> None:
+        g1, _, _ = self._setup(conn)
+        with pytest.raises(sqlite3.IntegrityError):
+            add_group_dependency(conn, g1, g1)
+
+    def test_list_all_group_dependencies(self, conn: sqlite3.Connection) -> None:
+        g1, g2, g3 = self._setup(conn)
+        add_group_dependency(conn, g2, g1)
+        add_group_dependency(conn, g3, g1)
+        deps = list_all_group_dependencies(conn)
+        assert set(deps) == {(g2, g1), (g3, g1)}
+
+    def test_list_all_group_dependencies_empty(self, conn: sqlite3.Connection) -> None:
+        self._setup(conn)
+        assert list_all_group_dependencies(conn) == ()
+
+    def test_get_reachable_group_dep_ids_linear(self, conn: sqlite3.Connection) -> None:
+        g1, g2, g3 = self._setup(conn)
+        add_group_dependency(conn, g1, g2)  # g1 -> g2
+        add_group_dependency(conn, g2, g3)  # g2 -> g3
+        assert set(get_reachable_group_dep_ids(conn, g1)) == {g2, g3}
+        assert get_reachable_group_dep_ids(conn, g2) == (g3,)
+        assert get_reachable_group_dep_ids(conn, g3) == ()
+
+    def test_get_reachable_group_dep_ids_no_deps(self, conn: sqlite3.Connection) -> None:
+        g1, _, _ = self._setup(conn)
+        assert get_reachable_group_dep_ids(conn, g1) == ()
 
 
 # ---- Task history ----

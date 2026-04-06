@@ -768,6 +768,55 @@ class TestDependencyService:
             service.add_dependency(conn, t1, t2)
 
 
+# ---- Group Dependency ----
+
+
+class TestGroupDependencyService:
+    def _setup(self, conn: sqlite3.Connection) -> tuple[int, int, int, int]:
+        bid = insert_board(conn)
+        pid = insert_project(conn, bid)
+        g1 = insert_group(conn, pid, "g1")
+        g2 = insert_group(conn, pid, "g2")
+        g3 = insert_group(conn, pid, "g3")
+        return bid, g1, g2, g3
+
+    def test_add(self, conn: sqlite3.Connection) -> None:
+        _, g1, g2, _ = self._setup(conn)
+        service.add_group_dependency(conn, g1, g2)
+        deps = service.list_all_group_dependencies(conn)
+        assert (g1, g2) in deps
+
+    def test_remove(self, conn: sqlite3.Connection) -> None:
+        _, g1, g2, _ = self._setup(conn)
+        service.add_group_dependency(conn, g1, g2)
+        service.remove_group_dependency(conn, g1, g2)
+        assert service.list_all_group_dependencies(conn) == ()
+
+    def test_add_self_ref_raises(self, conn: sqlite3.Connection) -> None:
+        _, g1, _, _ = self._setup(conn)
+        with pytest.raises(ValueError, match="cannot depend on itself"):
+            service.add_group_dependency(conn, g1, g1)
+
+    def test_cycle_direct(self, conn: sqlite3.Connection) -> None:
+        _, g1, g2, _ = self._setup(conn)
+        service.add_group_dependency(conn, g1, g2)  # g1 -> g2
+        with pytest.raises(ValueError, match="cycle"):
+            service.add_group_dependency(conn, g2, g1)  # g2 -> g1 would cycle
+
+    def test_cycle_transitive(self, conn: sqlite3.Connection) -> None:
+        _, g1, g2, g3 = self._setup(conn)
+        service.add_group_dependency(conn, g1, g2)  # g1 -> g2
+        service.add_group_dependency(conn, g2, g3)  # g2 -> g3
+        with pytest.raises(ValueError, match="cycle"):
+            service.add_group_dependency(conn, g3, g1)  # g3 -> g1 would cycle
+
+    def test_add_duplicate_raises(self, conn: sqlite3.Connection) -> None:
+        _, g1, g2, _ = self._setup(conn)
+        service.add_group_dependency(conn, g1, g2)
+        with pytest.raises(ValueError, match="already depends"):
+            service.add_group_dependency(conn, g1, g2)
+
+
 # ---- History ----
 
 

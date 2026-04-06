@@ -157,6 +157,13 @@ class Group:
 
 
 @dataclass(frozen=True)
+class GroupDependency:
+    group_id: int
+    depends_on_id: int
+    board_id: int
+
+
+@dataclass(frozen=True)
 class TaskHistory:
     id: int
     task_id: int
