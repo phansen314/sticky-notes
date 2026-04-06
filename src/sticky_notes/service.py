@@ -800,6 +800,63 @@ def list_all_dependencies(
     return repo.list_all_dependencies(conn)
 
 
+# ---- Group Dependency ----
+
+
+def add_group_dependency(
+    conn: sqlite3.Connection,
+    group_id: int,
+    depends_on_id: int,
+) -> None:
+    with transaction(conn), _friendly_errors():
+        if group_id == depends_on_id:
+            raise ValueError("a group cannot depend on itself")
+        grp = repo.get_group(conn, group_id)
+        if grp is None:
+            raise LookupError(f"group {group_id} not found")
+        dep = repo.get_group(conn, depends_on_id)
+        if dep is None:
+            raise LookupError(f"group {depends_on_id} not found")
+        grp_proj = repo.get_project(conn, grp.project_id)
+        dep_proj = repo.get_project(conn, dep.project_id)
+        if grp_proj is None or dep_proj is None or grp_proj.board_id != dep_proj.board_id:
+            raise ValueError(
+                f"groups must be on the same board: "
+                f"group {group_id} is on board {grp_proj.board_id if grp_proj else '?'}, "
+                f"group {depends_on_id} is on board {dep_proj.board_id if dep_proj else '?'}"
+            )
+        existing = repo.list_group_blocked_by_ids(conn, group_id)
+        if depends_on_id in existing:
+            raise ValueError(
+                f"group {group_id} already depends on group {depends_on_id}"
+            )
+        if group_id in repo.get_reachable_group_dep_ids(conn, depends_on_id):
+            raise ValueError(
+                f"adding dependency {group_id} -> {depends_on_id} would create a cycle"
+            )
+        repo.add_group_dependency(conn, group_id, depends_on_id)
+
+
+def remove_group_dependency(
+    conn: sqlite3.Connection,
+    group_id: int,
+    depends_on_id: int,
+) -> None:
+    with transaction(conn), _friendly_errors():
+        existing = repo.list_group_blocked_by_ids(conn, group_id)
+        if depends_on_id not in existing:
+            raise LookupError(
+                f"group {group_id} does not depend on group {depends_on_id}"
+            )
+        repo.remove_group_dependency(conn, group_id, depends_on_id)
+
+
+def list_all_group_dependencies(
+    conn: sqlite3.Connection,
+) -> tuple[tuple[int, int], ...]:
+    return repo.list_all_group_dependencies(conn)
+
+
 # ---- History ----
 
 

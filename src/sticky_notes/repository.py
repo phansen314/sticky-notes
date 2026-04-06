@@ -985,3 +985,66 @@ def reparent_children(
     )
 
 
+# ---- Group dependency functions ----
+
+
+def add_group_dependency(
+    conn: sqlite3.Connection,
+    group_id: int,
+    depends_on_id: int,
+) -> None:
+    conn.execute(
+        "INSERT INTO group_dependencies (group_id, depends_on_id, board_id) "
+        "VALUES (?, ?, (SELECT p.board_id FROM groups g JOIN projects p ON g.project_id = p.id WHERE g.id = ?))",
+        (group_id, depends_on_id, group_id),
+    )
+
+
+def remove_group_dependency(
+    conn: sqlite3.Connection,
+    group_id: int,
+    depends_on_id: int,
+) -> None:
+    conn.execute(
+        "DELETE FROM group_dependencies WHERE group_id = ? AND depends_on_id = ?",
+        (group_id, depends_on_id),
+    )
+
+
+def list_group_blocked_by_ids(
+    conn: sqlite3.Connection,
+    group_id: int,
+) -> tuple[int, ...]:
+    rows = conn.execute(
+        "SELECT depends_on_id FROM group_dependencies WHERE group_id = ?",
+        (group_id,),
+    ).fetchall()
+    return tuple(r["depends_on_id"] for r in rows)
+
+
+def list_all_group_dependencies(
+    conn: sqlite3.Connection,
+) -> tuple[tuple[int, int], ...]:
+    rows = conn.execute(
+        "SELECT group_id, depends_on_id FROM group_dependencies"
+    ).fetchall()
+    return tuple((r["group_id"], r["depends_on_id"]) for r in rows)
+
+
+def get_reachable_group_dep_ids(
+    conn: sqlite3.Connection,
+    group_id: int,
+) -> tuple[int, ...]:
+    """Return all group IDs reachable from *group_id* by following depends_on edges."""
+    rows = conn.execute(
+        "WITH RECURSIVE reachable AS ("
+        "  SELECT depends_on_id AS id FROM group_dependencies WHERE group_id = ? "
+        "  UNION "
+        "  SELECT gd.depends_on_id FROM group_dependencies gd "
+        "  JOIN reachable r ON gd.group_id = r.id"
+        ") SELECT id FROM reachable",
+        (group_id,),
+    ).fetchall()
+    return tuple(r["id"] for r in rows)
+
+

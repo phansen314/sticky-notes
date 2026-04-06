@@ -46,7 +46,7 @@ class TestInitDb:
             "boards", "projects", "statuses",
             "tasks", "task_dependencies", "task_history",
             "tags", "task_tags",
-            "groups",
+            "groups", "group_dependencies",
         }
 
     def test_idempotent(self, conn: sqlite3.Connection) -> None:
@@ -503,6 +503,37 @@ class TestMigrations:
             conn.execute(
                 "INSERT INTO tasks (board_id, title, status_id, project_id, group_id) "
                 "VALUES (1, 'bad', 1, 1, 2)"
+            )
+        conn.close()
+
+    def test_migration_005_adds_group_dependencies(self, tmp_path: Path) -> None:
+        """Simulate a v4 database without group_dependencies, verify migration creates it."""
+        db_path = tmp_path / "v4.db"
+        conn = get_connection(db_path)
+        # Bootstrap a v4 schema: current schema minus group_dependencies
+        init_db(conn)
+        conn.execute("DROP TABLE IF EXISTS group_dependencies")
+        conn.execute("DROP INDEX IF EXISTS idx_group_dependencies_depends_on_id")
+        conn.execute("PRAGMA user_version = 4")
+        conn.commit()
+
+        _run_migrations(conn)
+
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+        tables = {
+            r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            ).fetchall()
+        }
+        assert "group_dependencies" in tables
+        # Verify CHECK constraint: self-dependency must be rejected
+        conn.execute("INSERT INTO boards (id, name) VALUES (1, 'b')")
+        conn.execute("INSERT INTO projects (id, board_id, name) VALUES (1, 1, 'p')")
+        conn.execute("INSERT INTO groups (id, project_id, title) VALUES (1, 1, 'g')")
+        conn.commit()
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO group_dependencies (group_id, depends_on_id, board_id) VALUES (1, 1, 1)"
             )
         conn.close()
 

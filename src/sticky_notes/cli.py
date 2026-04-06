@@ -372,6 +372,31 @@ def cmd_dep_rm(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path
     )
 
 
+# ---- Group dependency subcommands ----
+
+
+def cmd_group_dep_create(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
+    board = _resolve_board(conn, args, db_path)
+    grp = service.resolve_group(conn, board.id, args.group_title, project_name=args.project)
+    dep = service.resolve_group(conn, board.id, args.depends_on_title, project_name=args.project)
+    service.add_group_dependency(conn, grp.id, dep.id)
+    return Ok(
+        data={"group_id": grp.id, "depends_on_id": dep.id},
+        text=f"group '{grp.title}' now blocked by '{dep.title}'",
+    )
+
+
+def cmd_group_dep_rm(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
+    board = _resolve_board(conn, args, db_path)
+    grp = service.resolve_group(conn, board.id, args.group_title, project_name=args.project)
+    dep = service.resolve_group(conn, board.id, args.depends_on_title, project_name=args.project)
+    service.remove_group_dependency(conn, grp.id, dep.id)
+    return Ok(
+        data={"group_id": grp.id, "depends_on_id": dep.id},
+        text=f"removed dependency '{grp.title}' -> '{dep.title}'",
+    )
+
+
 # ---- Group subcommands ----
 
 
@@ -629,6 +654,8 @@ HANDLERS: dict[str, CommandHandler] = {
     "project_rm": cmd_project_rm,
     "dep_create": cmd_dep_create,
     "dep_rm": cmd_dep_rm,
+    "group_dep_create": cmd_group_dep_create,
+    "group_dep_rm": cmd_group_dep_rm,
     "group_create": cmd_group_create,
     "group_ls": cmd_group_ls,
     "group_show": cmd_group_show,
@@ -815,6 +842,23 @@ def build_parser() -> argparse.ArgumentParser:
     p_dr.add_argument("task_num")
     p_dr.add_argument("depends_on_num")
     p_dr.add_argument("--by-title", action="store_true", help="resolve tasks by title string")
+
+    # ---- Group dependency subcommands ----
+
+    p_gdep = sub.add_parser("group-dep", help="group dependency management")
+    gdep_sub = p_gdep.add_subparsers()
+
+    p_gda = gdep_sub.add_parser("create", help="add a group dependency")
+    p_gda.set_defaults(command="group_dep_create")
+    p_gda.add_argument("group_title")
+    p_gda.add_argument("depends_on_title")
+    p_gda.add_argument("--project", "-p", default=None, help="disambiguate by project name")
+
+    p_gdr = gdep_sub.add_parser("rm", help="remove a group dependency")
+    p_gdr.set_defaults(command="group_dep_rm")
+    p_gdr.add_argument("group_title")
+    p_gdr.add_argument("depends_on_title")
+    p_gdr.add_argument("--project", "-p", default=None, help="disambiguate by project name")
 
     # ---- Group subcommands ----
 
