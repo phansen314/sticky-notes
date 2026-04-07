@@ -53,7 +53,7 @@ class StickyNotesApp(App):
                 yield KanbanBoard(id="kanban-columns")
         yield Footer()
 
-    def on_mount(self) -> None:
+    async def on_mount(self) -> None:
         tree = self.query_one(WorkspaceTree)
         kanban = self.query_one(KanbanBoard)
         self._workspace_id = get_active_workspace_id(self.db_path)
@@ -66,14 +66,14 @@ class StickyNotesApp(App):
             tree.show_empty("Workspace not found")
             return
         tree.load(model)
-        kanban.load(model)
+        await kanban.load(model)
         tree.focus()
         self.set_interval(self.config.auto_refresh_seconds, self._refresh)
 
-    def action_refresh(self) -> None:
-        self._refresh()
+    async def action_refresh(self) -> None:
+        await self._refresh()
 
-    def _refresh(self) -> None:
+    async def _refresh(self) -> None:
         if self._workspace_id is None:
             return
         try:
@@ -87,7 +87,7 @@ class StickyNotesApp(App):
         if self._kanban_last_focused is not None:
             prev_task_id = self._kanban_last_focused.task_data.id
         tree.load(model)
-        kanban.load(model)
+        await kanban.load(model)
         # Restore focus
         if self.active_panel == ActivePanel.KANBAN and prev_task_id is not None:
             for card in self.query(TaskCard):

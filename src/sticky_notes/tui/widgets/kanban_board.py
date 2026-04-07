@@ -25,9 +25,9 @@ class KanbanBoard(Horizontal):
             self.task = task
             super().__init__()
 
-    def load(self, model: WorkspaceModel) -> None:
+    async def load(self, model: WorkspaceModel) -> None:
         self._grid = None
-        self.remove_children()
+        await self.remove_children()
         all_tasks = self._collect_all_tasks(model)
         tasks_by_status: dict[int, list[Task]] = {}
         for task in all_tasks:
