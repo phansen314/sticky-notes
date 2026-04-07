@@ -27,6 +27,7 @@ class StickyNotesApp(App):
     TITLE = "\U0001f4cc Sticky Notes \U0001f4cc"
     BINDINGS = [
         Binding("r", "refresh", "Refresh", show=True),
+        Binding("ctrl+q", "quit", "Quit", show=True),
     ]
 
     conn: sqlite3.Connection
