@@ -6,7 +6,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Label, Static, TextArea
+from textual.widgets import Button, Footer, Input, Label, Static, TextArea
 
 from sticky_notes.service_models import ProjectDetail
 
@@ -47,6 +47,7 @@ class ProjectEditModal(ModalScreen[dict | None]):
             with Horizontal(id="project-edit-buttons"):
                 yield Button("Save", variant="primary", id="project-edit-save")
                 yield Button("Cancel", id="project-edit-cancel")
+        yield Footer()
 
     def on_mount(self) -> None:
         self.query_one("#project-edit-name", Input).focus()

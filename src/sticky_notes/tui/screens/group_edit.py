@@ -6,7 +6,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Label, Static
+from textual.widgets import Button, Footer, Input, Label, Static
 
 from sticky_notes.service_models import GroupDetail
 
@@ -39,6 +39,7 @@ class GroupEditModal(ModalScreen[dict | None]):
             with Horizontal(id="group-edit-buttons"):
                 yield Button("Save", variant="primary", id="group-edit-save")
                 yield Button("Cancel", id="group-edit-cancel")
+        yield Footer()
 
     def on_mount(self) -> None:
         self.query_one("#group-edit-title", Input).focus()
