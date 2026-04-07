@@ -13,11 +13,11 @@ from textual.widgets import Header, Footer
 
 from sticky_notes.active_workspace import get_active_workspace_id
 from sticky_notes.connection import DEFAULT_DB_PATH, get_connection, init_db
-from sticky_notes.models import Status, Task
-from sticky_notes.service import get_task_detail, update_task
+from sticky_notes.models import Group, Project, Status, Task
+from sticky_notes.service import get_group_detail, get_project_detail, get_task_detail, update_group, update_project, update_task
 from sticky_notes.tui.config import TuiConfig, load_config
 from sticky_notes.tui.model import WorkspaceModel, load_workspace_model
-from sticky_notes.tui.screens import TaskEditModal
+from sticky_notes.tui.screens import GroupEditModal, ProjectEditModal, TaskEditModal
 from sticky_notes.tui.widgets import KanbanBoard, TaskCard, WorkspaceTree
 
 
@@ -33,7 +33,7 @@ class StickyNotesApp(App):
         Binding("w", "focus_tree", "Workspace", show=True),
         Binding("k", "focus_kanban", "Kanban", show=True),
         Binding("r", "refresh", "Refresh", show=True),
-        Binding("e", "edit_task", "Edit", show=True),
+        Binding("e", "edit", "Edit", show=True),
         Binding("ctrl+q", "quit", "Quit", show=True),
     ]
 
@@ -136,22 +136,61 @@ class StickyNotesApp(App):
             if cards:
                 self.set_focus(cards.first())
 
-    def action_edit_task(self) -> None:
-        task = self._get_focused_task()
-        if task is None or self._model is None:
+    def action_edit(self) -> None:
+        if self._model is None:
             return
+        if self.active_panel == ActivePanel.TREE:
+            tree = self.query_one(WorkspaceTree)
+            node = tree.cursor_node
+            if node is not None:
+                if isinstance(node.data, Task):
+                    self._edit_task(node.data)
+                elif isinstance(node.data, Project):
+                    self._edit_project(node.data)
+                elif isinstance(node.data, Group):
+                    self._edit_group(node.data)
+        elif self._kanban_last_focused is not None:
+            self._edit_task(self._kanban_last_focused.task_data)
+
+    def _edit_task(self, task: Task) -> None:
         detail = get_task_detail(self.conn, task.id)
         statuses = self._model.statuses
         projects = tuple(p.project for p in self._model.projects)
         self.push_screen(
             TaskEditModal(detail, statuses, projects),
-            callback=self._on_edit_dismiss,
+            callback=self._on_task_edit_dismiss,
         )
 
-    async def _on_edit_dismiss(self, result: dict | None) -> None:
+    async def _on_task_edit_dismiss(self, result: dict | None) -> None:
         if result is None:
             return
         update_task(self.conn, result["task_id"], result["changes"], source="tui")
+        await self._refresh()
+
+    def _edit_project(self, project: Project) -> None:
+        detail = get_project_detail(self.conn, project.id)
+        self.push_screen(
+            ProjectEditModal(detail),
+            callback=self._on_project_edit_dismiss,
+        )
+
+    async def _on_project_edit_dismiss(self, result: dict | None) -> None:
+        if result is None:
+            return
+        update_project(self.conn, result["project_id"], result["changes"])
+        await self._refresh()
+
+    def _edit_group(self, group: Group) -> None:
+        detail = get_group_detail(self.conn, group.id)
+        self.push_screen(
+            GroupEditModal(detail),
+            callback=self._on_group_edit_dismiss,
+        )
+
+    async def _on_group_edit_dismiss(self, result: dict | None) -> None:
+        if result is None:
+            return
+        update_group(self.conn, result["group_id"], result["changes"])
         await self._refresh()
 
     def _order_statuses(self, statuses: tuple[Status, ...]) -> tuple[Status, ...]:
@@ -160,14 +199,4 @@ class StickyNotesApp(App):
             return statuses
         order_map = {sid: i for i, sid in enumerate(order)}
         return tuple(sorted(statuses, key=lambda s: (order_map.get(s.id, len(order)), s.id)))
-
-    def _get_focused_task(self) -> Task | None:
-        if self.active_panel == ActivePanel.TREE:
-            tree = self.query_one(WorkspaceTree)
-            node = tree.cursor_node
-            if node is not None and isinstance(node.data, Task):
-                return node.data
-        elif self._kanban_last_focused is not None:
-            return self._kanban_last_focused.task_data
-        return None
 

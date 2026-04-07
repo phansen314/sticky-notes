@@ -132,3 +132,79 @@ TaskEditModal {
     margin: 0 1;
 }
 
+ProjectEditModal {
+    align: center middle;
+}
+
+#project-edit-container {
+    width: 90%;
+    max-height: 85%;
+    padding: 1 2;
+    border: round green;
+    background: $background;
+}
+
+#project-edit-id {
+    width: 1fr;
+    text-style: bold;
+    text-align: center;
+    margin-bottom: 1;
+}
+
+#project-edit-desc {
+    height: 5;
+}
+
+#project-edit-error {
+    color: $error;
+    text-align: center;
+    margin-top: 1;
+}
+
+#project-edit-buttons {
+    width: 100%;
+    align: center middle;
+    height: 3;
+    margin-top: 1;
+}
+
+#project-edit-buttons Button {
+    margin: 0 1;
+}
+
+GroupEditModal {
+    align: center middle;
+}
+
+#group-edit-container {
+    width: 90%;
+    max-height: 85%;
+    padding: 1 2;
+    border: round green;
+    background: $background;
+}
+
+#group-edit-id {
+    width: 1fr;
+    text-style: bold;
+    text-align: center;
+    margin-bottom: 1;
+}
+
+#group-edit-error {
+    color: $error;
+    text-align: center;
+    margin-top: 1;
+}
+
+#group-edit-buttons {
+    width: 100%;
+    align: center middle;
+    height: 3;
+    margin-top: 1;
+}
+
+#group-edit-buttons Button {
+    margin: 0 1;
+}
+
