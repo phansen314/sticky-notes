@@ -13,9 +13,9 @@ from textual.widgets import Header, Footer
 from sticky_notes.active_workspace import get_active_workspace_id
 from sticky_notes.connection import DEFAULT_DB_PATH, get_connection, init_db
 from sticky_notes.models import Task
-from sticky_notes.service import get_task_detail, list_projects, list_statuses
+from sticky_notes.service import get_task_detail
 from sticky_notes.tui.config import TuiConfig, load_config
-from sticky_notes.tui.model import load_workspace_model
+from sticky_notes.tui.model import WorkspaceModel, load_workspace_model
 from sticky_notes.tui.screens import TaskEditModal
 from sticky_notes.tui.widgets import KanbanBoard, TaskCard, WorkspaceTree
 
@@ -29,6 +29,8 @@ class StickyNotesApp(App):
     CSS_PATH = "sticky_notes.tcss"
     TITLE = "\U0001f4cc Sticky Notes \U0001f4cc"
     BINDINGS = [
+        Binding("w", "focus_tree", "Workspace", show=True),
+        Binding("k", "focus_kanban", "Kanban", show=True),
         Binding("r", "refresh", "Refresh", show=True),
         Binding("e", "edit_task", "Edit", show=True),
         Binding("ctrl+q", "quit", "Quit", show=True),
@@ -39,6 +41,7 @@ class StickyNotesApp(App):
     active_panel: ActivePanel = ActivePanel.TREE
     _kanban_last_focused: TaskCard | None = None
     _workspace_id: int | None = None
+    _model: WorkspaceModel | None = None
 
     def __init__(self, db_path: Path | None = None):
         super().__init__()
@@ -69,6 +72,7 @@ class StickyNotesApp(App):
         except LookupError:
             tree.show_empty("Workspace not found")
             return
+        self._model = model
         tree.load(model)
         await kanban.load(model)
         tree.focus()
@@ -90,6 +94,7 @@ class StickyNotesApp(App):
         prev_task_id: int | None = None
         if self._kanban_last_focused is not None:
             prev_task_id = self._kanban_last_focused.task_data.id
+        self._model = model
         tree.load(model)
         await kanban.load(model)
         # Restore focus
@@ -117,19 +122,24 @@ class StickyNotesApp(App):
             self.active_panel = ActivePanel.KANBAN
             self._kanban_last_focused = widget
 
-    def action_focus_next(self) -> None:
-        self._switch_panel()
+    def action_focus_tree(self) -> None:
+        self.set_focus(self.query_one(WorkspaceTree))
 
-    def action_focus_previous(self) -> None:
-        self._switch_panel()
+    def action_focus_kanban(self) -> None:
+        if self._kanban_last_focused is not None and self._kanban_last_focused.parent is not None:
+            self.set_focus(self._kanban_last_focused)
+        else:
+            cards = self.query("TaskCard")
+            if cards:
+                self.set_focus(cards.first())
 
     def action_edit_task(self) -> None:
         task = self._get_focused_task()
-        if task is None:
+        if task is None or self._model is None:
             return
         detail = get_task_detail(self.conn, task.id)
-        statuses = list_statuses(self.conn, detail.workspace_id)
-        projects = list_projects(self.conn, detail.workspace_id)
+        statuses = self._model.statuses
+        projects = tuple(p.project for p in self._model.projects)
         self.push_screen(TaskEditModal(detail, statuses, projects))
 
     def _get_focused_task(self) -> Task | None:
@@ -142,15 +152,3 @@ class StickyNotesApp(App):
             return self._kanban_last_focused.task_data
         return None
 
-    def _switch_panel(self) -> None:
-        if self.active_panel == ActivePanel.TREE:
-            # Try to focus kanban
-            if self._kanban_last_focused is not None and self._kanban_last_focused.parent is not None:
-                self.set_focus(self._kanban_last_focused)
-            else:
-                cards = self.query("TaskCard")
-                if cards:
-                    self.set_focus(cards.first())
-                # else: no cards, stay in tree
-        else:
-            self.set_focus(self.query_one(WorkspaceTree))

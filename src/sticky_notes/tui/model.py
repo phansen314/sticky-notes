@@ -28,6 +28,7 @@ class WorkspaceModel:
     statuses: tuple[Status, ...]
     projects: tuple[ProjectNode, ...]
     unassigned_tasks: tuple[Task, ...]
+    all_tasks: tuple[Task, ...]
 
 
 def _build_group_tree(
@@ -100,4 +101,5 @@ def load_workspace_model(
         statuses=statuses,
         projects=tuple(project_nodes),
         unassigned_tasks=tuple(unassigned),
+        all_tasks=tasks,
     )

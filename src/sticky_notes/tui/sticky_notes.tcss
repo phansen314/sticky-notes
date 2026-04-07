@@ -131,3 +131,4 @@ TaskEditModal {
 #task-edit-buttons Button {
     margin: 0 1;
 }
+
