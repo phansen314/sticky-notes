@@ -95,7 +95,7 @@ original. The following are NOT carried over:
   to the new task using the target workspace's tags (created on the target workspace if
   they don't exist yet).
 - **group_id** — not carried over; groups are project-scoped and the task may
-  have a new or no project on the target board.
+  have a new or no project on the target workspace.
 - **History** — the original task retains its history; the new task starts fresh.
 
 ## Automatic Behaviors (service-only)

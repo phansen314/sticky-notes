@@ -19,6 +19,25 @@ INSERT INTO projects (id, workspace_id, name, description, archived, created_at)
 SELECT id, board_id, name, description, archived, created_at FROM _projects_old;
 DROP TABLE _projects_old;
 
+-- Recreate groups: fix FK reference back to new projects table
+-- (SQLite redirects the FK to _projects_old on rename -- must recreate to restore correct reference)
+ALTER TABLE groups RENAME TO _groups_old;
+CREATE TABLE groups (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+    parent_id  INTEGER,
+    title      TEXT NOT NULL COLLATE NOCASE,
+    position   INTEGER NOT NULL DEFAULT 0 CHECK (position >= 0),
+    archived   INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    UNIQUE (id, project_id),
+    FOREIGN KEY (parent_id, project_id) REFERENCES groups(id, project_id) ON DELETE RESTRICT
+);
+INSERT INTO groups (id, project_id, parent_id, title, position, archived, created_at)
+SELECT id, project_id, parent_id, title, position, archived, created_at
+FROM _groups_old;
+DROP TABLE _groups_old;
+
 -- Recreate statuses: board_id -> workspace_id
 ALTER TABLE statuses RENAME TO _statuses_old;
 CREATE TABLE statuses (

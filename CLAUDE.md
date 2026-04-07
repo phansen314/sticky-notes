@@ -38,7 +38,7 @@ src/sticky_notes/
     markup.py        # escape_markup helper for Textual rendering
     sticky_notes.tcss# global stylesheet
     screens/
-      settings.py    # SettingsScreen — theme, board, display preferences
+      settings.py    # SettingsScreen — theme, workspace, display preferences
       confirm_dialog.py # ConfirmDialog(ModalScreen[bool]) — reusable yes/no
       task_detail.py # TaskDetailModal(ModalScreen[int|None]) — read-only detail
       task_form.py   # TaskFormModal(ModalScreen[dict|None]) — create/edit form
@@ -58,7 +58,7 @@ tests/
   test_presenters.py # pure-function tests for text rendering (DB-free)
   test_repository.py
   test_service.py
-  test_tui.py        # TUI tests: config, app, settings, board, nav, move, archive, detail, create, edit
+  test_tui.py        # TUI tests: config, app, settings, workspace, nav, move, archive, detail, create, edit
 ```
 
 ## CLI

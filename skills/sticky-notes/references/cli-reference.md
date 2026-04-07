@@ -18,7 +18,7 @@ Apply to every command. Place before the subcommand:  `todo [global flags] <comm
 **JSON envelope:**
 - Success → stdout: `{"ok": true, "data": ...}`
 - Error → stderr: `{"ok": false, "error": "...", "code": "..."}`
-- Exit codes: `0` success · `1` lookup/validation/no active board · `2` db error · `130` interrupt
+- Exit codes: `0` success · `1` lookup/validation/no active workspace · `2` db error · `130` interrupt
 
 **Error codes:**
 
@@ -113,7 +113,7 @@ todo task edit task-0003 --tag urgent --untag backend
 
 ### `todo task mv <task_num> <column> [position] [flags]`
 
-**Within-board only.** Use `todo task transfer` for cross-board moves.
+**Within-workspace only.** Use `todo task transfer` for cross-workspace moves.
 
 | Arg/Flag | Description |
 |---|---|
@@ -206,8 +206,8 @@ todo workspace rename "work" "work-q2"
 
 | Command | Args | Flags | Description |
 |---|---|---|---|
-| `col create` | `name` | `--pos INT` | Create column at position (default: top of board). Lower = leftmost. Positions are **not renumbered** on insert — equal-position columns tie-break by insertion order |
-| `col ls` | — | — | List columns on active board |
+| `col create` | `name` | `--pos INT` | Create column at position (default: top of workspace). Lower = leftmost. Positions are **not renumbered** on insert — equal-position columns tie-break by insertion order |
+| `col ls` | — | — | List columns on active workspace |
 | `col rename` | `old new` | — | Rename a column |
 | `col rm` | `name` | `--reassign-to COL`, `--force` | Archive column; either reassign its tasks to another column, or `--force` to archive all tasks |
 
@@ -250,11 +250,11 @@ todo dep rm task-0003 task-0001
 
 ## `todo tag` Subcommands
 
-Tags are board-scoped. Many-to-many with tasks. `todo task create`/`todo task edit` auto-create tags that don't exist yet.
+Tags are workspace-scoped. Many-to-many with tasks. `todo task create`/`todo task edit` auto-create tags that don't exist yet.
 
 | Command | Args | Flags | Description |
 |---|---|---|---|
-| `tag create` | `name` | — | Create a tag (board-scoped) |
+| `tag create` | `name` | — | Create a tag (workspace-scoped) |
 | `tag ls` | — | `--all` / `-a` | List tags (include archived with `-a`) |
 | `tag rm` | `name` | `--unassign` | Archive tag; `--unassign` strips it from all tasks first |
 
@@ -296,7 +296,7 @@ todo group mv "Backend" --parent '' --project "API rewrite"  # promote to top-le
 
 ## `todo export`
 
-Exports the **entire database** as Markdown with Mermaid dependency graphs (all boards, all tasks).
+Exports the **entire database** as Markdown with Mermaid dependency graphs (all workspaces, all tasks).
 
 | Flag | Short | Description |
 |---|---|---|
@@ -308,7 +308,7 @@ With `--json`:
 
 ```sh
 todo export
-todo export -o /tmp/board-snapshot.md
+todo export -o /tmp/workspace-snapshot.md
 todo --json export
 todo --json export -o /tmp/snapshot.md
 ```
@@ -317,7 +317,7 @@ todo --json export -o /tmp/snapshot.md
 
 ## `todo info`
 
-Read-only diagnostic. Lists the DB file, WAL/SHM sidecars, and active-board pointer — each with an existence marker. No flags.
+Read-only diagnostic. Lists the DB file, WAL/SHM sidecars, and active-workspace pointer — each with an existence marker. No flags.
 
 ```sh
 todo info

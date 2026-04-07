@@ -34,7 +34,7 @@ from .models import (
 
 # ---- Updatable-field allowlists ----
 
-_BOARD_UPDATABLE: frozenset[str] = frozenset({"name", "archived"})
+_WORKSPACE_UPDATABLE: frozenset[str] = frozenset({"name", "archived"})
 _STATUS_UPDATABLE: frozenset[str] = frozenset({"name", "archived"})
 _PROJECT_UPDATABLE: frozenset[str] = frozenset({"name", "description", "archived"})
 # group_id is intentionally excluded — assignment goes through
@@ -126,7 +126,7 @@ def update_workspace(
     workspace_id: int,
     changes: dict[str, Any],
 ) -> Workspace:
-    sql, params = _build_update("workspaces", workspace_id, changes, _BOARD_UPDATABLE)
+    sql, params = _build_update("workspaces", workspace_id, changes, _WORKSPACE_UPDATABLE)
     cur = conn.execute(sql, params)
     if cur.rowcount == 0:
         raise LookupError(f"workspace {workspace_id} not found")

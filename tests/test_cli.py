@@ -147,13 +147,13 @@ class TestWorkspaceCommands:
         out, _ = cli("workspace", "rm")
         assert "archived workspace" in out
 
-    def test_archive_active_board_clears_pointer(self, cli, db_path):
+    def test_archive_active_workspace_clears_pointer(self, cli, db_path):
         cli("workspace", "create", "dev")
         assert get_active_workspace_id(db_path) is not None
         cli("workspace", "rm")
         assert get_active_workspace_id(db_path) is None
 
-    def test_archive_non_active_board_leaves_pointer(self, cli, db_path):
+    def test_archive_non_active_workspace_leaves_pointer(self, cli, db_path):
         cli("workspace", "create", "dev")
         cli("workspace", "create", "ops")
         cli("workspace", "use", "dev")
@@ -468,7 +468,7 @@ class TestDependencyCommands:
 
 
 class TestErrorHandling:
-    def test_no_active_board(self, cli):
+    def test_no_active_workspace(self, cli):
         _, err = cli("task", "ls", expect_exit=1)
         assert "no active workspace" in err
 
@@ -477,7 +477,7 @@ class TestErrorHandling:
         _, err = cli("task", "show", "999", expect_exit=1)
         assert "error:" in err
 
-    def test_duplicate_board_name(self, cli):
+    def test_duplicate_workspace_name(self, cli):
         cli("workspace", "create", "dev")
         _, err = cli("workspace", "create", "dev", expect_exit=1)
         assert "error:" in err
@@ -507,18 +507,18 @@ class TestErrorHandling:
         assert "active task" in err
 
 
-# ---- Board flag override ----
+# ---- Workspace flag override ----
 
 
 class TestWorkspaceFlag:
-    def test_board_flag(self, cli):
+    def test_workspace_flag(self, cli):
         cli("workspace", "create", "dev")
         cli("workspace", "create", "ops")
         cli("-w", "dev", "status", "create", "todo")
         out, _ = cli("-w", "dev", "status", "ls")
         assert "todo" in out
 
-    def test_board_flag_overrides_active(self, cli):
+    def test_workspace_flag_overrides_active(self, cli):
         cli("workspace", "create", "dev")
         cli("workspace", "create", "ops")
         # ops is now active (last created)
@@ -534,14 +534,14 @@ class TestWorkspaceFlag:
 
 
 class TestLsFilters:
-    def _setup_board(self, cli):
+    def _setup_workspace(self, cli):
         cli("workspace", "create", "work")
         cli("status", "create", "backlog")
         cli("status", "create", "doing")
         cli("project", "create", "alpha")
 
     def test_filter_by_status(self, cli):
-        self._setup_board(cli)
+        self._setup_workspace(cli)
         cli("task", "create", "task1", "-S", "backlog")
         cli("task", "create", "task2", "-S", "doing")
         out, _ = cli("task", "ls", "-S", "backlog")
@@ -549,7 +549,7 @@ class TestLsFilters:
         assert "task2" not in out or "task2" not in out.split("== backlog ==")[0]
 
     def test_filter_by_project(self, cli):
-        self._setup_board(cli)
+        self._setup_workspace(cli)
         cli("task", "create", "task1", "-p", "alpha", "-S", "backlog")
         cli("task", "create", "task2", "-S", "backlog")
         out, _ = cli("task", "ls", "-p", "alpha")
@@ -559,7 +559,7 @@ class TestLsFilters:
         assert len(lines) == 0
 
     def test_filter_by_priority(self, cli):
-        self._setup_board(cli)
+        self._setup_workspace(cli)
         cli("task", "create", "low", "--priority", "1", "-S", "backlog")
         cli("task", "create", "high", "--priority", "3", "-S", "backlog")
         out, _ = cli("task", "ls", "-P", "3")
@@ -568,7 +568,7 @@ class TestLsFilters:
         assert len(lines) == 0
 
     def test_filter_by_search(self, cli):
-        self._setup_board(cli)
+        self._setup_workspace(cli)
         cli("task", "create", "Fix login bug", "-S", "backlog")
         cli("task", "create", "Add search feature", "-S", "backlog")
         out, _ = cli("task", "ls", "-s", "login")
@@ -577,7 +577,7 @@ class TestLsFilters:
         assert len(lines) == 0
 
     def test_combined_filters(self, cli):
-        self._setup_board(cli)
+        self._setup_workspace(cli)
         cli("task", "create", "task1", "-S", "backlog", "--priority", "3")
         cli("task", "create", "task2", "-S", "backlog", "--priority", "1")
         cli("task", "create", "task3", "-S", "doing", "--priority", "3")
@@ -587,24 +587,24 @@ class TestLsFilters:
         assert len(lines) == 1
 
     def test_invalid_status_name(self, cli):
-        self._setup_board(cli)
+        self._setup_workspace(cli)
         _, err = cli("task", "ls", "-S", "nonexistent", expect_exit=1)
         assert "not found" in err
 
     def test_invalid_project_name(self, cli):
-        self._setup_board(cli)
+        self._setup_workspace(cli)
         _, err = cli("task", "ls", "-p", "nonexistent", expect_exit=1)
         assert "not found" in err
 
 
-class TestMvBoard:
+class TestMvWorkspace:
     @pytest.fixture(autouse=True)
     def _setup(self, cli):
         cli("workspace", "create", "dev")
         cli("status", "create", "todo")
         cli("status", "create", "done")
 
-    def test_transfer_to_board(self, cli):
+    def test_transfer_to_workspace(self, cli):
         cli("workspace", "create", "ops")
         cli("workspace", "use", "ops")
         cli("status", "create", "backlog")
@@ -614,7 +614,7 @@ class TestMvBoard:
         assert "workspace 'ops'" in out
         assert "status 'backlog'" in out
 
-    def test_transfer_to_board_with_project(self, cli):
+    def test_transfer_to_workspace_with_project(self, cli):
         cli("workspace", "create", "ops")
         cli("workspace", "use", "ops")
         cli("status", "create", "backlog")
@@ -667,7 +667,7 @@ class TestMvBoard:
 
 class TestGroupCLI:
     """Fixture `cli` provides a helper that always passes --db to a temp DB.
-    Each test creates its own board/project/column setup."""
+    Each test creates its own workspace/project/column setup."""
 
     @pytest.fixture(autouse=True)
     def _setup(self, cli):
@@ -971,7 +971,7 @@ class TestContext:
         assert "Groups:" in out
         assert "G1" in out
 
-    def test_context_empty_board_text(self, cli):
+    def test_context_empty_workspace_text(self, cli):
         cli("workspace", "create", "empty")
         out, _ = cli("context")
         assert "== empty ==" in out
@@ -1021,10 +1021,10 @@ class TestJsonOutput:
         assert data["data"]["archived"] is True
 
     def test_workspace_create(self, cli):
-        data = self._json(cli, "workspace", "create", "NewBoard")
+        data = self._json(cli, "workspace", "create", "NewWorkspace")
         assert data["ok"] is True
         assert data["data"]["id"] == 1
-        assert data["data"]["name"] == "NewBoard"
+        assert data["data"]["name"] == "NewWorkspace"
 
     def test_col_create(self, cli):
         cli("workspace", "create", "B")
@@ -1179,7 +1179,7 @@ class TestJsonOutput:
 
     # -- Moves --
 
-    def test_mv_within_board(self, cli):
+    def test_mv_within_workspace(self, cli):
         cli("workspace", "create", "B")
         cli("status", "create", "Todo")
         cli("status", "create", "Done")
@@ -1188,7 +1188,7 @@ class TestJsonOutput:
         assert data["ok"] is True
         assert data["data"]["id"] == 1
 
-    def test_transfer_cross_board(self, cli):
+    def test_transfer_cross_workspace(self, cli):
         cli("workspace", "create", "B1")
         cli("status", "create", "Todo")
         cli("task", "create", "T1", "-S", "todo")
@@ -1317,7 +1317,7 @@ class TestJsonOutput:
         assert len(payload["groups"]) == 1
         assert payload["groups"][0]["title"] == "G1"
 
-    def test_context_empty_board(self, cli):
+    def test_context_empty_workspace(self, cli):
         cli("workspace", "create", "Empty")
         data = self._json(cli, "context")
         assert data["ok"] is True

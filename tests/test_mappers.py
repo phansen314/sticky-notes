@@ -50,7 +50,7 @@ from sticky_notes.service_models import GroupDetail, GroupRef, ProjectDetail, Ta
 
 class FullSeed(NamedTuple):
     conn: sqlite3.Connection
-    board_id: int
+    workspace_id: int
     project_id: int
     status_id: int
     task1_id: int
@@ -62,13 +62,13 @@ class FullSeed(NamedTuple):
 def seeded(conn: sqlite3.Connection) -> FullSeed:
     """Full data graph for tests that need tasks, deps, and history."""
     with transaction(conn):
-        board_id = insert_workspace(conn)
-        project_id = insert_project(conn, board_id)
-        status_id = insert_status(conn, board_id)
+        workspace_id = insert_workspace(conn)
+        project_id = insert_project(conn, workspace_id)
+        status_id = insert_status(conn, workspace_id)
         task1_id = insert_task(
-            conn, board_id, "task1", status_id, project_id, priority=5,
+            conn, workspace_id, "task1", status_id, project_id, priority=5,
         )
-        task2_id = insert_task(conn, board_id, "task2", status_id, priority=3)
+        task2_id = insert_task(conn, workspace_id, "task2", status_id, priority=3)
         insert_task_dependency(conn, task1_id, task2_id)
         history_id = insert_task_history(
             conn, task1_id, field="title", old_value="old",
@@ -76,7 +76,7 @@ def seeded(conn: sqlite3.Connection) -> FullSeed:
         )
     return FullSeed(
         conn=conn,
-        board_id=board_id,
+        workspace_id=workspace_id,
         project_id=project_id,
         status_id=status_id,
         task1_id=task1_id,
@@ -116,8 +116,8 @@ class TestRowToWorkspace:
 class TestRowToStatus:
     def test_maps_row(self, conn: sqlite3.Connection) -> None:
         with transaction(conn):
-            board_id = insert_workspace(conn)
-            col_id = insert_status(conn, board_id)
+            workspace_id = insert_workspace(conn)
+            col_id = insert_status(conn, workspace_id)
         row = conn.execute(
             "SELECT * FROM statuses WHERE id = ?", (col_id,),
         ).fetchone()
@@ -130,8 +130,8 @@ class TestRowToStatus:
 
     def test_archived_is_bool(self, conn: sqlite3.Connection) -> None:
         with transaction(conn):
-            board_id = insert_workspace(conn)
-            col_id = insert_status(conn, board_id)
+            workspace_id = insert_workspace(conn)
+            col_id = insert_status(conn, workspace_id)
         with transaction(conn):
             conn.execute("UPDATE statuses SET archived = 1 WHERE id = ?", (col_id,))
         row = conn.execute(
@@ -144,8 +144,8 @@ class TestRowToStatus:
 class TestRowToProject:
     def test_maps_row(self, conn: sqlite3.Connection) -> None:
         with transaction(conn):
-            board_id = insert_workspace(conn)
-            proj_id = insert_project(conn, board_id)
+            workspace_id = insert_workspace(conn)
+            proj_id = insert_project(conn, workspace_id)
         row = conn.execute(
             "SELECT * FROM projects WHERE id = ?", (proj_id,),
         ).fetchone()
@@ -156,8 +156,8 @@ class TestRowToProject:
 
     def test_archived_is_bool(self, conn: sqlite3.Connection) -> None:
         with transaction(conn):
-            board_id = insert_workspace(conn)
-            proj_id = insert_project(conn, board_id)
+            workspace_id = insert_workspace(conn)
+            proj_id = insert_project(conn, workspace_id)
         with transaction(conn):
             conn.execute("UPDATE projects SET archived = 1 WHERE id = ?", (proj_id,))
         row = conn.execute(
@@ -241,9 +241,9 @@ class TestShallowFields:
             shallow_fields("not a dataclass", str)
 
     def test_rejects_wrong_instance_type(self) -> None:
-        board = Workspace(id=1, name="b", archived=False, created_at=0)
+        workspace = Workspace(id=1, name="b", archived=False, created_at=0)
         with pytest.raises(TypeError, match="is not an instance of"):
-            shallow_fields(board, Task)
+            shallow_fields(workspace, Task)
 
 
 # ---- Mapper tests ----
@@ -520,8 +520,8 @@ class TestMapperFieldCoverage:
 
     def test_row_to_status_populates_all_fields(self, conn: sqlite3.Connection) -> None:
         with transaction(conn):
-            board_id = insert_workspace(conn)
-            col_id = insert_status(conn, board_id)
+            workspace_id = insert_workspace(conn)
+            col_id = insert_status(conn, workspace_id)
         row = conn.execute("SELECT * FROM statuses WHERE id = ?", (col_id,)).fetchone()
         col = row_to_status(row)
         expected = {f.name for f in dataclasses.fields(Status)}
@@ -530,8 +530,8 @@ class TestMapperFieldCoverage:
 
     def test_row_to_project_populates_all_fields(self, conn: sqlite3.Connection) -> None:
         with transaction(conn):
-            board_id = insert_workspace(conn)
-            proj_id = insert_project(conn, board_id)
+            workspace_id = insert_workspace(conn)
+            proj_id = insert_project(conn, workspace_id)
         row = conn.execute("SELECT * FROM projects WHERE id = ?", (proj_id,)).fetchone()
         proj = row_to_project(row)
         expected = {f.name for f in dataclasses.fields(Project)}

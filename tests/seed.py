@@ -8,7 +8,7 @@ from sticky_notes.active_workspace import set_active_workspace_id
 from sticky_notes.connection import get_connection, init_db
 
 
-def seed_board(conn: sqlite3.Connection, db_path: Path | None = None) -> dict:
+def seed_workspace(conn: sqlite3.Connection, db_path: Path | None = None) -> dict:
     workspace = service.create_workspace(conn, "Coding")
 
     todo = service.create_status(conn, workspace.id, "Todo")
@@ -65,7 +65,7 @@ def seed_board(conn: sqlite3.Connection, db_path: Path | None = None) -> dict:
         set_active_workspace_id(db_path, workspace.id)
 
     return {
-        "board_id": workspace.id,
+        "workspace_id": workspace.id,
         "status_ids": {"todo": todo.id, "in_progress": in_progress.id, "done": done.id},
         "project_id": project.id,
         "task_ids": {
@@ -88,6 +88,6 @@ if __name__ == "__main__":
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = get_connection(path)
     init_db(conn)
-    ids = seed_board(conn, db_path=path)
+    ids = seed_workspace(conn, db_path=path)
     conn.close()
-    print(f"Seeded {path} with workspace {ids['board_id']}")
+    print(f"Seeded {path} with workspace {ids['workspace_id']}")

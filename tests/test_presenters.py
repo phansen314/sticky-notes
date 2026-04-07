@@ -109,10 +109,10 @@ class TestHistoryFormatter:
         assert out.count("\n") == 1
 
 
-# ---- format_board_list ----
+# ---- format_workspace_list ----
 
 
-class TestFormatBoardList:
+class TestFormatWorkspaceList:
     def test_empty(self):
         assert presenters.format_workspace_list((), None) == "no workspaces"
 
@@ -254,10 +254,10 @@ class TestFormatTaskDetail:
         assert "    " in out  # history lines are indented
 
 
-# ---- format_board_list_view ----
+# ---- format_workspace_list_view ----
 
 
-class TestFormatBoardListView:
+class TestFormatWorkspaceListView:
     def test_statuses_with_headers(self):
         view = WorkspaceListView(
             workspace=_workspace(1, "B"),
@@ -303,10 +303,10 @@ class TestFormatBoardListView:
         assert "@" not in out
 
 
-# ---- format_board_context ----
+# ---- format_workspace_context ----
 
 
-class TestFormatBoardContext:
+class TestFormatWorkspaceContext:
     def _ctx(self, *, name="dev", projects=(), tags=(), groups=()) -> WorkspaceContext:
         view = WorkspaceListView(workspace=_workspace(1, name), statuses=())
         return WorkspaceContext(view=view, projects=projects, tags=tags, groups=groups)
@@ -315,7 +315,7 @@ class TestFormatBoardContext:
         return GroupRef(id=id, project_id=proj_id, title=title, parent_id=None,
                         position=0, archived=False, created_at=0)
 
-    def test_board_header(self):
+    def test_workspace_header(self):
         out = presenters.format_workspace_context(self._ctx(name="work"))
         assert out.startswith("== work ==")
 
@@ -472,7 +472,7 @@ class TestFormatGroupDetail:
 
 
 class TestFormatMovePreview:
-    def _preview(self, **overrides) -> MoveToBoardPreview:
+    def _preview(self, **overrides) -> MoveToWorkspacePreview:
         base = dict(
             task_id=5, task_title="T", source_workspace_id=1, target_workspace_id=2,
             target_status_id=3, can_move=True, blocking_reason=None,

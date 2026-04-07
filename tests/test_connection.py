@@ -129,9 +129,9 @@ class TestTransaction:
 class TestSelfDependencyConstraint:
     def test_task_cannot_depend_on_itself(self, conn: sqlite3.Connection) -> None:
         with transaction(conn):
-            board_id = insert_workspace(conn, "b")
-            col_id = insert_status(conn, board_id, "col")
-            task_id = insert_task(conn, board_id, "t", col_id)
+            workspace_id = insert_workspace(conn, "b")
+            col_id = insert_status(conn, workspace_id, "col")
+            task_id = insert_task(conn, workspace_id, "t", col_id)
         with pytest.raises(sqlite3.IntegrityError):
             with transaction(conn):
                 conn.execute(
@@ -142,15 +142,15 @@ class TestSelfDependencyConstraint:
 
     def test_valid_dependency_allowed(self, conn: sqlite3.Connection) -> None:
         with transaction(conn):
-            board_id = insert_workspace(conn, "b")
-            col_id = insert_status(conn, board_id, "col")
-            t1 = insert_task(conn, board_id, "t1", col_id)
-            t2 = insert_task(conn, board_id, "t2", col_id)
+            workspace_id = insert_workspace(conn, "b")
+            col_id = insert_status(conn, workspace_id, "col")
+            t1 = insert_task(conn, workspace_id, "t1", col_id)
+            t2 = insert_task(conn, workspace_id, "t2", col_id)
         with transaction(conn):
             conn.execute(
                 "INSERT INTO task_dependencies (task_id, depends_on_id, workspace_id) "
                 "VALUES (?, ?, ?)",
-                (t1, t2, board_id),
+                (t1, t2, workspace_id),
             )
         row = conn.execute("SELECT * FROM task_dependencies").fetchone()
         assert row["task_id"] == t1
@@ -160,8 +160,8 @@ class TestSelfDependencyConstraint:
 class TestStatusArchived:
     def test_status_has_archived_default_zero(self, conn: sqlite3.Connection) -> None:
         with transaction(conn):
-            board_id = insert_workspace(conn, "b")
-            insert_status(conn, board_id, "col")
+            workspace_id = insert_workspace(conn, "b")
+            insert_status(conn, workspace_id, "col")
         row = conn.execute(
             "SELECT archived FROM statuses WHERE name = 'col'",
         ).fetchone()
@@ -169,10 +169,10 @@ class TestStatusArchived:
 
     def test_status_archived_can_be_set(self, conn: sqlite3.Connection) -> None:
         with transaction(conn):
-            board_id = insert_workspace(conn, "b")
+            workspace_id = insert_workspace(conn, "b")
             conn.execute(
                 "INSERT INTO statuses (workspace_id, name, archived) VALUES (?, 'col', 1)",
-                (board_id,),
+                (workspace_id,),
             )
         row = conn.execute(
             "SELECT archived FROM statuses WHERE name = 'col'",
@@ -181,7 +181,7 @@ class TestStatusArchived:
 
 
 class TestForeignKeyEnforcement:
-    def test_rejects_task_with_nonexistent_board(
+    def test_rejects_task_with_nonexistent_workspace(
         self, conn: sqlite3.Connection,
     ) -> None:
         with pytest.raises(sqlite3.IntegrityError):
@@ -194,18 +194,18 @@ class TestForeignKeyEnforcement:
         self, conn: sqlite3.Connection,
     ) -> None:
         with transaction(conn):
-            board_id = insert_workspace(conn, "b")
+            workspace_id = insert_workspace(conn, "b")
         with pytest.raises(sqlite3.IntegrityError):
             with transaction(conn):
                 conn.execute(
                     "INSERT INTO tasks (workspace_id, title, status_id) "
                     "VALUES (?, 't', 999)",
-                    (board_id,),
+                    (workspace_id,),
                 )
 
 
 class TestCrossWorkspaceConstraints:
-    def test_dependency_same_board_allowed(self, conn: sqlite3.Connection) -> None:
+    def test_dependency_same_workspace_allowed(self, conn: sqlite3.Connection) -> None:
         with transaction(conn):
             bid = insert_workspace(conn, "b")
             cid = insert_status(conn, bid)
@@ -222,7 +222,7 @@ class TestCrossWorkspaceConstraints:
         assert row["depends_on_id"] == t2
         assert row["workspace_id"] == bid
 
-    def test_dependency_cross_board_rejected(self, conn: sqlite3.Connection) -> None:
+    def test_dependency_cross_workspace_rejected(self, conn: sqlite3.Connection) -> None:
         with transaction(conn):
             b1 = insert_workspace(conn, "b1")
             b2 = insert_workspace(conn, "b2")
@@ -238,7 +238,7 @@ class TestCrossWorkspaceConstraints:
                     (t1, t2, b1),
                 )
 
-    def test_tag_same_board_allowed(self, conn: sqlite3.Connection) -> None:
+    def test_tag_same_workspace_allowed(self, conn: sqlite3.Connection) -> None:
         with transaction(conn):
             bid = insert_workspace(conn, "b")
             cid = insert_status(conn, bid)
@@ -256,7 +256,7 @@ class TestCrossWorkspaceConstraints:
         assert row["tag_id"] == tag_id
         assert row["workspace_id"] == bid
 
-    def test_tag_cross_board_rejected(self, conn: sqlite3.Connection) -> None:
+    def test_tag_cross_workspace_rejected(self, conn: sqlite3.Connection) -> None:
         with transaction(conn):
             b1 = insert_workspace(conn, "b1")
             b2 = insert_workspace(conn, "b2")
@@ -460,8 +460,8 @@ class TestMigrations:
                 changed_at INTEGER NOT NULL DEFAULT (unixepoch())
             );
         """)
-        # Seed data: board, project, column, group, tasks with join-table assignments
-        conn.execute("INSERT INTO workspaces (id, name) VALUES (1, 'b')")
+        # Seed data: workspace, project, column, group, tasks with join-table assignments
+        conn.execute("INSERT INTO boards (id, name) VALUES (1, 'b')")
         conn.execute("INSERT INTO projects (id, board_id, name) VALUES (1, 1, 'p')")
         conn.execute("INSERT INTO columns (id, board_id, name) VALUES (1, 1, 'c')")
         conn.execute("INSERT INTO groups (id, project_id, title) VALUES (1, 1, 'g')")
@@ -496,7 +496,7 @@ class TestMigrations:
             "SELECT id FROM workspaces WHERE name = 'B'"
         ).fetchone() is not None
         # Verify composite FK (group_id, project_id) enforces group-project match
-        conn.execute("INSERT INTO projects (id, board_id, name) VALUES (2, 1, 'p2')")
+        conn.execute("INSERT INTO projects (id, workspace_id, name) VALUES (2, 1, 'p2')")
         conn.execute("INSERT INTO groups (id, project_id, title) VALUES (2, 2, 'g2')")
         with pytest.raises(sqlite3.IntegrityError):
             # Task in project 1 cannot be assigned to group in project 2
@@ -639,9 +639,9 @@ class TestTaskHistoryFieldConstraint:
         self, conn: sqlite3.Connection,
     ) -> None:
         with transaction(conn):
-            board_id = insert_workspace(conn, "b")
-            col_id = insert_status(conn, board_id, "col")
-            task_id = insert_task(conn, board_id, "t", col_id)
+            workspace_id = insert_workspace(conn, "b")
+            col_id = insert_status(conn, workspace_id, "col")
+            task_id = insert_task(conn, workspace_id, "t", col_id)
         with pytest.raises(sqlite3.IntegrityError):
             with transaction(conn):
                 conn.execute(
@@ -654,9 +654,9 @@ class TestTaskHistoryFieldConstraint:
         self, conn: sqlite3.Connection,
     ) -> None:
         with transaction(conn):
-            board_id = insert_workspace(conn, "b")
-            col_id = insert_status(conn, board_id, "col")
-            task_id = insert_task(conn, board_id, "t", col_id)
+            workspace_id = insert_workspace(conn, "b")
+            col_id = insert_status(conn, workspace_id, "col")
+            task_id = insert_task(conn, workspace_id, "t", col_id)
         with transaction(conn):
             conn.execute(
                 "INSERT INTO task_history (task_id, field, new_value, source) "

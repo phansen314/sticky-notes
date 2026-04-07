@@ -55,48 +55,48 @@ run_expect_fail() {
 }
 
 # ════════════════════════════════════════════════════════════════════
-#  BOARD
+#  WORKSPACE
 # ════════════════════════════════════════════════════════════════════
-section "Board commands"
+section "Workspace commands"
 
-run "Create board 'Work'" \
-    $CMD board create Work
+run "Create workspace 'Work'" \
+    $CMD workspace create Work
 
-run "Create board 'Personal'" \
-    $CMD board create Personal
+run "Create workspace 'Personal'" \
+    $CMD workspace create Personal
 
-run "List boards" \
-    $CMD board ls
+run "List workspaces" \
+    $CMD workspace ls
 
 run "Switch to 'Work'" \
-    $CMD board use Work
+    $CMD workspace use Work
 
-run "Rename active board to 'Office'" \
-    $CMD board rename Office
+run "Rename active workspace to 'Office'" \
+    $CMD workspace rename Office
 
-run "List boards (verify rename)" \
-    $CMD board ls
+run "List workspaces (verify rename)" \
+    $CMD workspace ls
 
 run "Switch back to 'Personal'" \
-    $CMD board use Personal
+    $CMD workspace use Personal
 
 run "Archive 'Personal'" \
-    $CMD board archive
+    $CMD workspace rm Personal
 
-run "List boards (archived hidden)" \
-    $CMD board ls
+run "List workspaces (archived hidden)" \
+    $CMD workspace ls
 
-run "List boards --all (archived visible)" \
-    $CMD board ls --all
+run "List workspaces --all (archived visible)" \
+    $CMD workspace ls --all
 
 run "Switch to 'Office'" \
-    $CMD board use Office
+    $CMD workspace use Office
 
-# ── Board error paths ──────────────────────────────────────────────
-section "Board error paths"
+# ── Workspace error paths ──────────────────────────────────────────
+section "Workspace error paths"
 
-run_expect_fail "Duplicate board name" \
-    $CMD board create Office
+run_expect_fail "Duplicate workspace name" \
+    $CMD workspace create Office
 
 # ════════════════════════════════════════════════════════════════════
 #  COLUMN
@@ -273,10 +273,10 @@ run_expect_fail "Show missing task" \
 run_expect_fail "Move missing task" \
     $CMD mv 9999 "In Progress"
 
-# Test no active board error: use a separate DB with no board set
-NO_BOARD_DB="$TMPDIR/no-board.db"
-run_expect_fail "No active board" \
-    todo --db "$NO_BOARD_DB" ls
+# Test no active workspace error: use a separate DB with no workspace set
+NO_WORKSPACE_DB="$TMPDIR/no-workspace.db"
+run_expect_fail "No active workspace" \
+    todo --db "$NO_WORKSPACE_DB" ls
 
 # ════════════════════════════════════════════════════════════════════
 #  SUMMARY

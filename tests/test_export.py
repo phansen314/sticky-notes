@@ -26,8 +26,8 @@ from helpers import insert_task_history
 # ---- Helpers ----
 
 
-def _seed_board(conn: sqlite3.Connection) -> int:
-    """Create a board with columns, projects, tasks, and a dependency."""
+def _seed_workspace(conn: sqlite3.Connection) -> int:
+    """Create a workspace with statuses, projects, tasks, and a dependency."""
     with transaction(conn):
         bid = insert_workspace(conn, "Work")
         col_todo = insert_status(conn, bid, "Todo")
@@ -46,12 +46,12 @@ def _seed_board(conn: sqlite3.Connection) -> int:
 
 
 class TestExportEmpty:
-    def test_no_boards(self, conn: sqlite3.Connection) -> None:
+    def test_no_workspaces(self, conn: sqlite3.Connection) -> None:
         md = export_markdown(conn)
         assert "# Sticky Notes Export" in md
         assert "## Workspace" not in md
 
-    def test_archived_board_excluded(self, conn: sqlite3.Connection) -> None:
+    def test_archived_workspace_excluded(self, conn: sqlite3.Connection) -> None:
         with transaction(conn):
             bid = insert_workspace(conn, "Old")
         with transaction(conn):
@@ -63,14 +63,14 @@ class TestExportEmpty:
 class TestExportFull:
     @pytest.fixture(autouse=True)
     def _seed(self, conn: sqlite3.Connection) -> None:
-        _seed_board(conn)
+        _seed_workspace(conn)
 
     def test_header(self, conn: sqlite3.Connection) -> None:
         md = export_markdown(conn)
         assert md.startswith("# Sticky Notes Export\n")
         assert f"Generated: {datetime.date.today().isoformat()}" in md
 
-    def test_board_heading(self, conn: sqlite3.Connection) -> None:
+    def test_workspace_heading(self, conn: sqlite3.Connection) -> None:
         md = export_markdown(conn)
         assert "## Workspace: Work" in md
 
@@ -144,7 +144,7 @@ class TestExportEdgeCases:
         md = export_markdown(conn)
         assert "| NoDesc |  | 0 |" in md
 
-    def test_multiple_boards(self, conn: sqlite3.Connection) -> None:
+    def test_multiple_workspaces(self, conn: sqlite3.Connection) -> None:
         with transaction(conn):
             for name in ("Alpha", "Beta"):
                 bid = insert_workspace(conn, name)
@@ -153,8 +153,8 @@ class TestExportEdgeCases:
         assert "## Workspace: Alpha" in md
         assert "## Workspace: Beta" in md
 
-    def test_cross_board_deps_prevented(self, conn: sqlite3.Connection) -> None:
-        """Composite FK prevents dependencies between tasks on different boards."""
+    def test_cross_workspace_deps_prevented(self, conn: sqlite3.Connection) -> None:
+        """Composite FK prevents dependencies between tasks on different workspaces."""
         with transaction(conn):
             b1 = insert_workspace(conn, "B1")
             b2 = insert_workspace(conn, "B2")
@@ -347,8 +347,8 @@ class TestExportFullJson:
             tag_id = insert_tag(conn, bid, "urgent")
             insert_task_tag(conn, t1, tag_id)
         result = export_full_json(conn)
-        board_ids = {b["id"] for b in result["workspaces"]}
-        assert bid in board_ids
+        workspace_ids = {b["id"] for b in result["workspaces"]}
+        assert bid in workspace_ids
         task_ids = {t["id"] for t in result["tasks"]}
         assert {t1, t2} <= task_ids
         assert any(d["task_id"] == t2 and d["depends_on_id"] == t1 for d in result["task_dependencies"])
@@ -368,7 +368,7 @@ class TestExportFullJson:
         assert history[0]["old_value"] == "old"
         assert history[0]["new_value"] == "T"
 
-    def test_task_dependency_board_id_preserved(self, conn: sqlite3.Connection) -> None:
+    def test_task_dependency_workspace_id_preserved(self, conn: sqlite3.Connection) -> None:
         with transaction(conn):
             bid = insert_workspace(conn, "B")
             col = insert_status(conn, bid, "Todo")
