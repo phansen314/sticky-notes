@@ -13,7 +13,7 @@ from textual.widgets import Header, Footer
 from sticky_notes.active_workspace import get_active_workspace_id
 from sticky_notes.connection import DEFAULT_DB_PATH, get_connection, init_db
 from sticky_notes.models import Task
-from sticky_notes.service import get_task_detail
+from sticky_notes.service import get_task_detail, list_projects, list_statuses
 from sticky_notes.tui.config import TuiConfig, load_config
 from sticky_notes.tui.model import load_workspace_model
 from sticky_notes.tui.screens import TaskEditModal
@@ -128,7 +128,9 @@ class StickyNotesApp(App):
         if task is None:
             return
         detail = get_task_detail(self.conn, task.id)
-        self.push_screen(TaskEditModal(detail))
+        statuses = list_statuses(self.conn, detail.workspace_id)
+        projects = list_projects(self.conn, detail.workspace_id)
+        self.push_screen(TaskEditModal(detail, statuses, projects))
 
     def _get_focused_task(self) -> Task | None:
         if self.active_panel == ActivePanel.TREE:

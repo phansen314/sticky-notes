@@ -79,24 +79,55 @@ TaskEditModal {
 }
 
 #task-edit-container {
-    width: 80%;
-    height: 80%;
+    width: 90%;
+    max-height: 85%;
+    padding: 1 2;
     border: round green;
     background: $background;
-    padding: 1 2;
 }
 
 #task-edit-id {
     width: 1fr;
     text-style: bold;
     text-align: center;
+    margin-bottom: 1;
 }
 
-#task-edit-title {
+.form-label {
+    margin-bottom: 0;
+}
+
+.form-field {
+    margin-bottom: 1;
+}
+
+#task-edit-desc {
+    height: 5;
+}
+
+.form-row {
+    height: auto;
+}
+
+.form-group {
     width: 1fr;
-    height: 3;
+    margin: 0 1;
+    height: auto;
 }
 
-#task-edit-description {
-    height: 1fr;
+#task-edit-error {
+    color: $error;
+    text-align: center;
+    margin-top: 1;
+}
+
+#task-edit-buttons {
+    width: 100%;
+    align: center middle;
+    height: 3;
+    margin-top: 1;
+}
+
+#task-edit-buttons Button {
+    margin: 0 1;
 }
