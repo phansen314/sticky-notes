@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+from textual.message import Message
 from textual.widgets import Tree
 from textual.widgets._tree import TreeNode
 
-from sticky_notes.formatting import format_task_num
 from sticky_notes.models import Group, Project, Task
 from sticky_notes.tui.markup import escape_markup
 from sticky_notes.tui.model import GroupNode, WorkspaceModel
@@ -15,7 +15,29 @@ class WorkspaceTree(Tree[Project | Group | Task]):
     ICON_GROUP = "\U0001f4c1"
     ICON_TASK = "\U0001f4dd"
 
+    class TaskSelected(Message):
+        """A task node was selected in the tree."""
+
+        def __init__(self, task: Task) -> None:
+            self.task = task
+            super().__init__()
+
+    class ProjectSelected(Message):
+        """A project node was selected in the tree."""
+
+        def __init__(self, project: Project) -> None:
+            self.project = project
+            super().__init__()
+
+    class GroupSelected(Message):
+        """A group node was selected in the tree."""
+
+        def __init__(self, group: Group) -> None:
+            self.group = group
+            super().__init__()
+
     def load(self, model: WorkspaceModel) -> None:
+        self.clear()
         self.root.set_label(
             f"{self.ICON_WORKSPACE} {escape_markup(model.workspace.name)}"
         )
@@ -27,11 +49,11 @@ class WorkspaceTree(Tree[Project | Group | Task]):
             for gnode in pnode.groups:
                 self._add_group_node(proj_branch, gnode)
             for task in pnode.ungrouped_tasks:
-                label = f"{self.ICON_TASK} {format_task_num(task.id)}: {escape_markup(task.title)}"
+                label = f"{self.ICON_TASK} {task.id:d}: {escape_markup(task.title)}"
                 proj_branch.add_leaf(label, data=task)
             proj_branch.expand()
         for task in model.unassigned_tasks:
-            label = f"{self.ICON_TASK} {format_task_num(task.id)}: {escape_markup(task.title)}"
+            label = f"{self.ICON_TASK} {task.id:d}: {escape_markup(task.title)}"
             self.root.add_leaf(label, data=task)
         self.root.expand()
 
@@ -46,5 +68,15 @@ class WorkspaceTree(Tree[Project | Group | Task]):
         for child in group_node.children:
             self._add_group_node(branch, child)
         for task in group_node.tasks:
-            label = f"{self.ICON_TASK} {format_task_num(task.id)}: {escape_markup(task.title)}"
+            label = f"{self.ICON_TASK} {task.id:d}: {escape_markup(task.title)}"
             branch.add_leaf(label, data=task)
+
+    def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
+        event.stop()
+        node_data = event.node.data
+        if isinstance(node_data, Task):
+            self.post_message(self.TaskSelected(node_data))
+        elif isinstance(node_data, Project):
+            self.post_message(self.ProjectSelected(node_data))
+        elif isinstance(node_data, Group):
+            self.post_message(self.GroupSelected(node_data))

@@ -37,4 +37,13 @@ Screen {
 
 .task-card {
     padding: 0 1;
+    border: round $surface-lighten-2;
+}
+
+.task-card:focus {
+    border: round green;
+}
+
+#workspaces-tree > .tree--cursor {
+    background: #2A4A4A;
 }

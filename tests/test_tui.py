@@ -9,6 +9,7 @@ from sticky_notes.active_workspace import set_active_workspace_id
 from sticky_notes.connection import get_connection, init_db
 from sticky_notes.models import Group, Project, Task
 from sticky_notes.tui.app import StickyNotesApp
+from sticky_notes.tui.widgets import TaskCard
 
 
 class TestTreePopulation:
@@ -38,8 +39,8 @@ class TestTreePopulation:
             task_leaves = [n for n in proj_node.children if not n.allow_expand]
             assert len(task_leaves) == 4
             titles = {str(n.label) for n in task_leaves}
-            assert "\U0001f4dd task-0001: Design API schema" in titles
-            assert "\U0001f4dd task-0002: Endpoint design" in titles
+            assert "\U0001f4dd 1: Design API schema" in titles
+            assert "\U0001f4dd 2: Endpoint design" in titles
 
     async def test_unassigned_tasks_after_projects(self, app):
         async with app.run_test():
@@ -57,6 +58,27 @@ class TestTreePopulation:
             assert isinstance(proj_node.data, Project)
             task_leaf = [n for n in proj_node.children if not n.allow_expand][0]
             assert isinstance(task_leaf.data, Task)
+
+
+class TestTreeReload:
+    @pytest.fixture
+    def app(self, seeded_tui_db):
+        db_path, ids = seeded_tui_db
+        return StickyNotesApp(db_path=db_path)
+
+    async def test_reload_is_idempotent(self, app, seeded_tui_db):
+        db_path, ids = seeded_tui_db
+        async with app.run_test():
+            tree = app.query_one("#workspaces-tree")
+            first_count = len(list(tree.root.children))
+            # Reload with same model
+            from sticky_notes.tui.model import load_workspace_model
+            conn = app.conn
+            ws_id = ids["workspace_id"]
+            model = load_workspace_model(conn, ws_id)
+            tree.load(model)
+            second_count = len(list(tree.root.children))
+            assert first_count == second_count
 
 
 class TestTreeNoActiveWorkspace:
@@ -151,8 +173,25 @@ class TestKanbanColumns:
             )
             cards = done_col.query(".task-card")
             card_texts = {str(c.render()) for c in cards}
-            assert "task-0006: Setup CI pipeline" in card_texts
-            assert "task-0008: Scaffold project" in card_texts
+            assert "6: Setup CI pipeline" in card_texts
+            assert "8: Scaffold project" in card_texts
+
+    async def test_task_cards_are_focusable(self, app):
+        app, ids = app
+        async with app.run_test():
+            cards = app.query(".task-card")
+            assert len(cards) > 0
+            for card in cards:
+                assert isinstance(card, TaskCard)
+                assert card.can_focus is True
+
+    async def test_task_cards_carry_task_data(self, app):
+        app, ids = app
+        async with app.run_test():
+            cards = app.query(".task-card")
+            for card in cards:
+                assert isinstance(card.task_data, Task)
+                assert card.task_data.id > 0
 
     async def test_no_workspace_no_columns(self, tmp_path):
         db_path = tmp_path / "empty.db"
