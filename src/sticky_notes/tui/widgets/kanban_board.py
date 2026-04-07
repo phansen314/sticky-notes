@@ -16,6 +16,8 @@ class _KanbanScrollable(ScrollableContainer):
 
 
 class KanbanBoard(Horizontal):
+    _grid: list[list[TaskCard]] | None = None
+
     class TaskActivated(Message):
         """A task card was activated on the kanban board."""
 
@@ -24,6 +26,7 @@ class KanbanBoard(Horizontal):
             super().__init__()
 
     def load(self, model: WorkspaceModel) -> None:
+        self._grid = None
         self.remove_children()
         all_tasks = self._collect_all_tasks(model)
         tasks_by_status: dict[int, list[Task]] = {}
@@ -48,11 +51,13 @@ class KanbanBoard(Horizontal):
     # -- Grid navigation --
 
     def _build_grid(self) -> list[list[TaskCard]]:
-        grid: list[list[TaskCard]] = []
-        for col in self.query(".status-col"):
-            cards = list(col.query(TaskCard))
-            grid.append(cards)
-        return grid
+        if self._grid is None:
+            grid: list[list[TaskCard]] = []
+            for col in self.query(".status-col"):
+                cards = list(col.query(TaskCard))
+                grid.append(cards)
+            self._grid = grid
+        return self._grid
 
     def _find_card_position(
         self, card: TaskCard, grid: list[list[TaskCard]]

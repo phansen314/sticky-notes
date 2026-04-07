@@ -6,6 +6,7 @@ from pathlib import Path
 
 from textual import events
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.containers import Vertical, Horizontal
 from textual.widgets import Header, Footer
 
@@ -24,11 +25,15 @@ class ActivePanel(StrEnum):
 class StickyNotesApp(App):
     CSS_PATH = "sticky_notes.tcss"
     TITLE = "\U0001f4cc Sticky Notes \U0001f4cc"
+    BINDINGS = [
+        Binding("r", "refresh", "Refresh", show=True),
+    ]
 
     conn: sqlite3.Connection
     config: TuiConfig
     active_panel: ActivePanel = ActivePanel.TREE
     _kanban_last_focused: TaskCard | None = None
+    _workspace_id: int | None = None
 
     def __init__(self, db_path: Path | None = None):
         super().__init__()
@@ -50,18 +55,54 @@ class StickyNotesApp(App):
     def on_mount(self) -> None:
         tree = self.query_one(WorkspaceTree)
         kanban = self.query_one(KanbanBoard)
-        ws_id = get_active_workspace_id(self.db_path)
-        if ws_id is None:
+        self._workspace_id = get_active_workspace_id(self.db_path)
+        if self._workspace_id is None:
             tree.show_empty("No active workspace")
             return
         try:
-            model = load_workspace_model(self.conn, ws_id)
+            model = load_workspace_model(self.conn, self._workspace_id)
         except LookupError:
             tree.show_empty("Workspace not found")
             return
         tree.load(model)
         kanban.load(model)
         tree.focus()
+        self.set_interval(self.config.auto_refresh_seconds, self._refresh)
+
+    def action_refresh(self) -> None:
+        self._refresh()
+
+    def _refresh(self) -> None:
+        if self._workspace_id is None:
+            return
+        try:
+            model = load_workspace_model(self.conn, self._workspace_id)
+        except LookupError:
+            return
+        tree = self.query_one(WorkspaceTree)
+        kanban = self.query_one(KanbanBoard)
+        # Remember focused task id before reload
+        prev_task_id: int | None = None
+        if self._kanban_last_focused is not None:
+            prev_task_id = self._kanban_last_focused.task_data.id
+        tree.load(model)
+        kanban.load(model)
+        # Restore focus
+        if self.active_panel == ActivePanel.KANBAN and prev_task_id is not None:
+            for card in self.query(TaskCard):
+                if card.task_data.id == prev_task_id:
+                    self._kanban_last_focused = card
+                    self.set_focus(card)
+                    return
+            # Task no longer exists — focus first card or fall back to tree
+            cards = self.query(TaskCard)
+            if cards:
+                self._kanban_last_focused = cards.first()
+                self.set_focus(cards.first())
+            else:
+                self.set_focus(tree)
+        else:
+            self.set_focus(tree)
 
     def on_descendant_focus(self, event: events.DescendantFocus) -> None:
         widget = event.widget
