@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from textual import events
 from textual.message import Message
 from textual.widgets import Tree
 from textual.widgets._tree import TreeNode
@@ -70,6 +71,28 @@ class WorkspaceTree(Tree[Project | Group | Task]):
         for task in group_node.tasks:
             label = f"{self.ICON_TASK} {task.id:d}: {escape_markup(task.title)}"
             branch.add_leaf(label, data=task)
+
+    def key_left(self, event: events.Key) -> None:
+        node = self.cursor_node
+        if node is None:
+            return
+        if node.is_expanded:
+            node.collapse()
+        elif node.parent is not None:
+            self.select_node(node.parent)
+            self.scroll_to_node(node.parent)
+        event.stop()
+
+    def key_right(self, event: events.Key) -> None:
+        node = self.cursor_node
+        if node is None:
+            return
+        if node.allow_expand and not node.is_expanded:
+            node.expand()
+        elif node.is_expanded and node.children:
+            self.select_node(node.children[0])
+            self.scroll_to_node(node.children[0])
+        event.stop()
 
     def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
         event.stop()

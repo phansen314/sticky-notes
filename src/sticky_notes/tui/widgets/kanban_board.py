@@ -68,24 +68,23 @@ class KanbanBoard(Horizontal):
         if not isinstance(focused, TaskCard):
             return False
         grid = self._build_grid()
+        non_empty = [i for i, col in enumerate(grid) if col]
+        if not non_empty:
+            return False
         pos = self._find_card_position(focused, grid)
         if pos is None:
             return False
         ci, ri = pos
-        new_ci = ci + col_delta
-        new_ri = ri + row_delta
-        # Column movement: skip empty columns
+        # Column movement: wrap around, skip empty columns
         if col_delta != 0:
-            while 0 <= new_ci < len(grid) and not grid[new_ci]:
-                new_ci += col_delta
-            if not (0 <= new_ci < len(grid)):
-                return False
+            idx = non_empty.index(ci)
+            idx = (idx + col_delta) % len(non_empty)
+            new_ci = non_empty[idx]
             new_ri = min(ri, len(grid[new_ci]) - 1)
-        # Row movement: bounds check
-        if row_delta != 0:
-            if not (0 <= new_ri < len(grid[ci])):
-                return False
+        # Row movement: wrap within column
+        else:
             new_ci = ci
+            new_ri = (ri + row_delta) % len(grid[ci])
         self.screen.set_focus(grid[new_ci][new_ri])
         return True
 
