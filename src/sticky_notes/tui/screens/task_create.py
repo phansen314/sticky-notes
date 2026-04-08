@@ -5,14 +5,12 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Footer, Input, Select, Static
 
-from sticky_notes.formatting import format_timestamp
 from sticky_notes.models import Project, Status
-from sticky_notes.service_models import TaskDetail
 from sticky_notes.tui.screens.base_edit import BaseEditModal, ModalScroll
 from sticky_notes.tui.widgets.markdown_editor import MarkdownEditor
 
 
-class TaskEditModal(BaseEditModal):
+class TaskCreateModal(BaseEditModal):
     BINDINGS = BaseEditModal.BINDINGS + [
         Binding("alt+e", "editor_mode", "Edit MD", show=True),
         Binding("alt+p", "preview_mode", "Preview MD", show=True),
@@ -20,31 +18,28 @@ class TaskEditModal(BaseEditModal):
 
     def __init__(
         self,
-        detail: TaskDetail,
         statuses: tuple[Status, ...],
         projects: tuple[Project, ...],
     ) -> None:
-        self.detail = detail
         self._statuses = statuses
         self._projects = projects
         super().__init__()
 
     def compose(self) -> ComposeResult:
         with ModalScroll(classes="modal-container"):
-            yield Static(str(self.detail.id), classes="modal-id")
+            yield Static("New Task", classes="modal-id")
 
             yield Static("Title", classes="form-label")
             yield Input(
-                value=self.detail.title,
                 placeholder="Task title",
-                id="task-edit-title",
+                id="task-create-title",
                 classes="form-field",
             )
 
             yield Static("Description (alt+e edit | alt+p preview)", classes="form-label")
             yield MarkdownEditor(
-                self.detail.description or "",
-                id="task-edit-desc",
+                "",
+                id="task-create-desc",
                 classes="form-field",
             )
 
@@ -57,8 +52,8 @@ class TaskEditModal(BaseEditModal):
                     yield Static("Status", classes="form-label")
                     yield Select(
                         status_options,
-                        value=self.detail.status_id,
-                        id="task-edit-status",
+                        value=self._statuses[0].id if self._statuses else Select.NULL,
+                        id="task-create-status",
                         allow_blank=False,
                         classes="form-field",
                     )
@@ -66,8 +61,8 @@ class TaskEditModal(BaseEditModal):
                     yield Static("Priority", classes="form-label")
                     yield Select(
                         priority_options,
-                        value=self.detail.priority,
-                        id="task-edit-priority",
+                        value=1,
+                        id="task-create-priority",
                         allow_blank=False,
                         classes="form-field",
                     )
@@ -75,48 +70,34 @@ class TaskEditModal(BaseEditModal):
                     yield Static("Project", classes="form-label")
                     yield Select(
                         project_options,
-                        value=self.detail.project_id if self.detail.project_id else Select.NULL,
-                        id="task-edit-project",
+                        value=Select.NULL,
+                        id="task-create-project",
                         allow_blank=True,
                         classes="form-field",
                     )
-
-            due_str = format_timestamp(self.detail.due_date) if self.detail.due_date else ""
-            start_str = format_timestamp(self.detail.start_date) if self.detail.start_date else ""
-            finish_str = format_timestamp(self.detail.finish_date) if self.detail.finish_date else ""
 
             with Horizontal(classes="form-row"):
                 with Vertical(classes="form-group"):
                     yield Static("Due Date", classes="form-label")
                     yield Input(
-                        value=due_str,
                         placeholder="YYYY-MM-DD",
-                        id="task-edit-due",
+                        id="task-create-due",
                         classes="form-field",
                     )
                 with Vertical(classes="form-group"):
                     yield Static("Start Date", classes="form-label")
                     yield Input(
-                        value=start_str,
                         placeholder="YYYY-MM-DD",
-                        id="task-edit-start",
+                        id="task-create-start",
                         classes="form-field",
                     )
                 with Vertical(classes="form-group"):
                     yield Static("Finish Date", classes="form-label")
                     yield Input(
-                        value=finish_str,
                         placeholder="YYYY-MM-DD",
-                        id="task-edit-finish",
+                        id="task-create-finish",
                         classes="form-field",
                     )
-
-            if self.detail.blocked_by:
-                names = ", ".join(f"{t.id}: {t.title}" for t in self.detail.blocked_by)
-                yield Static(f"Blocked by: {names}", classes="form-label dep-info")
-            if self.detail.blocks:
-                names = ", ".join(f"{t.id}: {t.title}" for t in self.detail.blocks)
-                yield Static(f"Blocks: {names}", classes="form-label dep-info")
 
             yield Static("", id="modal-error", classes="modal-error")
             with Horizontal(classes="modal-buttons"):
@@ -125,32 +106,36 @@ class TaskEditModal(BaseEditModal):
         yield Footer()
 
     def on_mount(self) -> None:
-        self.query_one("#task-edit-title", Input).focus()
+        self.query_one("#task-create-title", Input).focus()
 
     def _do_save(self) -> None:
-        title = self.query_one("#task-edit-title", Input).value.strip()
+        title = self.query_one("#task-create-title", Input).value.strip()
         if not title:
             self._show_error("Title is required")
             return
 
-        desc_text = self.query_one("#task-edit-desc", MarkdownEditor).text.strip()
+        desc_text = self.query_one("#task-create-desc", MarkdownEditor).text.strip()
         description = desc_text or None
 
-        status_id = self.query_one("#task-edit-status", Select).value
-        priority = self.query_one("#task-edit-priority", Select).value
+        status_id = self.query_one("#task-create-status", Select).value
+        if not isinstance(status_id, int):
+            self._show_error("Status is required")
+            return
 
-        project_val = self.query_one("#task-edit-project", Select).value
+        priority = self.query_one("#task-create-priority", Select).value
+
+        project_val = self.query_one("#task-create-project", Select).value
         project_id = project_val if isinstance(project_val, int) else None
 
-        due_date = self._parse_date_field("task-edit-due", "due")
+        due_date = self._parse_date_field("task-create-due", "due")
         if isinstance(due_date, str):
             self._show_error(due_date)
             return
-        start_date = self._parse_date_field("task-edit-start", "start")
+        start_date = self._parse_date_field("task-create-start", "start")
         if isinstance(start_date, str):
             self._show_error(start_date)
             return
-        finish_date = self._parse_date_field("task-edit-finish", "finish")
+        finish_date = self._parse_date_field("task-create-finish", "finish")
         if isinstance(finish_date, str):
             self._show_error(finish_date)
             return
@@ -159,12 +144,12 @@ class TaskEditModal(BaseEditModal):
             self._show_error("Finish date must be on or after start date")
             return
 
-        self._diff_and_dismiss("task_id", self.detail.id, self.detail, {
+        self.dismiss({
             "title": title,
-            "description": description,
             "status_id": status_id,
             "priority": priority,
             "project_id": project_id,
+            "description": description,
             "due_date": due_date,
             "start_date": start_date,
             "finish_date": finish_date,
