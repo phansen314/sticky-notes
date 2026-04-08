@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from textual.app import ComposeResult
-from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Footer, Input, Select, Static
 
@@ -11,10 +10,6 @@ from sticky_notes.tui.widgets.markdown_editor import MarkdownEditor
 
 
 class TaskCreateModal(BaseEditModal):
-    BINDINGS = BaseEditModal.BINDINGS + [
-        Binding("alt+e", "editor_mode", "Edit MD", show=True),
-        Binding("alt+p", "preview_mode", "Preview MD", show=True),
-    ]
 
     def __init__(
         self,
@@ -36,7 +31,7 @@ class TaskCreateModal(BaseEditModal):
                 classes="form-field",
             )
 
-            yield Static("Description (alt+e edit | alt+p preview)", classes="form-label")
+            yield Static("Description (ctrl+e edit | ctrl+r preview)", classes="form-label")
             yield MarkdownEditor(
                 "",
                 id="task-create-desc",

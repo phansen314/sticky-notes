@@ -121,13 +121,13 @@ textual run --dev sticky_notes.tui.app:StickyNotesApp
 
 | Key | Action |
 |-----|--------|
-| `alt+w` | Focus workspace tree |
-| `alt+b` | Focus kanban board |
+| `w` | Focus workspace tree |
+| `b` | Focus kanban board |
 | `r` | Refresh |
 | `e` | Edit selected entity |
-| `alt+n` | Create new (task/group/project) |
+| `n` | Create new (task/group/project) |
 | `s` | Switch workspace |
-| `alt+j` / `alt+l` | Move task left/right across statuses |
+| `[` / `]` | Move task left/right across statuses |
 | `ctrl+q` | Quit |
 
 ## Claude Code Plugin

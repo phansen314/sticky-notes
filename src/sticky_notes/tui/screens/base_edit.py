@@ -22,6 +22,8 @@ class BaseEditModal(ModalScreen[dict | None]):
         Binding("ctrl+s", "save", "Save"),
         Binding("ctrl+n", "next_field", "Next", show=True),
         Binding("ctrl+b", "prev_field", "Prev", show=True),
+        Binding("ctrl+e", "editor_mode", "Edit MD", show=True),
+        Binding("ctrl+r", "preview_mode", "Preview MD", show=True),
     ]
 
     def action_next_field(self) -> None:

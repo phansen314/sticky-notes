@@ -225,7 +225,7 @@ class TestStatusMove:
             node = node.parent
         raise AssertionError("Card not inside a status column")
 
-    async def test_alt_right_moves_to_next_status(self, app):
+    async def test_shift_right_moves_to_next_status(self, app):
         app, ids = app
         async with app.run_test() as pilot:
             # Focus a Todo card (task 1: Design API schema)
@@ -235,7 +235,7 @@ class TestStatusMove:
             await pilot.pause()
             task_id = card.task_data.id
 
-            await pilot.press("alt+right")
+            await pilot.press("shift+right")
             await pilot.pause()
             await pilot.pause()
 
@@ -243,7 +243,7 @@ class TestStatusMove:
             new_card = next(c for c in app.query(TaskCard) if c.task_data.id == task_id)
             assert self._card_column_id(new_card) == f"status-col-{ids['status_ids']['in_progress']}"
 
-    async def test_alt_left_moves_to_previous_status(self, app):
+    async def test_shift_left_moves_to_previous_status(self, app):
         app, ids = app
         async with app.run_test() as pilot:
             ip_col = app.query_one(f"#status-col-{ids['status_ids']['in_progress']}")
@@ -252,7 +252,7 @@ class TestStatusMove:
             await pilot.pause()
             task_id = card.task_data.id
 
-            await pilot.press("alt+left")
+            await pilot.press("shift+left")
             await pilot.pause()
             await pilot.pause()
 
@@ -268,7 +268,7 @@ class TestStatusMove:
             await pilot.pause()
             task_id = card.task_data.id
 
-            await pilot.press("alt+right")
+            await pilot.press("shift+right")
             await pilot.pause()
             await pilot.pause()
 
@@ -285,14 +285,14 @@ class TestStatusMove:
             await pilot.pause()
             task_id = card.task_data.id
 
-            await pilot.press("alt+left")
+            await pilot.press("shift+left")
             await pilot.pause()
             await pilot.pause()
 
             new_card = next(c for c in app.query(TaskCard) if c.task_data.id == task_id)
             assert self._card_column_id(new_card) == f"status-col-{ids['status_ids']['todo']}"
 
-    async def test_alt_l_alias(self, app):
+    async def test_bracket_right_alias(self, app):
         app, ids = app
         async with app.run_test() as pilot:
             todo_col = app.query_one(f"#status-col-{ids['status_ids']['todo']}")
@@ -301,14 +301,14 @@ class TestStatusMove:
             await pilot.pause()
             task_id = card.task_data.id
 
-            await pilot.press("alt+l")
+            await pilot.press("]")
             await pilot.pause()
             await pilot.pause()
 
             new_card = next(c for c in app.query(TaskCard) if c.task_data.id == task_id)
             assert self._card_column_id(new_card) == f"status-col-{ids['status_ids']['in_progress']}"
 
-    async def test_alt_j_alias(self, app):
+    async def test_bracket_left_alias(self, app):
         app, ids = app
         async with app.run_test() as pilot:
             ip_col = app.query_one(f"#status-col-{ids['status_ids']['in_progress']}")
@@ -317,7 +317,7 @@ class TestStatusMove:
             await pilot.pause()
             task_id = card.task_data.id
 
-            await pilot.press("alt+j")
+            await pilot.press("[")
             await pilot.pause()
             await pilot.pause()
 
@@ -338,7 +338,7 @@ class TestStatusMove:
             app.set_focus(card)
             await pilot.pause()
 
-            await pilot.press("alt+right")
+            await pilot.press("shift+right")
             await pilot.pause()
             await pilot.pause()
 
@@ -354,7 +354,7 @@ class TestStatusMove:
             await pilot.pause()
             task_id = card.task_data.id
 
-            await pilot.press("alt+right")
+            await pilot.press("shift+right")
             await pilot.pause()
             await pilot.pause()
 
