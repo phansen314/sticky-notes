@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-from typing import Any
-
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
 from textual.widgets import Button, Footer, Input, Static
 
 from sticky_notes.service_models import ProjectDetail
-from sticky_notes.tui.screens.base_edit import BaseEditModal, _ModalScroll
+from sticky_notes.tui.screens.base_edit import BaseEditModal, ModalScroll
 from sticky_notes.tui.widgets.markdown_editor import MarkdownEditor
 
 
@@ -23,7 +21,7 @@ class ProjectEditModal(BaseEditModal):
         super().__init__()
 
     def compose(self) -> ComposeResult:
-        with _ModalScroll(classes="modal-container"):
+        with ModalScroll(classes="modal-container"):
             yield Static(str(self.detail.id), classes="modal-id")
 
             yield Static("Name", classes="form-label")
@@ -50,7 +48,7 @@ class ProjectEditModal(BaseEditModal):
     def on_mount(self) -> None:
         self.query_one("#project-edit-name", Input).focus()
 
-    def action_save(self) -> None:
+    def _do_save(self) -> None:
         name = self.query_one("#project-edit-name", Input).value.strip()
         if not name:
             self._show_error("Name is required")
@@ -59,19 +57,7 @@ class ProjectEditModal(BaseEditModal):
         desc_text = self.query_one("#project-edit-desc", MarkdownEditor).text.strip()
         description = desc_text or None
 
-        form_values: dict[str, Any] = {
+        self._diff_and_dismiss("project_id", self.detail.id, self.detail, {
             "name": name,
             "description": description,
-        }
-
-        changes: dict[str, Any] = {}
-        for field, new_val in form_values.items():
-            old_val = getattr(self.detail, field)
-            if new_val != old_val:
-                changes[field] = new_val
-
-        if not changes:
-            self.dismiss(None)
-            return
-
-        self.dismiss({"project_id": self.detail.id, "changes": changes})
+        })

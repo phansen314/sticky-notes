@@ -4,6 +4,27 @@ from __future__ import annotations
 
 import sqlite3
 
+from textual.app import App, ComposeResult
+
+
+class ModalTestApp(App):
+    """Reusable test harness: pushes a modal on mount and captures its result."""
+
+    result: dict | None = "NOT_SET"  # type: ignore[assignment]
+
+    def __init__(self, modal) -> None:
+        super().__init__()
+        self._modal = modal
+
+    def compose(self) -> ComposeResult:
+        return []
+
+    def on_mount(self) -> None:
+        self.push_screen(self._modal, callback=self._capture)
+
+    def _capture(self, result: dict | None) -> None:
+        self.result = result
+
 
 def insert_workspace(
     conn: sqlite3.Connection,

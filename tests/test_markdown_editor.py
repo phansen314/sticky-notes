@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from textual.app import App, ComposeResult
-from textual.widgets import ContentSwitcher, Markdown, TextArea
+from textual.widgets import ContentSwitcher, TextArea
 
 from sticky_notes.tui.widgets.markdown_editor import MarkdownEditor
 
@@ -21,7 +21,7 @@ class TestMarkdownEditor:
         app = EditorTestApp("hello")
         async with app.run_test() as pilot:
             switcher = app.query_one(ContentSwitcher)
-            assert switcher.current == "md-editor"
+            assert switcher.current == "test-editor-editor"
 
     async def test_text_property_returns_content(self):
         app = EditorTestApp("hello")
@@ -36,7 +36,7 @@ class TestMarkdownEditor:
             editor.switch_to_preview()
             await pilot.pause()
             switcher = app.query_one(ContentSwitcher)
-            assert switcher.current == "md-preview"
+            assert switcher.current == "test-editor-preview"
 
     async def test_switch_back_to_editor_preserves_content(self):
         app = EditorTestApp("original")
@@ -60,7 +60,7 @@ class TestMarkdownEditor:
         app = EditorTestApp("")
         async with app.run_test() as pilot:
             editor = app.query_one(MarkdownEditor)
-            textarea = app.query_one("#md-editor", TextArea)
+            textarea = app.query_one(TextArea)
             textarea.insert("# Updated")
             editor.switch_to_preview()
             await pilot.pause()
@@ -70,7 +70,7 @@ class TestMarkdownEditor:
         app = EditorTestApp("start")
         async with app.run_test() as pilot:
             editor = app.query_one(MarkdownEditor)
-            textarea = app.query_one("#md-editor", TextArea)
+            textarea = app.query_one(TextArea)
             editor.switch_to_preview()
             await pilot.pause()
             editor.switch_to_editor()

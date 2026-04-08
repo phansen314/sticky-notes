@@ -16,21 +16,24 @@ class MarkdownEditor(Widget):
     def __init__(self, text: str = "", *, id: str | None = None, classes: str | None = None) -> None:
         super().__init__(id=id, classes=classes)
         self._initial_text = text
+        pfx = id or "md"
+        self._editor_id = f"{pfx}-editor"
+        self._preview_id = f"{pfx}-preview"
 
     def compose(self) -> ComposeResult:
-        with ContentSwitcher(initial="md-editor"):
-            yield TextArea(self._initial_text, id="md-editor", tab_behavior="indent")
-            with _PreviewScroll(id="md-preview"):
+        with ContentSwitcher(initial=self._editor_id):
+            yield TextArea(self._initial_text, id=self._editor_id, tab_behavior="indent")
+            with _PreviewScroll(id=self._preview_id):
                 yield Markdown(self._initial_text)
 
     @property
     def text(self) -> str:
-        return self.query_one("#md-editor", TextArea).text
+        return self.query_one(TextArea).text
 
     def switch_to_editor(self) -> None:
-        self.query_one(ContentSwitcher).current = "md-editor"
-        self.query_one("#md-editor", TextArea).focus()
+        self.query_one(ContentSwitcher).current = self._editor_id
+        self.query_one(TextArea).focus()
 
     def switch_to_preview(self) -> None:
         self.query_one(Markdown).update(self.text)
-        self.query_one(ContentSwitcher).current = "md-preview"
+        self.query_one(ContentSwitcher).current = self._preview_id

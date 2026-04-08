@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from textual.binding import Binding
 from textual.containers import VerticalScroll
 from textual.css.query import NoMatches
@@ -9,7 +11,7 @@ from textual.widgets import Button, Static
 from sticky_notes.tui.widgets.markdown_editor import MarkdownEditor
 
 
-class _ModalScroll(VerticalScroll, can_focus=False):
+class ModalScroll(VerticalScroll, can_focus=False):
     pass
 
 
@@ -35,6 +37,22 @@ class BaseEditModal(ModalScreen[dict | None]):
 
     def _show_error(self, msg: str) -> None:
         self.query_one("#modal-error", Static).update(msg)
+
+    def _clear_error(self) -> None:
+        self.query_one("#modal-error", Static).update("")
+
+    def action_save(self) -> None:
+        self._clear_error()
+        self._do_save()
+
+    def _do_save(self) -> None:
+        raise NotImplementedError("Subclasses must implement _do_save")
+
+    def _diff_and_dismiss(
+        self, entity_key: str, entity_id: int, original: object, form_values: dict[str, Any],
+    ) -> None:
+        changes = {k: v for k, v in form_values.items() if v != getattr(original, k)}
+        self.dismiss({entity_key: entity_id, "changes": changes} if changes else None)
 
     def action_editor_mode(self) -> None:
         try:

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -10,7 +8,7 @@ from textual.widgets import Button, Footer, Input, Select, Static
 from sticky_notes.formatting import format_timestamp, parse_date
 from sticky_notes.models import Project, Status
 from sticky_notes.service_models import TaskDetail
-from sticky_notes.tui.screens.base_edit import BaseEditModal, _ModalScroll
+from sticky_notes.tui.screens.base_edit import BaseEditModal, ModalScroll
 from sticky_notes.tui.widgets.markdown_editor import MarkdownEditor
 
 
@@ -32,7 +30,7 @@ class TaskEditModal(BaseEditModal):
         super().__init__()
 
     def compose(self) -> ComposeResult:
-        with _ModalScroll(classes="modal-container"):
+        with ModalScroll(classes="modal-container"):
             yield Static(str(self.detail.id), classes="modal-id")
 
             yield Static("Title", classes="form-label")
@@ -132,8 +130,7 @@ class TaskEditModal(BaseEditModal):
         except ValueError:
             return f"Invalid date format in {field_id.replace('task-edit-', '')}"
 
-    def action_save(self) -> None:
-        # Read values
+    def _do_save(self) -> None:
         title = self.query_one("#task-edit-title", Input).value.strip()
         if not title:
             self._show_error("Title is required")
@@ -148,7 +145,6 @@ class TaskEditModal(BaseEditModal):
         project_val = self.query_one("#task-edit-project", Select).value
         project_id = project_val if isinstance(project_val, int) else None
 
-        # Parse dates
         due_date = self._parse_date_field("task-edit-due")
         if isinstance(due_date, str):
             self._show_error(due_date)
@@ -162,13 +158,11 @@ class TaskEditModal(BaseEditModal):
             self._show_error(finish_date)
             return
 
-        # Validate date ordering
         if start_date is not None and finish_date is not None and finish_date < start_date:
             self._show_error("Finish date must be on or after start date")
             return
 
-        # Diff against original
-        form_values: dict[str, Any] = {
+        self._diff_and_dismiss("task_id", self.detail.id, self.detail, {
             "title": title,
             "description": description,
             "status_id": status_id,
@@ -177,16 +171,4 @@ class TaskEditModal(BaseEditModal):
             "due_date": due_date,
             "start_date": start_date,
             "finish_date": finish_date,
-        }
-
-        changes: dict[str, Any] = {}
-        for field, new_val in form_values.items():
-            old_val = getattr(self.detail, field)
-            if new_val != old_val:
-                changes[field] = new_val
-
-        if not changes:
-            self.dismiss(None)
-            return
-
-        self.dismiss({"task_id": self.detail.id, "changes": changes})
+        })

@@ -3,16 +3,15 @@ from __future__ import annotations
 
 import pytest
 
-from textual.app import App, ComposeResult
 from textual.widgets import Input, Static, TextArea
-
-from sticky_notes.tui.widgets.markdown_editor import MarkdownEditor
 
 from sticky_notes.models import Group, Workspace
 from sticky_notes.service_models import GroupDetail, ProjectDetail
 from sticky_notes.tui.screens.group_edit import GroupEditModal
 from sticky_notes.tui.screens.project_edit import ProjectEditModal
 from sticky_notes.tui.screens.workspace_edit import WorkspaceEditModal
+
+from helpers import ModalTestApp
 
 
 # ---- Factories ----
@@ -60,26 +59,6 @@ def make_workspace(**overrides) -> Workspace:
     return Workspace(**defaults)
 
 
-# ---- Test harness ----
-
-
-class ModalTestApp(App):
-    result: dict | None = "NOT_SET"
-
-    def __init__(self, modal) -> None:
-        super().__init__()
-        self._modal = modal
-
-    def compose(self) -> ComposeResult:
-        return []
-
-    def on_mount(self) -> None:
-        self.push_screen(self._modal, callback=self._capture)
-
-    def _capture(self, result: dict | None) -> None:
-        self.result = result
-
-
 # ---- Project edit modal tests ----
 
 
@@ -121,7 +100,7 @@ class TestProjectEditModal:
         app = ModalTestApp(ProjectEditModal(make_project_detail()))
         async with app.run_test() as pilot:
             modal = app.screen
-            textarea = modal.query_one("#md-editor", TextArea)
+            textarea = modal.query_one(TextArea)
             textarea.clear()
             textarea.insert("new desc")
             modal.action_save()
@@ -132,7 +111,7 @@ class TestProjectEditModal:
         app = ModalTestApp(ProjectEditModal(make_project_detail(description="something")))
         async with app.run_test() as pilot:
             modal = app.screen
-            textarea = modal.query_one("#md-editor", TextArea)
+            textarea = modal.query_one(TextArea)
             textarea.clear()
             modal.action_save()
             await pilot.pause()
@@ -143,7 +122,7 @@ class TestProjectEditModal:
         async with app.run_test() as pilot:
             modal = app.screen
             modal.query_one("#project-edit-name", Input).value = "Beta"
-            textarea = modal.query_one("#md-editor", TextArea)
+            textarea = modal.query_one(TextArea)
             textarea.clear()
             textarea.insert("updated")
             modal.action_save()

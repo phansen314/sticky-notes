@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import pytest
 
-from textual.app import App, ComposeResult
 from textual.widgets import Input, Select, Static, TextArea
-
-from sticky_notes.tui.widgets.markdown_editor import MarkdownEditor
 
 from sticky_notes.models import Project, Status
 from sticky_notes.service_models import TaskDetail
 from sticky_notes.tui.screens.task_edit import TaskEditModal
+
+from helpers import ModalTestApp
 
 
 def make_detail(**overrides) -> TaskDetail:
@@ -48,23 +47,6 @@ STATUSES = (
 PROJECTS = (
     Project(id=1, workspace_id=1, name="Alpha", description=None, archived=False, created_at=0),
 )
-
-
-class ModalTestApp(App):
-    result: dict | None = "NOT_SET"
-
-    def __init__(self, modal: TaskEditModal) -> None:
-        super().__init__()
-        self._modal = modal
-
-    def compose(self) -> ComposeResult:
-        return []
-
-    def on_mount(self) -> None:
-        self.push_screen(self._modal, callback=self._capture)
-
-    def _capture(self, result: dict | None) -> None:
-        self.result = result
 
 
 def _make_app(**detail_overrides) -> ModalTestApp:
@@ -139,7 +121,7 @@ class TestSaveFieldChanges:
         app = _make_app()
         async with app.run_test() as pilot:
             modal = app.screen
-            textarea = modal.query_one("#md-editor", TextArea)
+            textarea = modal.query_one(TextArea)
             textarea.clear()
             textarea.insert("new desc")
             modal.action_save()
@@ -150,7 +132,7 @@ class TestSaveFieldChanges:
         app = _make_app(description="something")
         async with app.run_test() as pilot:
             modal = app.screen
-            textarea = modal.query_one("#md-editor", TextArea)
+            textarea = modal.query_one(TextArea)
             textarea.clear()
             modal.action_save()
             await pilot.pause()

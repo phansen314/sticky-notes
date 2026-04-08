@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-from typing import Any
-
 from textual.app import ComposeResult
 from textual.containers import Horizontal
 from textual.widgets import Button, Footer, Input, Static
 
 from sticky_notes.service_models import GroupDetail
-from sticky_notes.tui.screens.base_edit import BaseEditModal, _ModalScroll
+from sticky_notes.tui.screens.base_edit import BaseEditModal, ModalScroll
 
 
 class GroupEditModal(BaseEditModal):
@@ -16,7 +14,7 @@ class GroupEditModal(BaseEditModal):
         super().__init__()
 
     def compose(self) -> ComposeResult:
-        with _ModalScroll(classes="modal-container"):
+        with ModalScroll(classes="modal-container"):
             yield Static(str(self.detail.id), classes="modal-id")
 
             yield Static("Title", classes="form-label")
@@ -36,18 +34,10 @@ class GroupEditModal(BaseEditModal):
     def on_mount(self) -> None:
         self.query_one("#group-edit-title", Input).focus()
 
-    def action_save(self) -> None:
+    def _do_save(self) -> None:
         title = self.query_one("#group-edit-title", Input).value.strip()
         if not title:
             self._show_error("Title is required")
             return
 
-        changes: dict[str, Any] = {}
-        if title != self.detail.title:
-            changes["title"] = title
-
-        if not changes:
-            self.dismiss(None)
-            return
-
-        self.dismiss({"group_id": self.detail.id, "changes": changes})
+        self._diff_and_dismiss("group_id", self.detail.id, self.detail, {"title": title})

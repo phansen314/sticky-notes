@@ -1,27 +1,25 @@
 from __future__ import annotations
 
-from typing import Any
-
 from textual.app import ComposeResult
 from textual.containers import Horizontal
 from textual.widgets import Button, Footer, Input, Static
 
 from sticky_notes.models import Workspace
-from sticky_notes.tui.screens.base_edit import BaseEditModal, _ModalScroll
+from sticky_notes.tui.screens.base_edit import BaseEditModal, ModalScroll
 
 
 class WorkspaceEditModal(BaseEditModal):
     def __init__(self, workspace: Workspace) -> None:
-        self.workspace = workspace
+        self.detail = workspace
         super().__init__()
 
     def compose(self) -> ComposeResult:
-        with _ModalScroll(classes="modal-container"):
-            yield Static(str(self.workspace.id), classes="modal-id")
+        with ModalScroll(classes="modal-container"):
+            yield Static(str(self.detail.id), classes="modal-id")
 
             yield Static("Name", classes="form-label")
             yield Input(
-                value=self.workspace.name,
+                value=self.detail.name,
                 placeholder="Workspace name",
                 id="workspace-edit-name",
                 classes="form-field",
@@ -36,18 +34,10 @@ class WorkspaceEditModal(BaseEditModal):
     def on_mount(self) -> None:
         self.query_one("#workspace-edit-name", Input).focus()
 
-    def action_save(self) -> None:
+    def _do_save(self) -> None:
         name = self.query_one("#workspace-edit-name", Input).value.strip()
         if not name:
             self._show_error("Name is required")
             return
 
-        changes: dict[str, Any] = {}
-        if name != self.workspace.name:
-            changes["name"] = name
-
-        if not changes:
-            self.dismiss(None)
-            return
-
-        self.dismiss({"workspace_id": self.workspace.id, "changes": changes})
+        self._diff_and_dismiss("workspace_id", self.detail.id, self.detail, {"name": name})
