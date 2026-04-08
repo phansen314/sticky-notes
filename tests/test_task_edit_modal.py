@@ -5,6 +5,8 @@ import pytest
 from textual.app import App, ComposeResult
 from textual.widgets import Input, Select, Static, TextArea
 
+from sticky_notes.tui.widgets.markdown_editor import MarkdownEditor
+
 from sticky_notes.models import Project, Status
 from sticky_notes.service_models import TaskDetail
 from sticky_notes.tui.screens.task_edit import TaskEditModal
@@ -95,7 +97,7 @@ class TestSaveValidation:
             modal.query_one("#task-edit-title", Input).value = ""
             modal.action_save()
             await pilot.pause()
-            error = modal.query_one("#task-edit-error", Static)
+            error = modal.query_one("#modal-error", Static)
             assert "Title is required" in str(error.render())
             assert app.result == "NOT_SET"
 
@@ -106,7 +108,7 @@ class TestSaveValidation:
             modal.query_one("#task-edit-due", Input).value = "not-a-date"
             modal.action_save()
             await pilot.pause()
-            error = modal.query_one("#task-edit-error", Static)
+            error = modal.query_one("#modal-error", Static)
             assert "Invalid date" in str(error.render())
             assert app.result == "NOT_SET"
 
@@ -118,7 +120,7 @@ class TestSaveValidation:
             modal.query_one("#task-edit-finish", Input).value = "2026-05-01"
             modal.action_save()
             await pilot.pause()
-            error = modal.query_one("#task-edit-error", Static)
+            error = modal.query_one("#modal-error", Static)
             assert "Finish date" in str(error.render())
             assert app.result == "NOT_SET"
 
@@ -137,7 +139,7 @@ class TestSaveFieldChanges:
         app = _make_app()
         async with app.run_test() as pilot:
             modal = app.screen
-            textarea = modal.query_one("#task-edit-desc", TextArea)
+            textarea = modal.query_one("#md-editor", TextArea)
             textarea.clear()
             textarea.insert("new desc")
             modal.action_save()
@@ -148,7 +150,7 @@ class TestSaveFieldChanges:
         app = _make_app(description="something")
         async with app.run_test() as pilot:
             modal = app.screen
-            textarea = modal.query_one("#task-edit-desc", TextArea)
+            textarea = modal.query_one("#md-editor", TextArea)
             textarea.clear()
             modal.action_save()
             await pilot.pause()

@@ -4,21 +4,20 @@ from typing import Any
 
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.screen import ModalScreen
-from textual.widgets import Button, Footer, Input, Label, Select, Static, TextArea
+from textual.containers import Horizontal, Vertical
+from textual.widgets import Button, Footer, Input, Select, Static
 
 from sticky_notes.formatting import format_timestamp, parse_date
 from sticky_notes.models import Project, Status
 from sticky_notes.service_models import TaskDetail
+from sticky_notes.tui.screens.base_edit import BaseEditModal, _ModalScroll
+from sticky_notes.tui.widgets.markdown_editor import MarkdownEditor
 
 
-class TaskEditModal(ModalScreen[dict | None]):
-    BINDINGS = [
-        Binding("escape", "dismiss", "Close", priority=True),
-        Binding("ctrl+s", "save", "Save"),
-        Binding("ctrl+n", "next_field", "Next", show=True),
-        Binding("ctrl+m", "prev_field", "Prev", show=True),
+class TaskEditModal(BaseEditModal):
+    BINDINGS = BaseEditModal.BINDINGS + [
+        Binding("alt+e", "editor_mode", "Edit MD", show=True),
+        Binding("alt+p", "preview_mode", "Preview MD", show=True),
     ]
 
     def __init__(
@@ -33,8 +32,8 @@ class TaskEditModal(ModalScreen[dict | None]):
         super().__init__()
 
     def compose(self) -> ComposeResult:
-        with VerticalScroll(id="task-edit-container"):
-            yield Label(str(self.detail.id), id="task-edit-id")
+        with _ModalScroll(classes="modal-container"):
+            yield Static(str(self.detail.id), classes="modal-id")
 
             yield Static("Title", classes="form-label")
             yield Input(
@@ -44,12 +43,11 @@ class TaskEditModal(ModalScreen[dict | None]):
                 classes="form-field",
             )
 
-            yield Static("Description", classes="form-label")
-            yield TextArea(
+            yield Static("Description (alt+e edit | alt+p preview)", classes="form-label")
+            yield MarkdownEditor(
                 self.detail.description or "",
                 id="task-edit-desc",
                 classes="form-field",
-                tab_behavior="indent",
             )
 
             status_options = [(s.name, s.id) for s in self._statuses]
@@ -115,29 +113,14 @@ class TaskEditModal(ModalScreen[dict | None]):
                         classes="form-field",
                     )
 
-            yield Static("", id="task-edit-error")
-            with Horizontal(id="task-edit-buttons"):
-                yield Button("Save", variant="primary", id="task-edit-save")
-                yield Button("Cancel", id="task-edit-cancel")
+            yield Static("", id="modal-error", classes="modal-error")
+            with Horizontal(classes="modal-buttons"):
+                yield Button("Save", variant="primary", id="modal-save")
+                yield Button("Cancel", id="modal-cancel")
         yield Footer()
 
     def on_mount(self) -> None:
         self.query_one("#task-edit-title", Input).focus()
-
-    def action_next_field(self) -> None:
-        self.focus_next()
-
-    def action_prev_field(self) -> None:
-        self.focus_previous()
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "task-edit-save":
-            self.action_save()
-        elif event.button.id == "task-edit-cancel":
-            self.dismiss(None)
-
-    def _show_error(self, msg: str) -> None:
-        self.query_one("#task-edit-error", Static).update(msg)
 
     def _parse_date_field(self, field_id: str) -> int | None | str:
         """Return parsed timestamp, None for empty, or error string."""
@@ -156,7 +139,7 @@ class TaskEditModal(ModalScreen[dict | None]):
             self._show_error("Title is required")
             return
 
-        desc_text = self.query_one("#task-edit-desc", TextArea).text.strip()
+        desc_text = self.query_one("#task-edit-desc", MarkdownEditor).text.strip()
         description = desc_text or None
 
         status_id = self.query_one("#task-edit-status", Select).value

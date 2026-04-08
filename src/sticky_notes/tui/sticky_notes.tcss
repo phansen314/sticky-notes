@@ -74,11 +74,13 @@ Header {
     border: round green;
 }
 
-TaskEditModal {
+/* ---- Shared edit modal styles ---- */
+
+BaseEditModal {
     align: center middle;
 }
 
-#task-edit-container {
+.modal-container {
     width: 90%;
     max-height: 85%;
     padding: 1 2;
@@ -86,7 +88,7 @@ TaskEditModal {
     background: $background;
 }
 
-#task-edit-id {
+.modal-id {
     width: 1fr;
     text-style: bold;
     text-align: center;
@@ -101,10 +103,6 @@ TaskEditModal {
     margin-bottom: 1;
 }
 
-#task-edit-desc {
-    height: 5;
-}
-
 .form-row {
     height: auto;
 }
@@ -115,132 +113,25 @@ TaskEditModal {
     height: auto;
 }
 
-#task-edit-error {
+.modal-error {
     color: $error;
     text-align: center;
     margin-top: 1;
 }
 
-#task-edit-buttons {
+.modal-buttons {
     width: 100%;
     align: center middle;
     height: 3;
     margin-top: 1;
 }
 
-#task-edit-buttons Button {
+.modal-buttons Button {
     margin: 0 1;
 }
 
-ProjectEditModal {
-    align: center middle;
-}
+/* ---- Entity-specific overrides ---- */
 
-#project-edit-container {
-    width: 90%;
-    max-height: 85%;
-    padding: 1 2;
-    border: round green;
-    background: $background;
+MarkdownEditor {
+    height: 1fr;
 }
-
-#project-edit-id {
-    width: 1fr;
-    text-style: bold;
-    text-align: center;
-    margin-bottom: 1;
-}
-
-#project-edit-desc {
-    height: 5;
-}
-
-#project-edit-error {
-    color: $error;
-    text-align: center;
-    margin-top: 1;
-}
-
-#project-edit-buttons {
-    width: 100%;
-    align: center middle;
-    height: 3;
-    margin-top: 1;
-}
-
-#project-edit-buttons Button {
-    margin: 0 1;
-}
-
-GroupEditModal {
-    align: center middle;
-}
-
-#group-edit-container {
-    width: 90%;
-    max-height: 85%;
-    padding: 1 2;
-    border: round green;
-    background: $background;
-}
-
-#group-edit-id {
-    width: 1fr;
-    text-style: bold;
-    text-align: center;
-    margin-bottom: 1;
-}
-
-#group-edit-error {
-    color: $error;
-    text-align: center;
-    margin-top: 1;
-}
-
-#group-edit-buttons {
-    width: 100%;
-    align: center middle;
-    height: 3;
-    margin-top: 1;
-}
-
-#group-edit-buttons Button {
-    margin: 0 1;
-}
-
-WorkspaceEditModal {
-    align: center middle;
-}
-
-#workspace-edit-container {
-    width: 90%;
-    max-height: 85%;
-    padding: 1 2;
-    border: round green;
-    background: $background;
-}
-
-#workspace-edit-id {
-    width: 1fr;
-    text-style: bold;
-    text-align: center;
-    margin-bottom: 1;
-}
-
-#workspace-edit-error {
-    color: $error;
-    text-align: center;
-    margin-top: 1;
-}
-
-#workspace-edit-buttons {
-    width: 100%;
-    align: center middle;
-    height: 3;
-    margin-top: 1;
-}
-
-#workspace-edit-buttons Button {
-    margin: 0 1;
-}
-

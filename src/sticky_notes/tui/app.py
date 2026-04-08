@@ -14,7 +14,7 @@ from textual.widgets import Header, Footer
 from sticky_notes.active_workspace import get_active_workspace_id
 from sticky_notes.connection import DEFAULT_DB_PATH, get_connection, init_db
 from sticky_notes.models import Group, Project, Status, Task, Workspace
-from sticky_notes.service import get_group_detail, get_project_detail, get_task_detail, update_group, update_project, update_task, update_workspace
+from sticky_notes.service import get_group_detail, get_project_detail, get_task_detail, get_workspace, update_group, update_project, update_task, update_workspace
 from sticky_notes.tui.config import TuiConfig, load_config
 from sticky_notes.tui.model import WorkspaceModel, load_workspace_model
 from sticky_notes.tui.screens import GroupEditModal, ProjectEditModal, TaskEditModal, WorkspaceEditModal
@@ -166,7 +166,11 @@ class StickyNotesApp(App):
     async def _on_task_edit_dismiss(self, result: dict | None) -> None:
         if result is None:
             return
-        update_task(self.conn, result["task_id"], result["changes"], source="tui")
+        try:
+            update_task(self.conn, result["task_id"], result["changes"], source="tui")
+        except ValueError as e:
+            self.notify(str(e), severity="error")
+            return
         await self._refresh()
 
     def _edit_project(self, project: Project) -> None:
@@ -179,7 +183,11 @@ class StickyNotesApp(App):
     async def _on_project_edit_dismiss(self, result: dict | None) -> None:
         if result is None:
             return
-        update_project(self.conn, result["project_id"], result["changes"])
+        try:
+            update_project(self.conn, result["project_id"], result["changes"])
+        except ValueError as e:
+            self.notify(str(e), severity="error")
+            return
         await self._refresh()
 
     def _edit_group(self, group: Group) -> None:
@@ -192,19 +200,28 @@ class StickyNotesApp(App):
     async def _on_group_edit_dismiss(self, result: dict | None) -> None:
         if result is None:
             return
-        update_group(self.conn, result["group_id"], result["changes"])
+        try:
+            update_group(self.conn, result["group_id"], result["changes"])
+        except ValueError as e:
+            self.notify(str(e), severity="error")
+            return
         await self._refresh()
 
     def _edit_workspace(self, workspace: Workspace) -> None:
+        fresh = get_workspace(self.conn, workspace.id)
         self.push_screen(
-            WorkspaceEditModal(workspace),
+            WorkspaceEditModal(fresh),
             callback=self._on_workspace_edit_dismiss,
         )
 
     async def _on_workspace_edit_dismiss(self, result: dict | None) -> None:
         if result is None:
             return
-        update_workspace(self.conn, result["workspace_id"], result["changes"])
+        try:
+            update_workspace(self.conn, result["workspace_id"], result["changes"])
+        except ValueError as e:
+            self.notify(str(e), severity="error")
+            return
         await self._refresh()
 
     def _order_statuses(self, statuses: tuple[Status, ...]) -> tuple[Status, ...]:
