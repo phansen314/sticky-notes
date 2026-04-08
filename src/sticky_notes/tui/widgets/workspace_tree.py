@@ -112,6 +112,22 @@ class WorkspaceTree(Tree[Workspace | Project | Group | Task]):
             self.scroll_to_node(node.children[0])
         event.stop()
 
+    # ijkl aliases (home-row navigation)
+
+    def key_i(self, event: events.Key) -> None:
+        self.action_cursor_up()
+        event.stop()
+
+    def key_k(self, event: events.Key) -> None:
+        self.action_cursor_down()
+        event.stop()
+
+    def key_j(self, event: events.Key) -> None:
+        self.key_left(event)
+
+    def key_l(self, event: events.Key) -> None:
+        self.key_right(event)
+
     def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
         event.stop()
         node_data = event.node.data

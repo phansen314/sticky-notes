@@ -109,3 +109,21 @@ class KanbanBoard(Horizontal):
         if self._navigate(1, 0):
             event.stop()
 
+    # ijkl aliases (home-row navigation)
+
+    def key_i(self, event: events.Key) -> None:
+        if self._navigate(0, -1):
+            event.stop()
+
+    def key_k(self, event: events.Key) -> None:
+        if self._navigate(0, 1):
+            event.stop()
+
+    def key_j(self, event: events.Key) -> None:
+        if self._navigate(-1, 0):
+            event.stop()
+
+    def key_l(self, event: events.Key) -> None:
+        if self._navigate(1, 0):
+            event.stop()
+

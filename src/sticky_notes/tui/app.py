@@ -30,8 +30,8 @@ class StickyNotesApp(App):
     CSS_PATH = "sticky_notes.tcss"
     TITLE = "\U0001f4cc Sticky Notes \U0001f4cc"
     BINDINGS = [
-        Binding("w", "focus_tree", "Workspace", show=True),
-        Binding("k", "focus_kanban", "Kanban", show=True),
+        Binding("alt+w", "focus_tree", "Workspace", show=True),
+        Binding("alt+k", "focus_kanban", "Kanban", show=True),
         Binding("r", "refresh", "Refresh", show=True),
         Binding("e", "edit", "Edit", show=True),
         Binding("ctrl+q", "quit", "Quit", show=True),
