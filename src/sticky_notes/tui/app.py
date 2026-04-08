@@ -9,6 +9,7 @@ from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical, Horizontal
+from textual.message import Message
 from textual.widgets import Header, Footer
 
 from sticky_notes.active_workspace import get_active_workspace_id
@@ -26,14 +27,25 @@ class ActivePanel(StrEnum):
     KANBAN = "kanban"
 
 
+class _RefreshRequested(Message):
+    """Coalescing refresh message — duplicates in the queue merge into one."""
+
+    def can_replace(self, message: Message) -> bool:
+        return isinstance(message, _RefreshRequested)
+
+
 class StickyNotesApp(App):
     CSS_PATH = "sticky_notes.tcss"
     TITLE = "\U0001f4cc Sticky Notes \U0001f4cc"
     BINDINGS = [
         Binding("alt+w", "focus_tree", "Workspace", show=True),
-        Binding("alt+k", "focus_kanban", "Kanban", show=True),
+        Binding("alt+b", "focus_kanban", "Board", show=True),
         Binding("r", "refresh", "Refresh", show=True),
         Binding("e", "edit", "Edit", show=True),
+        Binding("alt+j", "status_left", "◀ Status", show=False),
+        Binding("alt+left", "status_left", show=False),
+        Binding("alt+l", "status_right", "Status ▶", show=False),
+        Binding("alt+right", "status_right", show=False),
         Binding("ctrl+q", "quit", "Quit", show=True),
     ]
 
@@ -78,12 +90,15 @@ class StickyNotesApp(App):
         tree.load(model)
         await kanban.load(model)
         tree.focus()
-        self.set_interval(self.config.auto_refresh_seconds, self._refresh)
+        self.set_interval(self.config.auto_refresh_seconds, self.request_refresh)
 
-    async def action_refresh(self) -> None:
-        await self._refresh()
+    def request_refresh(self) -> None:
+        self.post_message(_RefreshRequested())
 
-    async def _refresh(self) -> None:
+    def action_refresh(self) -> None:
+        self.request_refresh()
+
+    async def on__refresh_requested(self, event: _RefreshRequested) -> None:
         if self._workspace_id is None:
             return
         try:
@@ -99,7 +114,7 @@ class StickyNotesApp(App):
             prev_task_id = self._kanban_last_focused.task_data.id
         self._model = model
         tree.load(model)
-        await kanban.load(model)
+        await kanban.sync(model)
         # Restore focus
         if self.active_panel == ActivePanel.KANBAN and prev_task_id is not None:
             for card in self.query(TaskCard):
@@ -124,6 +139,12 @@ class StickyNotesApp(App):
         elif isinstance(widget, TaskCard):
             self.active_panel = ActivePanel.KANBAN
             self._kanban_last_focused = widget
+
+    def action_status_left(self) -> None:
+        self.query_one(KanbanBoard)._move_status(-1)
+
+    def action_status_right(self) -> None:
+        self.query_one(KanbanBoard)._move_status(1)
 
     def action_focus_tree(self) -> None:
         self.set_focus(self.query_one(WorkspaceTree))
@@ -163,7 +184,7 @@ class StickyNotesApp(App):
             callback=self._on_task_edit_dismiss,
         )
 
-    async def _on_task_edit_dismiss(self, result: dict | None) -> None:
+    def _on_task_edit_dismiss(self, result: dict | None) -> None:
         if result is None:
             return
         try:
@@ -171,7 +192,7 @@ class StickyNotesApp(App):
         except ValueError as e:
             self.notify(str(e), severity="error")
             return
-        await self._refresh()
+        self.request_refresh()
 
     def _edit_project(self, project: Project) -> None:
         detail = get_project_detail(self.conn, project.id)
@@ -180,7 +201,7 @@ class StickyNotesApp(App):
             callback=self._on_project_edit_dismiss,
         )
 
-    async def _on_project_edit_dismiss(self, result: dict | None) -> None:
+    def _on_project_edit_dismiss(self, result: dict | None) -> None:
         if result is None:
             return
         try:
@@ -188,7 +209,7 @@ class StickyNotesApp(App):
         except ValueError as e:
             self.notify(str(e), severity="error")
             return
-        await self._refresh()
+        self.request_refresh()
 
     def _edit_group(self, group: Group) -> None:
         detail = get_group_detail(self.conn, group.id)
@@ -197,7 +218,7 @@ class StickyNotesApp(App):
             callback=self._on_group_edit_dismiss,
         )
 
-    async def _on_group_edit_dismiss(self, result: dict | None) -> None:
+    def _on_group_edit_dismiss(self, result: dict | None) -> None:
         if result is None:
             return
         try:
@@ -205,7 +226,7 @@ class StickyNotesApp(App):
         except ValueError as e:
             self.notify(str(e), severity="error")
             return
-        await self._refresh()
+        self.request_refresh()
 
     def _edit_workspace(self, workspace: Workspace) -> None:
         fresh = get_workspace(self.conn, workspace.id)
@@ -214,7 +235,7 @@ class StickyNotesApp(App):
             callback=self._on_workspace_edit_dismiss,
         )
 
-    async def _on_workspace_edit_dismiss(self, result: dict | None) -> None:
+    def _on_workspace_edit_dismiss(self, result: dict | None) -> None:
         if result is None:
             return
         try:
@@ -222,7 +243,15 @@ class StickyNotesApp(App):
         except ValueError as e:
             self.notify(str(e), severity="error")
             return
-        await self._refresh()
+        self.request_refresh()
+
+    async def on_kanban_board_task_status_move(self, event: KanbanBoard.TaskStatusMove) -> None:
+        try:
+            update_task(self.conn, event.task.id, {"status_id": event.new_status_id}, source="tui")
+        except ValueError as e:
+            self.notify(str(e), severity="error")
+            return
+        self.request_refresh()
 
     def _order_statuses(self, statuses: tuple[Status, ...]) -> tuple[Status, ...]:
         order = self.config.status_order
@@ -230,4 +259,3 @@ class StickyNotesApp(App):
             return statuses
         order_map = {sid: i for i, sid in enumerate(order)}
         return tuple(sorted(statuses, key=lambda s: (order_map.get(s.id, len(order)), s.id)))
-

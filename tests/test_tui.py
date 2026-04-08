@@ -9,7 +9,7 @@ from sticky_notes.active_workspace import set_active_workspace_id
 from sticky_notes.connection import get_connection, init_db
 from sticky_notes.models import Group, Project, Task
 from sticky_notes.tui.app import StickyNotesApp
-from sticky_notes.tui.widgets import TaskCard
+from sticky_notes.tui.widgets import KanbanBoard, TaskCard
 
 
 class TestTreePopulation:
@@ -202,3 +202,166 @@ class TestKanbanColumns:
         async with app.run_test():
             cols = app.query(".status-col")
             assert len(cols) == 0
+
+
+class TestStatusMove:
+    """Tests for shift+arrow / shift+ijkl task status movement."""
+
+    @pytest.fixture
+    def app(self, seeded_tui_db):
+        db_path, ids = seeded_tui_db
+        return StickyNotesApp(db_path=db_path), ids
+
+    def _col_title(self, app, status_id: int) -> str:
+        col = app.query_one(f"#status-col-{status_id}")
+        return str(col.query_one(".status-col-title").render())
+
+    def _card_column_id(self, card: TaskCard) -> str:
+        """Walk up to the .status-col ancestor to find which column a card is in."""
+        node = card.parent
+        while node is not None:
+            if hasattr(node, "id") and node.id and node.id.startswith("status-col-"):
+                return node.id
+            node = node.parent
+        raise AssertionError("Card not inside a status column")
+
+    async def test_alt_right_moves_to_next_status(self, app):
+        app, ids = app
+        async with app.run_test() as pilot:
+            # Focus a Todo card (task 1: Design API schema)
+            todo_col = app.query_one(f"#status-col-{ids['status_ids']['todo']}")
+            card = todo_col.query(TaskCard).first()
+            app.set_focus(card)
+            await pilot.pause()
+            task_id = card.task_data.id
+
+            await pilot.press("alt+right")
+            await pilot.pause()
+            await pilot.pause()
+
+            # Card should now be in the In Progress column
+            new_card = next(c for c in app.query(TaskCard) if c.task_data.id == task_id)
+            assert self._card_column_id(new_card) == f"status-col-{ids['status_ids']['in_progress']}"
+
+    async def test_alt_left_moves_to_previous_status(self, app):
+        app, ids = app
+        async with app.run_test() as pilot:
+            ip_col = app.query_one(f"#status-col-{ids['status_ids']['in_progress']}")
+            card = ip_col.query(TaskCard).first()
+            app.set_focus(card)
+            await pilot.pause()
+            task_id = card.task_data.id
+
+            await pilot.press("alt+left")
+            await pilot.pause()
+            await pilot.pause()
+
+            new_card = next(c for c in app.query(TaskCard) if c.task_data.id == task_id)
+            assert self._card_column_id(new_card) == f"status-col-{ids['status_ids']['todo']}"
+
+    async def test_no_wrap_at_rightmost_column(self, app):
+        app, ids = app
+        async with app.run_test() as pilot:
+            done_col = app.query_one(f"#status-col-{ids['status_ids']['done']}")
+            card = done_col.query(TaskCard).first()
+            app.set_focus(card)
+            await pilot.pause()
+            task_id = card.task_data.id
+
+            await pilot.press("alt+right")
+            await pilot.pause()
+            await pilot.pause()
+
+            # Card should still be in Done
+            new_card = next(c for c in app.query(TaskCard) if c.task_data.id == task_id)
+            assert self._card_column_id(new_card) == f"status-col-{ids['status_ids']['done']}"
+
+    async def test_no_wrap_at_leftmost_column(self, app):
+        app, ids = app
+        async with app.run_test() as pilot:
+            todo_col = app.query_one(f"#status-col-{ids['status_ids']['todo']}")
+            card = todo_col.query(TaskCard).first()
+            app.set_focus(card)
+            await pilot.pause()
+            task_id = card.task_data.id
+
+            await pilot.press("alt+left")
+            await pilot.pause()
+            await pilot.pause()
+
+            new_card = next(c for c in app.query(TaskCard) if c.task_data.id == task_id)
+            assert self._card_column_id(new_card) == f"status-col-{ids['status_ids']['todo']}"
+
+    async def test_alt_l_alias(self, app):
+        app, ids = app
+        async with app.run_test() as pilot:
+            todo_col = app.query_one(f"#status-col-{ids['status_ids']['todo']}")
+            card = todo_col.query(TaskCard).first()
+            app.set_focus(card)
+            await pilot.pause()
+            task_id = card.task_data.id
+
+            await pilot.press("alt+l")
+            await pilot.pause()
+            await pilot.pause()
+
+            new_card = next(c for c in app.query(TaskCard) if c.task_data.id == task_id)
+            assert self._card_column_id(new_card) == f"status-col-{ids['status_ids']['in_progress']}"
+
+    async def test_alt_j_alias(self, app):
+        app, ids = app
+        async with app.run_test() as pilot:
+            ip_col = app.query_one(f"#status-col-{ids['status_ids']['in_progress']}")
+            card = ip_col.query(TaskCard).first()
+            app.set_focus(card)
+            await pilot.pause()
+            task_id = card.task_data.id
+
+            await pilot.press("alt+j")
+            await pilot.pause()
+            await pilot.pause()
+
+            new_card = next(c for c in app.query(TaskCard) if c.task_data.id == task_id)
+            assert self._card_column_id(new_card) == f"status-col-{ids['status_ids']['todo']}"
+
+    async def test_column_titles_update_after_move(self, app):
+        app, ids = app
+        async with app.run_test() as pilot:
+            todo_id = ids["status_ids"]["todo"]
+            ip_id = ids["status_ids"]["in_progress"]
+
+            assert self._col_title(app, todo_id) == "(4) Todo"
+            assert self._col_title(app, ip_id) == "(2) In Progress"
+
+            todo_col = app.query_one(f"#status-col-{todo_id}")
+            card = todo_col.query(TaskCard).first()
+            app.set_focus(card)
+            await pilot.pause()
+
+            await pilot.press("alt+right")
+            await pilot.pause()
+            await pilot.pause()
+
+            assert self._col_title(app, todo_id) == "(3) Todo"
+            assert self._col_title(app, ip_id) == "(3) In Progress"
+
+    async def test_model_consistent_after_move(self, app):
+        app, ids = app
+        async with app.run_test() as pilot:
+            todo_col = app.query_one(f"#status-col-{ids['status_ids']['todo']}")
+            card = todo_col.query(TaskCard).first()
+            app.set_focus(card)
+            await pilot.pause()
+            task_id = card.task_data.id
+
+            await pilot.press("alt+right")
+            await pilot.pause()
+            await pilot.pause()
+
+            # Model should reflect the new status
+            model_task = next(t for t in app._model.all_tasks if t.id == task_id)
+            assert model_task.status_id == ids["status_ids"]["in_progress"]
+
+            # Card task_data should also be current
+            new_card = next(c for c in app.query(TaskCard) if c.task_data.id == task_id)
+            assert new_card.task_data.status_id == ids["status_ids"]["in_progress"]
