@@ -2,101 +2,141 @@ Screen {
     layout: vertical;
 }
 
-#settings-container {
-    padding: 1 2;
-    overflow-y: auto;
-}
-
-.section-title {
-    text-align: center;
+Header {
+    background: $background;
+    color: white;
     text-style: bold;
-    padding: 1 0;
 }
 
-.section-heading {
-    text-style: bold;
-    margin-top: 1;
-    margin-bottom: 1;
-    color: $accent;
-}
-
-.setting-row {
-    height: 3;
-    align: left middle;
-    margin-bottom: 1;
-}
-
-.setting-row .label {
-    width: 30;
-    padding: 0 1;
-}
-
-.setting-row Select {
-    width: 30;
-}
-
-.setting-row Switch {
-    width: auto;
-}
-
-#board-header {
-    text-style: bold;
-    text-align: center;
-    height: 1;
-    dock: top;
-}
-
-#columns-container {
+#main-panels {
     height: 1fr;
 }
 
-#no-board-message, #no-columns-message {
-    width: 100%;
-    height: 100%;
-    content-align: center middle;
-    text-align: center;
+#workspaces-panel {
+    width: 25%;
+    border: round $surface-lighten-2;
 }
 
-.column-header {
+#workspaces-tree {
+    background: $background;
+}
+
+#workspaces-tree:focus {
+    background: $background;
+    background-tint: transparent;
+    tint: transparent;
+}
+
+#kanban-panel {
+    width: 1fr;
+    border: round $surface-lighten-2;
+}
+
+#kanban-columns {
+    height: 1fr;
+}
+
+.status-col {
+    width: 1fr;
+    border-left: solid $surface-lighten-2;
+}
+
+.status-col:first-child {
+    border-left: none;
+}
+
+.status-col-title {
+    width: 1fr;
     text-style: bold;
     text-align: center;
-    padding: 1 0;
-}
-
-BoardView TaskCard:focus {
-    border: solid $accent;
-    background: $surface-lighten-2;
-}
-
-BoardView ColumnWidget:focus-within {
-    border: solid $accent;
-}
-
-AllTasksScreen #all-tasks-container {
-    padding: 1 2;
-}
-
-AllTasksScreen .project-group-header {
-    text-style: bold;
-    margin-top: 1;
     padding: 0 1;
-    color: $accent;
+    border-bottom: solid $surface-lighten-2;
 }
 
-AllTasksScreen .column-sub-header {
-    margin-left: 2;
-    color: $text 70%;
+.task-card {
+    padding: 0 1;
+    border: round $surface-lighten-2;
 }
 
-AllTasksScreen TaskCard {
-    margin-left: 4;
+.task-card:focus {
+    border: round green;
 }
 
-AllTasksScreen TaskCard:focus {
-    border: solid $accent;
-    background: $surface-lighten-2;
+#workspaces-tree > .tree--cursor {
+    background: green;
 }
 
-ModalScreen {
-    background: $background 60%;
+#workspaces-panel:focus-within {
+    border: round green;
+}
+
+#kanban-panel:focus-within {
+    border: round green;
+}
+
+/* ---- Shared edit modal styles ---- */
+
+BaseEditModal {
+    align: center middle;
+}
+
+.modal-container {
+    width: 90%;
+    max-height: 85%;
+    padding: 1 2;
+    border: round green;
+    background: $background;
+}
+
+.modal-id {
+    width: 1fr;
+    text-style: bold;
+    text-align: center;
+    margin-bottom: 1;
+}
+
+.form-label {
+    margin-bottom: 0;
+}
+
+.form-field {
+    margin-bottom: 1;
+}
+
+.form-row {
+    height: auto;
+}
+
+.form-group {
+    width: 1fr;
+    margin: 0 1;
+    height: auto;
+}
+
+.modal-error {
+    color: $error;
+    text-align: center;
+    margin-top: 1;
+}
+
+.modal-buttons {
+    width: 100%;
+    align: center middle;
+    height: 3;
+    margin-top: 1;
+}
+
+.modal-buttons Button {
+    margin: 0 1;
+}
+
+.dep-info {
+    color: $text-muted;
+    margin-top: 1;
+}
+
+/* ---- Entity-specific overrides ---- */
+
+MarkdownEditor {
+    height: 1fr;
 }

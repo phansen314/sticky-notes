@@ -4,43 +4,64 @@ from __future__ import annotations
 
 import sqlite3
 
+from textual.app import App, ComposeResult
 
-def insert_board(
+
+class ModalTestApp(App):
+    """Reusable test harness: pushes a modal on mount and captures its result."""
+
+    result: dict | None = "NOT_SET"  # type: ignore[assignment]
+
+    def __init__(self, modal) -> None:
+        super().__init__()
+        self._modal = modal
+
+    def compose(self) -> ComposeResult:
+        return []
+
+    def on_mount(self) -> None:
+        self.push_screen(self._modal, callback=self._capture)
+
+    def _capture(self, result: dict | None) -> None:
+        self.result = result
+
+
+def insert_workspace(
     conn: sqlite3.Connection,
-    name: str = "board1",
+    name: str = "workspace1",
 ) -> int:
-    cur = conn.execute("INSERT INTO boards (name) VALUES (?)", (name,))
+    cur = conn.execute("INSERT INTO workspaces (name) VALUES (?)", (name,))
     return cur.lastrowid  # type: ignore[return-value]
 
 
 def insert_status(
     conn: sqlite3.Connection,
-    board_id: int,
+    workspace_id: int,
     name: str = "todo",
 ) -> int:
     cur = conn.execute(
-        "INSERT INTO statuses (board_id, name) VALUES (?, ?)",
-        (board_id, name),
+        "INSERT INTO statuses (workspace_id, name) VALUES (?, ?)",
+        (workspace_id, name),
     )
     return cur.lastrowid  # type: ignore[return-value]
 
 
 def insert_project(
     conn: sqlite3.Connection,
-    board_id: int,
+    workspace_id: int,
     name: str = "proj1",
     description: str | None = "desc",
 ) -> int:
     cur = conn.execute(
-        "INSERT INTO projects (board_id, name, description) VALUES (?, ?, ?)",
-        (board_id, name, description),
+        "INSERT INTO projects (workspace_id, name, description) VALUES (?, ?, ?)",
+        (workspace_id, name, description),
     )
     return cur.lastrowid  # type: ignore[return-value]
 
 
 def insert_task(
     conn: sqlite3.Connection,
-    board_id: int,
+    workspace_id: int,
     title: str,
     status_id: int,
     project_id: int | None = None,
@@ -48,9 +69,9 @@ def insert_task(
     due_date: int | None = None,
 ) -> int:
     cur = conn.execute(
-        "INSERT INTO tasks (board_id, title, status_id, project_id, priority, due_date) "
+        "INSERT INTO tasks (workspace_id, title, status_id, project_id, priority, due_date) "
         "VALUES (?, ?, ?, ?, ?, ?)",
-        (board_id, title, status_id, project_id, priority, due_date),
+        (workspace_id, title, status_id, project_id, priority, due_date),
     )
     return cur.lastrowid  # type: ignore[return-value]
 
@@ -61,9 +82,21 @@ def insert_task_dependency(
     depends_on_id: int,
 ) -> None:
     conn.execute(
-        "INSERT INTO task_dependencies (task_id, depends_on_id, board_id) "
-        "VALUES (?, ?, (SELECT board_id FROM tasks WHERE id = ?))",
+        "INSERT INTO task_dependencies (task_id, depends_on_id, workspace_id) "
+        "VALUES (?, ?, (SELECT workspace_id FROM tasks WHERE id = ?))",
         (task_id, depends_on_id, task_id),
+    )
+
+
+def insert_group_dependency(
+    conn: sqlite3.Connection,
+    group_id: int,
+    depends_on_id: int,
+) -> None:
+    conn.execute(
+        "INSERT INTO group_dependencies (group_id, depends_on_id, workspace_id) "
+        "VALUES (?, ?, (SELECT p.workspace_id FROM groups g JOIN projects p ON g.project_id = p.id WHERE g.id = ?))",
+        (group_id, depends_on_id, group_id),
     )
 
 
@@ -83,12 +116,12 @@ def insert_group(
 
 def insert_tag(
     conn: sqlite3.Connection,
-    board_id: int,
+    workspace_id: int,
     name: str = "tag1",
 ) -> int:
     cur = conn.execute(
-        "INSERT INTO tags (board_id, name) VALUES (?, ?)",
-        (board_id, name),
+        "INSERT INTO tags (workspace_id, name) VALUES (?, ?)",
+        (workspace_id, name),
     )
     return cur.lastrowid  # type: ignore[return-value]
 
@@ -99,8 +132,8 @@ def insert_task_tag(
     tag_id: int,
 ) -> None:
     conn.execute(
-        "INSERT INTO task_tags (task_id, tag_id, board_id) "
-        "VALUES (?, ?, (SELECT board_id FROM tasks WHERE id = ?))",
+        "INSERT INTO task_tags (task_id, tag_id, workspace_id) "
+        "VALUES (?, ?, (SELECT workspace_id FROM tasks WHERE id = ?))",
         (task_id, tag_id, task_id),
     )
 

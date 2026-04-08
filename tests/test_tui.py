@@ -5,1844 +5,363 @@ from pathlib import Path
 import pytest
 
 from sticky_notes import service
-from sticky_notes.connection import DEFAULT_DB_PATH, get_connection, init_db
+from sticky_notes.active_workspace import set_active_workspace_id
+from sticky_notes.connection import get_connection, init_db
+from sticky_notes.models import Group, Project, Task
 from sticky_notes.tui.app import StickyNotesApp
-from sticky_notes.tui.config import TuiConfig, load_config, save_config
-from sticky_notes.tui.screens.all_tasks import AllTasksScreen
-from sticky_notes.tui.screens.board_select import BoardSelectModal
-from sticky_notes.tui.screens.status_filter import StatusFilterModal
-from sticky_notes.tui.screens.confirm_dialog import ConfirmDialog
-from sticky_notes.tui.screens.move_task import MoveTaskModal
-from sticky_notes.tui.screens.project_select import ProjectSelectModal
-from sticky_notes.tui.screens.settings import SettingsScreen
-from sticky_notes.tui.screens.task_detail import TaskDetailModal
-from sticky_notes.tui.screens.task_form import TaskFormModal
-from sticky_notes.tui.widgets import BoardView, ColumnWidget, TaskCard
-from textual.widgets import Input, Markdown, Select, Static
+from sticky_notes.tui.widgets import KanbanBoard, TaskCard
 
 
-# ---- Config unit tests ----
+class TestTreePopulation:
+    @pytest.fixture
+    def app(self, seeded_tui_db):
+        db_path, ids = seeded_tui_db
+        return StickyNotesApp(db_path=db_path)
+
+    async def test_root_label_is_workspace_name(self, app):
+        async with app.run_test():
+            tree = app.query_one("#workspaces-tree")
+            assert str(tree.root.label) == "\U0001f4e6 (8) Coding"
+
+    async def test_project_node_exists(self, app):
+        async with app.run_test():
+            tree = app.query_one("#workspaces-tree")
+            project_nodes = [
+                n for n in tree.root.children if n.allow_expand
+            ]
+            assert len(project_nodes) == 1
+            assert str(project_nodes[0].label) == "\U0001f5c2\ufe0f (4) apr-api"
+
+    async def test_ungrouped_tasks_under_project(self, app):
+        async with app.run_test():
+            tree = app.query_one("#workspaces-tree")
+            proj_node = [n for n in tree.root.children if n.allow_expand][0]
+            task_leaves = [n for n in proj_node.children if not n.allow_expand]
+            assert len(task_leaves) == 4
+            titles = {str(n.label) for n in task_leaves}
+            assert "\U0001f4dd 1: Design API schema" in titles
+            assert "\U0001f4dd 2: Endpoint design" in titles
+
+    async def test_unassigned_tasks_after_projects(self, app):
+        async with app.run_test():
+            tree = app.query_one("#workspaces-tree")
+            children = list(tree.root.children)
+            # First child is the project node, rest are unassigned task leaves
+            assert children[0].allow_expand
+            unassigned = [n for n in children if not n.allow_expand]
+            assert len(unassigned) == 4
+
+    async def test_node_data_attached(self, app):
+        async with app.run_test():
+            tree = app.query_one("#workspaces-tree")
+            proj_node = [n for n in tree.root.children if n.allow_expand][0]
+            assert isinstance(proj_node.data, Project)
+            task_leaf = [n for n in proj_node.children if not n.allow_expand][0]
+            assert isinstance(task_leaf.data, Task)
 
 
-class TestTuiConfig:
-    def test_defaults(self):
-        config = TuiConfig()
-        assert config.theme == "dark"
-        assert config.show_task_descriptions is True
-        assert config.show_archived is False
-        assert config.confirm_archive is True
-        assert config.default_priority == 1
+class TestTreeReload:
+    @pytest.fixture
+    def app(self, seeded_tui_db):
+        db_path, ids = seeded_tui_db
+        return StickyNotesApp(db_path=db_path)
 
-    def test_load_missing_file(self, tmp_path: Path):
-        config = load_config(tmp_path / "nonexistent.toml")
-        assert config == TuiConfig()
+    async def test_reload_is_idempotent(self, app, seeded_tui_db):
+        db_path, ids = seeded_tui_db
+        async with app.run_test():
+            tree = app.query_one("#workspaces-tree")
+            first_count = len(list(tree.root.children))
+            # Reload with same model
+            from sticky_notes.tui.model import load_workspace_model
+            conn = app.conn
+            ws_id = ids["workspace_id"]
+            model = load_workspace_model(conn, ws_id)
+            tree.load(model)
+            second_count = len(list(tree.root.children))
+            assert first_count == second_count
 
-    def test_save_load_roundtrip(self, tmp_path: Path):
-        path = tmp_path / "tui.toml"
-        original = TuiConfig(
-            theme="light",
-            show_task_descriptions=False,
-            show_archived=True,
-            confirm_archive=False,
-            default_priority=3,
+
+class TestTreeNoActiveWorkspace:
+    async def test_no_workspace_shows_message(self, tmp_path):
+        db_path = tmp_path / "empty.db"
+        conn = get_connection(db_path)
+        init_db(conn)
+        conn.close()
+        app = StickyNotesApp(db_path=db_path)
+        async with app.run_test():
+            tree = app.query_one("#workspaces-tree")
+            assert str(tree.root.label) == "No active workspace"
+
+
+class TestTreeWithGroups:
+    @pytest.fixture
+    def grouped_tui_db(self, tmp_path):
+        db_path = tmp_path / "grouped.db"
+        conn = get_connection(db_path)
+        init_db(conn)
+        ws = service.create_workspace(conn, "Grouped")
+        status = service.create_status(conn, ws.id, "Todo")
+        proj = service.create_project(conn, ws.id, "myproj")
+        parent_grp = service.create_group(conn, proj.id, "parent-group")
+        child_grp = service.create_group(
+            conn, proj.id, "child-group", parent_id=parent_grp.id
         )
-        save_config(original, path)
-        loaded = load_config(path)
-        assert loaded.theme == "light"
-        assert loaded.show_task_descriptions is False
-        assert loaded.show_archived is True
-        assert loaded.confirm_archive is False
-        assert loaded.default_priority == 3
-
-    def test_save_creates_parent_dirs(self, tmp_path: Path):
-        path = tmp_path / "nested" / "dir" / "tui.toml"
-        save_config(TuiConfig(), path)
-        assert path.exists()
-
-    def test_load_partial_config(self, tmp_path: Path):
-        path = tmp_path / "tui.toml"
-        path.write_text('theme = "light"\n')
-        config = load_config(path)
-        assert config.theme == "light"
-        assert config.default_priority == 1  # default preserved
-
-    def test_save_format(self, tmp_path: Path):
-        path = tmp_path / "tui.toml"
-        save_config(TuiConfig(), path)
-        text = path.read_text()
-        assert 'theme = "dark"' in text
-        assert "show_task_descriptions = true" in text
-        assert "show_archived = false" in text
-        assert "default_priority = 1" in text
-
-
-# ---- TUI app + settings screen pilot tests ----
-
-
-@pytest.fixture
-def tui_db_path(tmp_path: Path) -> Path:
-    return tmp_path / "tui-test.db"
-
-
-class TestStickyNotesApp:
-    async def test_app_mounts_with_injected_db(self, tui_db_path: Path):
-        app = StickyNotesApp(db_path=tui_db_path)
-        async with app.run_test() as pilot:
-            assert app.db_path == tui_db_path
-            assert tui_db_path.exists()
-            assert hasattr(app, "conn")
-            assert hasattr(app, "config")
-
-    def test_app_default_db_path(self):
-        app = StickyNotesApp()
-        assert app.db_path == DEFAULT_DB_PATH
-
-    async def test_dark_mode_from_config(self, tui_db_path: Path):
-        app = StickyNotesApp(db_path=tui_db_path)
-        async with app.run_test():
-            assert app.dark is True
-
-
-class TestSettingsScreen:
-    async def test_settings_screen_mounts(self, tui_db_path: Path):
-        app = StickyNotesApp(db_path=tui_db_path)
-        async with app.run_test() as pilot:
-            await pilot.press("s")
-            await pilot.pause()
-            assert isinstance(app.screen, SettingsScreen)
-
-    async def test_db_path_displayed(self, tui_db_path: Path):
-        app = StickyNotesApp(db_path=tui_db_path)
-        async with app.run_test() as pilot:
-            await pilot.press("s")
-            await pilot.pause()
-            db_path_widget = app.screen.query_one("#db-path", Static)
-            assert str(tui_db_path) in str(db_path_widget.render())
-
-    async def test_db_size_displayed(self, tui_db_path: Path):
-        app = StickyNotesApp(db_path=tui_db_path)
-        async with app.run_test() as pilot:
-            await pilot.press("s")
-            await pilot.pause()
-            db_size_widget = app.screen.query_one("#db-size", Static)
-            renderable = str(db_size_widget.render())
-            assert "Size:" in renderable
-            assert "KB" in renderable or "B" in renderable
-
-    async def test_escape_pops_settings(self, tui_db_path: Path):
-        app = StickyNotesApp(db_path=tui_db_path)
-        async with app.run_test() as pilot:
-            await pilot.press("s")
-            await pilot.pause()
-            assert isinstance(app.screen, SettingsScreen)
-            await pilot.press("escape")
-            await pilot.pause()
-            assert not isinstance(app.screen, SettingsScreen)
-
-    async def test_settings_uses_app_config(self, tui_db_path: Path):
-        app = StickyNotesApp(db_path=tui_db_path)
-        async with app.run_test() as pilot:
-            await pilot.press("s")
-            await pilot.pause()
-            assert app.screen.typed_app.config is app.config
-
-
-# ---- Board view tests ----
-
-
-class TestBoardView:
-    async def test_seeded_board_renders_three_columns(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test():
-            columns = app.query(ColumnWidget)
-            assert len(columns) == 3
-
-    async def test_seeded_board_renders_eight_task_cards(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test():
-            cards = app.query(TaskCard)
-            assert len(cards) == 8
-
-    async def test_column_headers_contain_names(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test():
-            headers = app.query(".column-header")
-            header_texts = [str(h.render()) for h in headers]
-            assert any("Todo" in t for t in header_texts)
-            assert any("In Progress" in t for t in header_texts)
-            assert any("Done" in t for t in header_texts)
-
-    async def test_empty_db_shows_no_board_message(self, tui_db_path: Path):
-        app = StickyNotesApp(db_path=tui_db_path)
-        async with app.run_test():
-            msg = app.query_one("#no-board-message", Static)
-            assert "No active board" in str(msg.render())
-
-    async def test_task_cards_contain_expected_text(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test():
-            cards = app.query(TaskCard)
-            texts = [str(c.render()) for c in cards]
-            assert any("task-" in t for t in texts)
-            assert any("[P" in t for t in texts)
-
-    async def test_archived_task_hidden_by_default(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        # Archive one task
-        from sticky_notes.connection import get_connection
-
-        conn = get_connection(db_path)
-        service.update_task(
-            conn, ids["task_ids"]["scaffold"], {"archived": True}, "test"
-        )
+        # Task in child group
+        t1 = service.create_task(conn, ws.id, "grouped-task", status.id, project_id=proj.id)
+        service.assign_task_to_group(conn, t1.id, child_grp.id, source="test")
+        # Ungrouped task in project
+        service.create_task(conn, ws.id, "ungrouped-task", status.id, project_id=proj.id)
+        set_active_workspace_id(db_path, ws.id)
         conn.close()
+        return db_path
 
+    async def test_group_nodes_before_ungrouped(self, grouped_tui_db):
+        app = StickyNotesApp(db_path=grouped_tui_db)
+        async with app.run_test():
+            tree = app.query_one("#workspaces-tree")
+            proj_node = tree.root.children[0]
+            children = list(proj_node.children)
+            # First child is group node (expandable), last is ungrouped task leaf
+            assert children[0].allow_expand
+            assert isinstance(children[0].data, Group)
+            assert not children[-1].allow_expand
+            assert isinstance(children[-1].data, Task)
+
+    async def test_nested_groups(self, grouped_tui_db):
+        app = StickyNotesApp(db_path=grouped_tui_db)
+        async with app.run_test():
+            tree = app.query_one("#workspaces-tree")
+            proj_node = tree.root.children[0]
+            parent_node = [n for n in proj_node.children if n.allow_expand][0]
+            assert str(parent_node.label) == "\U0001f4c1 (1) parent-group"
+            child_nodes = list(parent_node.children)
+            assert len(child_nodes) == 1
+            assert str(child_nodes[0].label) == "\U0001f4c1 (1) child-group"
+            # Task is under child group
+            task_leaves = list(child_nodes[0].children)
+            assert len(task_leaves) == 1
+            assert not task_leaves[0].allow_expand
+
+
+class TestKanbanColumns:
+    @pytest.fixture
+    def app(self, seeded_tui_db):
+        db_path, ids = seeded_tui_db
+        return StickyNotesApp(db_path=db_path), ids
+
+    async def test_status_columns_rendered(self, app):
+        app, ids = app
+        async with app.run_test():
+            cols = app.query(".status-col")
+            assert len(cols) == 3
+
+    async def test_column_has_title_with_count(self, app):
+        app, ids = app
+        async with app.run_test():
+            titles = app.query(".status-col-title")
+            title_texts = {str(t.render()) for t in titles}
+            # Seed: Todo=4, In Progress=2, Done=2
+            assert "(4) Todo" in title_texts
+            assert "(2) In Progress" in title_texts
+            assert "(2) Done" in title_texts
+
+    async def test_tasks_in_correct_columns(self, app):
+        app, ids = app
+        async with app.run_test():
+            done_col = app.query_one(
+                f"#status-col-{ids['status_ids']['done']}"
+            )
+            cards = done_col.query(".task-card")
+            card_texts = {str(c.render()) for c in cards}
+            assert "6: Setup CI pipeline" in card_texts
+            assert "8: Scaffold project" in card_texts
+
+    async def test_task_cards_are_focusable(self, app):
+        app, ids = app
+        async with app.run_test():
+            cards = app.query(".task-card")
+            assert len(cards) > 0
+            for card in cards:
+                assert isinstance(card, TaskCard)
+                assert card.can_focus is True
+
+    async def test_task_cards_carry_task_data(self, app):
+        app, ids = app
+        async with app.run_test():
+            cards = app.query(".task-card")
+            for card in cards:
+                assert isinstance(card.task_data, Task)
+                assert card.task_data.id > 0
+
+    async def test_no_workspace_no_columns(self, tmp_path):
+        db_path = tmp_path / "empty.db"
+        conn = get_connection(db_path)
+        init_db(conn)
+        conn.close()
         app = StickyNotesApp(db_path=db_path)
         async with app.run_test():
-            cards = app.query(TaskCard)
-            assert len(cards) == 7
+            cols = app.query(".status-col")
+            assert len(cols) == 0
 
 
-# ---- Board view test helpers ----
+class TestStatusMove:
+    """Tests for shift+arrow / shift+ijkl task status movement."""
 
-
-async def _wait_for_board(pilot) -> None:
-    """Wait for board to mount and initial focus to be set."""
-    await pilot.pause()
-
-
-def _board(app: StickyNotesApp) -> BoardView:
-    return app.query_one(BoardView)
-
-
-# ---- Board navigation tests ----
-
-
-class TestBoardNavigation:
-    """Keyboard navigation across the 2D grid of columns and task cards."""
-
-    async def test_initial_focus_on_first_card(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            assert _board(app).focused_position == (0, 0)
-            assert isinstance(app.focused, TaskCard)
-
-    async def test_down_arrow_moves_to_next_card(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            await pilot.press("down")
-            await pilot.pause()
-            assert _board(app).focused_position == (0, 1)
-
-    async def test_up_arrow_moves_to_previous_card(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            await pilot.press("down")
-            await pilot.pause()
-            await pilot.press("up")
-            await pilot.pause()
-            assert _board(app).focused_position == (0, 0)
-
-    async def test_up_at_top_stays_clamped(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            await pilot.press("up")
-            await pilot.pause()
-            assert _board(app).focused_position == (0, 0)
-
-    async def test_down_at_bottom_stays_clamped(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            # Navigate to Todo (col 2) which has 4 tasks
-            await pilot.press("right", "right")
-            await pilot.pause()
-            assert _board(app).focused_position == (2, 0)
-            # Go to the bottom
-            await pilot.press("down", "down", "down")
-            await pilot.pause()
-            assert _board(app).focused_position == (2, 3)
-            # One more down should stay at bottom
-            await pilot.press("down")
-            await pilot.pause()
-            assert _board(app).focused_position == (2, 3)
-
-    async def test_right_arrow_moves_to_next_column(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            await pilot.press("right")
-            await pilot.pause()
-            assert _board(app).focused_position == (1, 0)
-
-    async def test_left_arrow_moves_to_previous_column(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            await pilot.press("right")
-            await pilot.pause()
-            await pilot.press("left")
-            await pilot.pause()
-            assert _board(app).focused_position == (0, 0)
-
-    async def test_left_at_first_column_stays(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            await pilot.press("left")
-            await pilot.pause()
-            assert _board(app).focused_position == (0, 0)
-
-    async def test_right_at_last_column_stays(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            # Move to last column (Done, col 2)
-            await pilot.press("right", "right")
-            await pilot.pause()
-            pos = _board(app).focused_position
-            assert pos is not None and pos[0] == 2
-            # One more right should stay
-            await pilot.press("right")
-            await pilot.pause()
-            assert _board(app).focused_position == pos
-
-    async def test_vertical_position_clamped_on_column_switch(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            # Navigate to Todo (col 2, 4 tasks: 0,1,2,3)
-            await pilot.press("right", "right")
-            await pilot.pause()
-            assert _board(app).focused_position == (2, 0)
-            # Go to task index 3
-            await pilot.press("down", "down", "down")
-            await pilot.pause()
-            assert _board(app).focused_position == (2, 3)
-            # Move left to In Progress (only 2 tasks: 0,1) — clamped
-            await pilot.press("left")
-            await pilot.pause()
-            assert _board(app).focused_position == (1, 1)
-
-    async def test_focused_card_has_focus_property(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
+    @pytest.fixture
+    def app(self, seeded_tui_db):
         db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            focused = app.focused
-            assert isinstance(focused, TaskCard)
-            assert focused.has_focus
-
-    async def test_right_skips_empty_column(
-        self, seeded_tui_db_empty_middle: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db_empty_middle
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            assert _board(app).focused_position == (0, 0)
-            # Right should skip empty In Progress (col 1) -> Done (col 2)
-            await pilot.press("right")
-            await pilot.pause()
-            assert _board(app).focused_position == (2, 0)
-
-    async def test_left_skips_empty_column(
-        self, seeded_tui_db_empty_middle: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db_empty_middle
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            # Navigate to Done (col 2) — skips empty col 1
-            await pilot.press("right")
-            await pilot.pause()
-            assert _board(app).focused_position == (2, 0)
-            # Left should skip empty In Progress (col 1) -> Todo (col 0)
-            await pilot.press("left")
-            await pilot.pause()
-            assert _board(app).focused_position == (0, 0)
-
+        return StickyNotesApp(db_path=db_path), ids
 
-# ---- Board task movement tests ----
+    def _col_title(self, app, status_id: int) -> str:
+        col = app.query_one(f"#status-col-{status_id}")
+        return str(col.query_one(".status-col-title").render())
 
+    def _card_column_id(self, card: TaskCard) -> str:
+        """Walk up to the .status-col ancestor to find which column a card is in."""
+        node = card.parent
+        while node is not None:
+            if hasattr(node, "id") and node.id and node.id.startswith("status-col-"):
+                return node.id
+            node = node.parent
+        raise AssertionError("Card not inside a status column")
 
-class TestBoardTaskMovement:
-    """Shift+Arrow moves focused task to adjacent column."""
-
-    async def test_shift_right_moves_task_to_next_column(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            # Focus is at (0, 0) in Done. Shift+right moves to In Progress.
-            await pilot.press("shift+right")
-            await pilot.pause()
-            await pilot.pause()
-            board = _board(app)
-            assert board.focused_position is not None
-            assert board.focused_position[0] == 1
-            columns = board._get_columns()
-            done_cards = board._get_cards(columns[0])
-            in_progress_cards = board._get_cards(columns[1])
-            assert len(done_cards) == 1
-            assert len(in_progress_cards) == 3
-
-    async def test_shift_left_moves_task_to_previous_column(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            # Navigate to In Progress first
-            await pilot.press("right")
-            await pilot.pause()
-            assert _board(app).focused_position == (1, 0)
-            # Move task left to Done
-            await pilot.press("shift+left")
-            await pilot.pause()
-            await pilot.pause()
-            board = _board(app)
-            assert board.focused_position is not None
-            assert board.focused_position[0] == 0
-            columns = board._get_columns()
-            done_cards = board._get_cards(columns[0])
-            in_progress_cards = board._get_cards(columns[1])
-            assert len(done_cards) == 3
-            assert len(in_progress_cards) == 1
-
-    async def test_shift_left_at_first_column_is_noop(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            assert _board(app).focused_position == (0, 0)
-            await pilot.press("shift+left")
-            await pilot.pause()
-            await pilot.pause()
-            assert _board(app).focused_position == (0, 0)
-            columns = _board(app)._get_columns()
-            assert len(_board(app)._get_cards(columns[0])) == 2
-
-    async def test_shift_right_at_last_column_is_noop(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            # Navigate to Done (col 2)
-            await pilot.press("right", "right")
-            await pilot.pause()
-            pos = _board(app).focused_position
-            assert pos is not None and pos[0] == 2
-            await pilot.press("shift+right")
-            await pilot.pause()
-            await pilot.pause()
-            assert _board(app).focused_position == pos
-
-    async def test_move_preserves_focus_on_moved_task(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            focused = app.focused
-            assert isinstance(focused, TaskCard)
-            task_id_before = focused.task_data.id
-            await pilot.press("shift+right")
-            await pilot.pause()
-            await pilot.pause()
-            focused_after = app.focused
-            assert isinstance(focused_after, TaskCard)
-            assert focused_after.task_data.id == task_id_before
-
-    async def test_move_last_task_empties_column(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            # Navigate to In Progress (2 tasks)
-            await pilot.press("right")
-            await pilot.pause()
-            assert _board(app).focused_position == (1, 0)
-            # Move first task right to Done
-            await pilot.press("shift+right")
-            await pilot.pause()
-            await pilot.pause()
-            # After rebuild, focus is on the moved task in Done.
-            # Navigate left to get back to In Progress remaining task
-            await pilot.press("left")
-            await pilot.pause()
-            board = _board(app)
-            assert board.focused_position == (1, 0)
-            columns = board._get_columns()
-            in_progress_cards = board._get_cards(columns[1])
-            assert len(in_progress_cards) == 1
-            # Move that last task right too
-            await pilot.press("shift+right")
-            await pilot.pause()
-            await pilot.pause()
-            columns = _board(app)._get_columns()
-            assert len(_board(app)._get_cards(columns[1])) == 0
-
-    async def test_move_updates_database(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            focused = app.focused
-            assert isinstance(focused, TaskCard)
-            task_id = focused.task_data.id
-            original_col = focused.task_data.status_id
-            await pilot.press("shift+right")
-            await pilot.pause()
-            await pilot.pause()
-            # Verify in DB with a fresh connection
-            from sticky_notes.connection import get_connection
-
-            fresh_conn = get_connection(db_path)
-            task = service.get_task(fresh_conn, task_id)
-            fresh_conn.close()
-            assert task.status_id != original_col
-            assert task.status_id == ids["status_ids"]["in_progress"]
-
-    async def test_move_to_adjacent_empty_column(
-        self, seeded_tui_db_empty_middle: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db_empty_middle
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            assert _board(app).focused_position == (0, 0)
-            # Shift+right should move to col 1 (empty In Progress), NOT skip to col 2
-            await pilot.press("shift+right")
-            await pilot.pause()
-            await pilot.pause()
-            board = _board(app)
-            assert board.focused_position is not None
-            assert board.focused_position[0] == 1
-            columns = board._get_columns()
-            assert len(board._get_cards(columns[1])) == 1
-
-    async def test_click_then_shift_move(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        """Clicking a card then shift+right should move the clicked card."""
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
+    async def test_alt_right_moves_to_next_status(self, app):
+        app, ids = app
         async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            # Default focus is (0, 0). Click a card in In Progress (col 1).
-            board = _board(app)
-            columns = board._get_columns()
-            target_card = board._get_cards(columns[1])[0]
-            target_task_id = target_card.task_data.id
-            await pilot.click(target_card)
+            # Focus a Todo card (task 1: Design API schema)
+            todo_col = app.query_one(f"#status-col-{ids['status_ids']['todo']}")
+            card = todo_col.query(TaskCard).first()
+            app.set_focus(card)
             await pilot.pause()
-            # Indices should have synced to (1, 0)
-            assert board.focused_position == (1, 0)
-            # Shift+right should move THIS card, not the one at (0, 0)
-            await pilot.press("shift+right")
-            await pilot.pause()
-            await pilot.pause()
-            board = _board(app)
-            # Task moved to Todo (col 2) — focus follows it
-            assert board.focused_position is not None
-            assert board.focused_position[0] == 2
-            focused = app.focused
-            assert isinstance(focused, TaskCard)
-            assert focused.task_data.id == target_task_id
-
-    async def test_click_then_arrow_navigates_from_clicked_card(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        """After clicking a card, arrow keys should navigate relative to it."""
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            # Click the second card in Todo (col 2, task 1)
-            board = _board(app)
-            columns = board._get_columns()
-            card_1 = board._get_cards(columns[2])[1]
-            await pilot.click(card_1)
+            task_id = card.task_data.id
+
+            await pilot.press("alt+right")
             await pilot.pause()
-            assert board.focused_position == (2, 1)
-            # Down should go to (2, 2), not from stale (0, 0) -> (0, 1)
-            await pilot.press("down")
             await pilot.pause()
-            assert board.focused_position == (2, 2)
-
-
-# ---- Archive tests ----
-
 
-class TestArchiveTask:
-    """Pressing 'd' archives the focused task."""
+            # Card should now be in the In Progress column
+            new_card = next(c for c in app.query(TaskCard) if c.task_data.id == task_id)
+            assert self._card_column_id(new_card) == f"status-col-{ids['status_ids']['in_progress']}"
 
-    async def test_archive_with_confirm_yes(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            assert len(app.query(TaskCard)) == 8
-            # Press d to archive — confirm dialog should appear
-            await pilot.press("d")
-            await pilot.pause()
-            assert isinstance(app.screen, ConfirmDialog)
-            # Confirm with y
-            await pilot.press("y")
-            await pilot.pause()
-            await pilot.pause()
-            assert not isinstance(app.screen, ConfirmDialog)
-            assert len(app.query(TaskCard)) == 7
-
-    async def test_archive_with_confirm_no(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            assert len(app.query(TaskCard)) == 8
-            await pilot.press("d")
-            await pilot.pause()
-            assert isinstance(app.screen, ConfirmDialog)
-            # Cancel with n
-            await pilot.press("n")
-            await pilot.pause()
-            assert not isinstance(app.screen, ConfirmDialog)
-            # No task removed
-            assert len(app.query(TaskCard)) == 8
-
-    async def test_archive_with_confirm_escape(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            await pilot.press("d")
-            await pilot.pause()
-            assert isinstance(app.screen, ConfirmDialog)
-            await pilot.press("escape")
-            await pilot.pause()
-            assert not isinstance(app.screen, ConfirmDialog)
-            assert len(app.query(TaskCard)) == 8
-
-    async def test_archive_without_confirm(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        app.config.confirm_archive = False
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            assert len(app.query(TaskCard)) == 8
-            await pilot.press("d")
-            await pilot.pause()
-            await pilot.pause()
-            # No dialog, straight to archive
-            assert not isinstance(app.screen, ConfirmDialog)
-            assert len(app.query(TaskCard)) == 7
-
-    async def test_archive_updates_database(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        app.config.confirm_archive = False
+    async def test_alt_left_moves_to_previous_status(self, app):
+        app, ids = app
         async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            focused = app.focused
-            assert isinstance(focused, TaskCard)
-            task_id = focused.task_data.id
-            await pilot.press("d")
+            ip_col = app.query_one(f"#status-col-{ids['status_ids']['in_progress']}")
+            card = ip_col.query(TaskCard).first()
+            app.set_focus(card)
             await pilot.pause()
-            await pilot.pause()
-            # Verify in DB
-            from sticky_notes.connection import get_connection
-
-            fresh_conn = get_connection(db_path)
-            task = service.get_task(fresh_conn, task_id)
-            fresh_conn.close()
-            assert task.archived is True
-
-    async def test_archive_via_delete_key(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        app.config.confirm_archive = False
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            assert len(app.query(TaskCard)) == 8
-            await pilot.press("delete")
-            await pilot.pause()
-            await pilot.pause()
-            assert len(app.query(TaskCard)) == 7
-
-    async def test_archive_cursor_stays_in_same_column(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        """After archiving, cursor should stay in the same column, not jump to (0,0)."""
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        app.config.confirm_archive = False
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            # Navigate to In Progress (col 1), task 0
-            await pilot.press("right")
-            await pilot.pause()
-            assert _board(app).focused_position == (1, 0)
-            # Archive it
-            await pilot.press("d")
-            await pilot.pause()
-            await pilot.pause()
-            # Should stay in col 1, not jump to (0, 0)
-            board = _board(app)
-            assert board.focused_position is not None
-            assert board.focused_position[0] == 1
-            assert board.focused_position[1] == 0
-
-    async def test_archive_last_in_column_clamps_index(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        """Archiving the last task in a column should clamp cursor up."""
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        app.config.confirm_archive = False
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            # Navigate to In Progress (col 1), go to last task (index 1)
-            await pilot.press("right")
-            await pilot.pause()
-            await pilot.press("down")
-            await pilot.pause()
-            assert _board(app).focused_position == (1, 1)
-            # Archive task at index 1 — only 1 task remains, cursor should clamp to 0
-            await pilot.press("d")
+            task_id = card.task_data.id
+
+            await pilot.press("alt+left")
             await pilot.pause()
             await pilot.pause()
-            board = _board(app)
-            assert board.focused_position is not None
-            assert board.focused_position[0] == 1
-            assert board.focused_position[1] == 0
-
-
-# ---- Task detail modal tests ----
-
 
-class TestTaskDetailModal:
-    """Pressing 'enter' opens a read-only task detail modal."""
+            new_card = next(c for c in app.query(TaskCard) if c.task_data.id == task_id)
+            assert self._card_column_id(new_card) == f"status-col-{ids['status_ids']['todo']}"
 
-    async def test_enter_opens_detail_modal(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            await pilot.press("enter")
-            await pilot.pause()
-            assert isinstance(app.screen, TaskDetailModal)
-
-    async def test_detail_shows_task_number_and_title(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            focused = app.focused
-            assert isinstance(focused, TaskCard)
-            task_id = focused.task_data.id
-            task_title = focused.task_data.title
-            await pilot.press("enter")
-            await pilot.pause()
-            title_widget = app.screen.query_one("#detail-title", Static)
-            rendered = str(title_widget.render())
-            assert f"task-{task_id:04d}" in rendered
-            assert task_title in rendered
-
-    async def test_detail_shows_column_name(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            await pilot.press("enter")
-            await pilot.pause()
-            texts = [str(w.render()) for w in app.screen.query(Static)]
-            assert any("Done" in t for t in texts)
-
-    async def test_detail_shows_priority(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            await pilot.press("enter")
-            await pilot.pause()
-            texts = [str(w.render()) for w in app.screen.query(Static)]
-            assert any("Priority:" in t for t in texts)
-
-    async def test_detail_shows_description(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            # Navigate to "Design API schema" (Todo col 2, index 0) which has a description
-            await pilot.press("right", "right")
-            await pilot.pause()
-            await pilot.press("enter")
-            await pilot.pause()
-            static_texts = [str(w.render()) for w in app.screen.query(Static)]
-            assert any("Description" in t for t in static_texts)
-            md_widget = app.screen.query_one("#detail-desc", Markdown)
-            # Markdown widget stores source in _markdown attribute
-            assert "OpenAPI" in md_widget._markdown
-
-    async def test_detail_shows_dependencies(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
+    async def test_no_wrap_at_rightmost_column(self, app):
+        app, ids = app
         async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            # Navigate to "User CRUD" in Todo (col 2, index 2) — blocked by "Auth middleware"
-            await pilot.press("right", "right")
+            done_col = app.query_one(f"#status-col-{ids['status_ids']['done']}")
+            card = done_col.query(TaskCard).first()
+            app.set_focus(card)
             await pilot.pause()
-            await pilot.press("down", "down")
-            await pilot.pause()
-            focused = app.focused
-            assert isinstance(focused, TaskCard)
-            assert focused.task_data.title == "User CRUD"
-            await pilot.press("enter")
-            await pilot.pause()
-            texts = [str(w.render()) for w in app.screen.query(Static)]
-            assert any("Blocked by:" in t for t in texts)
-
-    async def test_escape_dismisses_detail(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            await pilot.press("enter")
-            await pilot.pause()
-            assert isinstance(app.screen, TaskDetailModal)
-            await pilot.press("escape")
-            await pilot.pause()
-            assert not isinstance(app.screen, TaskDetailModal)
-
-    async def test_e_from_detail_dismisses_with_task_id(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            await pilot.press("enter")
+            task_id = card.task_data.id
+
+            await pilot.press("alt+right")
             await pilot.pause()
-            assert isinstance(app.screen, TaskDetailModal)
-            await pilot.press("e")
             await pilot.pause()
-            # Detail should dismiss (edit modal not yet wired)
-            assert not isinstance(app.screen, TaskDetailModal)
-
-
-# ---- Task create modal tests ----
-
 
-class TestTaskCreateModal:
-    """Pressing 'n' opens the task creation form."""
+            # Card should still be in Done
+            new_card = next(c for c in app.query(TaskCard) if c.task_data.id == task_id)
+            assert self._card_column_id(new_card) == f"status-col-{ids['status_ids']['done']}"
 
-    async def test_n_opens_create_form(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            await pilot.press("n")
-            await pilot.pause()
-            assert isinstance(app.screen, TaskFormModal)
-
-    async def test_create_form_title_says_new_task(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            await pilot.press("n")
-            await pilot.pause()
-            title = app.screen.query_one("#form-title", Static)
-            assert "New Task" in str(title.render())
-
-    async def test_submit_with_title_creates_task(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            assert len(app.query(TaskCard)) == 8
-            await pilot.press("n")
-            await pilot.pause()
-            # Type a title
-            title_input = app.screen.query_one("#form-input-title", Input)
-            title_input.value = "New test task"
-            # Click submit
-            await pilot.press("ctrl+s")
-            await pilot.pause()
-            await pilot.pause()
-            assert not isinstance(app.screen, TaskFormModal)
-            assert len(app.query(TaskCard)) == 9
-
-    async def test_submit_empty_title_shows_error(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            await pilot.press("n")
-            await pilot.pause()
-            # Submit without typing anything
-            await pilot.press("ctrl+s")
-            await pilot.pause()
-            # Should still be on the form
-            assert isinstance(app.screen, TaskFormModal)
-            error = app.screen.query_one("#form-error", Static)
-            assert "required" in str(error.render()).lower()
-
-    async def test_cancel_does_not_create_task(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            assert len(app.query(TaskCard)) == 8
-            await pilot.press("n")
-            await pilot.pause()
-            assert isinstance(app.screen, TaskFormModal)
-            await pilot.press("escape")
-            await pilot.pause()
-            assert not isinstance(app.screen, TaskFormModal)
-            assert len(app.query(TaskCard)) == 8
-
-    async def test_created_task_appears_in_focused_column(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            # Navigate to In Progress (col 1)
-            await pilot.press("right")
-            await pilot.pause()
-            assert _board(app).focused_position == (1, 0)
-            board = _board(app)
-            in_progress_before = len(board._get_cards(board._get_columns()[1]))
-            await pilot.press("n")
-            await pilot.pause()
-            title_input = app.screen.query_one("#form-input-title", Input)
-            title_input.value = "In progress task"
-            await pilot.press("ctrl+s")
-            await pilot.pause()
-            await pilot.pause()
-            board = _board(app)
-            in_progress_after = len(board._get_cards(board._get_columns()[1]))
-            assert in_progress_after == in_progress_before + 1
-
-    async def test_created_task_gets_focus(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            await pilot.press("n")
-            await pilot.pause()
-            title_input = app.screen.query_one("#form-input-title", Input)
-            title_input.value = "Focus me"
-            await pilot.press("ctrl+s")
-            await pilot.pause()
-            await pilot.pause()
-            focused = app.focused
-            assert isinstance(focused, TaskCard)
-            assert focused.task_data.title == "Focus me"
-
-    async def test_created_task_in_database(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
+    async def test_no_wrap_at_leftmost_column(self, app):
+        app, ids = app
         async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            await pilot.press("n")
-            await pilot.pause()
-            title_input = app.screen.query_one("#form-input-title", Input)
-            title_input.value = "DB persist test"
-            await pilot.press("ctrl+s")
+            todo_col = app.query_one(f"#status-col-{ids['status_ids']['todo']}")
+            card = todo_col.query(TaskCard).first()
+            app.set_focus(card)
             await pilot.pause()
-            await pilot.pause()
-            from sticky_notes.connection import get_connection
-
-            fresh_conn = get_connection(db_path)
-            task = service.get_task_by_title(fresh_conn, ids["board_id"], "DB persist test")
-            fresh_conn.close()
-            assert task.title == "DB persist test"
-
-    async def test_invalid_due_date_shows_error(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            await pilot.press("n")
+            task_id = card.task_data.id
+
+            await pilot.press("alt+left")
             await pilot.pause()
-            title_input = app.screen.query_one("#form-input-title", Input)
-            title_input.value = "Has bad date"
-            due_input = app.screen.query_one("#form-input-due", Input)
-            due_input.value = "not-a-date"
-            await pilot.press("ctrl+s")
             await pilot.pause()
-            assert isinstance(app.screen, TaskFormModal)
-            error = app.screen.query_one("#form-error", Static)
-            assert "date" in str(error.render()).lower()
-
-
-# ---- Task edit modal tests ----
 
+            new_card = next(c for c in app.query(TaskCard) if c.task_data.id == task_id)
+            assert self._card_column_id(new_card) == f"status-col-{ids['status_ids']['todo']}"
 
-class TestTaskEditModal:
-    """Pressing 'e' opens the edit form pre-populated with current values."""
-
-    async def test_e_opens_edit_form(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            await pilot.press("e")
-            await pilot.pause()
-            assert isinstance(app.screen, TaskFormModal)
-
-    async def test_edit_form_title_says_edit_task(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            await pilot.press("e")
-            await pilot.pause()
-            title = app.screen.query_one("#form-title", Static)
-            assert "Edit Task" in str(title.render())
-
-    async def test_edit_form_prepopulated_with_title(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            focused = app.focused
-            assert isinstance(focused, TaskCard)
-            original_title = focused.task_data.title
-            await pilot.press("e")
-            await pilot.pause()
-            title_input = app.screen.query_one("#form-input-title", Input)
-            assert title_input.value == original_title
-
-    async def test_edit_no_column_selector(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            await pilot.press("e")
-            await pilot.pause()
-            # Edit mode should not have a column selector
-            matches = app.screen.query("#form-select-column")
-            assert len(matches) == 0
-
-    async def test_edit_changes_title(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            focused = app.focused
-            assert isinstance(focused, TaskCard)
-            task_id = focused.task_data.id
-            await pilot.press("e")
-            await pilot.pause()
-            title_input = app.screen.query_one("#form-input-title", Input)
-            title_input.value = "Updated title"
-            await pilot.press("ctrl+s")
-            await pilot.pause()
-            await pilot.pause()
-            assert not isinstance(app.screen, TaskFormModal)
-            # Verify in DB
-            from sticky_notes.connection import get_connection
-
-            fresh_conn = get_connection(db_path)
-            task = service.get_task(fresh_conn, task_id)
-            fresh_conn.close()
-            assert task.title == "Updated title"
-
-    async def test_edit_escape_no_changes(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            focused = app.focused
-            assert isinstance(focused, TaskCard)
-            task_id = focused.task_data.id
-            original_title = focused.task_data.title
-            await pilot.press("e")
-            await pilot.pause()
-            await pilot.press("escape")
-            await pilot.pause()
-            assert not isinstance(app.screen, TaskFormModal)
-            from sticky_notes.connection import get_connection
-
-            fresh_conn = get_connection(db_path)
-            task = service.get_task(fresh_conn, task_id)
-            fresh_conn.close()
-            assert task.title == original_title
-
-    async def test_edit_preserves_focus_on_edited_task(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            focused = app.focused
-            assert isinstance(focused, TaskCard)
-            task_id = focused.task_data.id
-            await pilot.press("e")
-            await pilot.pause()
-            title_input = app.screen.query_one("#form-input-title", Input)
-            title_input.value = "Edited and focused"
-            await pilot.press("ctrl+s")
-            await pilot.pause()
-            await pilot.pause()
-            focused_after = app.focused
-            assert isinstance(focused_after, TaskCard)
-            assert focused_after.task_data.id == task_id
-
-    async def test_detail_to_edit_flow(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        """Enter opens detail, 'e' from detail opens edit form."""
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            focused = app.focused
-            assert isinstance(focused, TaskCard)
-            original_title = focused.task_data.title
-            # Open detail
-            await pilot.press("enter")
-            await pilot.pause()
-            assert isinstance(app.screen, TaskDetailModal)
-            # Press 'e' to transition to edit
-            await pilot.press("e")
-            await pilot.pause()
-            assert isinstance(app.screen, TaskFormModal)
-            # Verify pre-populated
-            title_input = app.screen.query_one("#form-input-title", Input)
-            assert title_input.value == original_title
-
-    async def test_edit_changes_priority(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
+    async def test_alt_l_alias(self, app):
+        app, ids = app
         async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            focused = app.focused
-            assert isinstance(focused, TaskCard)
-            task_id = focused.task_data.id
-            original_priority = focused.task_data.priority
-            await pilot.press("e")
+            todo_col = app.query_one(f"#status-col-{ids['status_ids']['todo']}")
+            card = todo_col.query(TaskCard).first()
+            app.set_focus(card)
             await pilot.pause()
-            # Change priority via the Select widget
-            from textual.widgets import Select
-
-            priority_select = app.screen.query_one("#form-select-priority", Select)
-            new_priority = 5 if original_priority != 5 else 4
-            priority_select.value = new_priority
-            await pilot.press("ctrl+s")
+            task_id = card.task_data.id
+
+            await pilot.press("alt+l")
             await pilot.pause()
             await pilot.pause()
-            assert not isinstance(app.screen, TaskFormModal)
-            from sticky_notes.connection import get_connection
-
-            fresh_conn = get_connection(db_path)
-            task = service.get_task(fresh_conn, task_id)
-            fresh_conn.close()
-            assert task.priority == new_priority
-
-
-# ---- Board select modal tests ----
-
 
-class TestBoardSelectModal:
-    """Pressing 'b' opens a board picker modal."""
+            new_card = next(c for c in app.query(TaskCard) if c.task_data.id == task_id)
+            assert self._card_column_id(new_card) == f"status-col-{ids['status_ids']['in_progress']}"
 
-    async def test_b_opens_board_select(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            await pilot.press("b")
-            await pilot.pause()
-            assert isinstance(app.screen, BoardSelectModal)
-
-    async def test_escape_dismisses_board_select(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            await pilot.press("b")
-            await pilot.pause()
-            assert isinstance(app.screen, BoardSelectModal)
-            await pilot.press("escape")
-            await pilot.pause()
-            assert not isinstance(app.screen, BoardSelectModal)
-
-    async def test_board_select_shows_current_board(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            await pilot.press("b")
-            await pilot.pause()
-            from textual.widgets import OptionList
-
-            option_list = app.screen.query_one("#board-option-list", OptionList)
-            # Should have at least one option containing the board name
-            prompts = [str(option_list.get_option_at_index(i).prompt) for i in range(option_list.option_count)]
-            assert any("Coding" in p for p in prompts)
-
-    async def test_switch_board(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        # Create a second board
-        from sticky_notes.connection import get_connection
-
-        conn = get_connection(db_path)
-        board2 = service.create_board(conn, "Second Board")
-        service.create_status(conn, board2.id, "Backlog")
-        conn.close()
-
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            assert _board(app)._board_id == ids["board_id"]
-            await pilot.press("b")
-            await pilot.pause()
-            assert isinstance(app.screen, BoardSelectModal)
-            # Select the second board by pressing down then enter
-            await pilot.press("down")
-            await pilot.pause()
-            await pilot.press("enter")
-            await pilot.pause()
-            await pilot.pause()
-            assert not isinstance(app.screen, BoardSelectModal)
-            assert _board(app)._board_id == board2.id
-
-    async def test_select_same_board_is_noop(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
+    async def test_alt_j_alias(self, app):
+        app, ids = app
         async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            card_count_before = len(app.query(TaskCard))
-            await pilot.press("b")
+            ip_col = app.query_one(f"#status-col-{ids['status_ids']['in_progress']}")
+            card = ip_col.query(TaskCard).first()
+            app.set_focus(card)
             await pilot.pause()
-            # Select the current board (first one, already highlighted)
-            await pilot.press("enter")
+            task_id = card.task_data.id
+
+            await pilot.press("alt+j")
             await pilot.pause()
             await pilot.pause()
-            assert not isinstance(app.screen, BoardSelectModal)
-            assert len(app.query(TaskCard)) == card_count_before
 
+            new_card = next(c for c in app.query(TaskCard) if c.task_data.id == task_id)
+            assert self._card_column_id(new_card) == f"status-col-{ids['status_ids']['todo']}"
 
-# ---- Project select modal tests ----
-
-
-class TestProjectSelectModal:
-    """Pressing 'p' opens a project filter picker modal."""
-
-    async def test_p_opens_project_select(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            await pilot.press("p")
-            await pilot.pause()
-            assert isinstance(app.screen, ProjectSelectModal)
-
-    async def test_escape_dismisses_project_select(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            await pilot.press("p")
-            await pilot.pause()
-            assert isinstance(app.screen, ProjectSelectModal)
-            await pilot.press("escape")
-            await pilot.pause()
-            assert not isinstance(app.screen, ProjectSelectModal)
-            # No filter change — all 8 cards still visible
-            assert len(app.query(TaskCard)) == 8
-
-    async def test_project_select_shows_all_projects_option(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            await pilot.press("p")
-            await pilot.pause()
-            from textual.widgets import OptionList
-
-            option_list = app.screen.query_one("#project-option-list", OptionList)
-            first_prompt = str(option_list.get_option_at_index(0).prompt)
-            assert "All Projects" in first_prompt
-
-    async def test_filter_by_project(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            assert len(app.query(TaskCard)) == 8
-            await pilot.press("p")
-            await pilot.pause()
-            # Select the project (second option: "apr-api")
-            await pilot.press("down")
-            await pilot.pause()
-            await pilot.press("enter")
-            await pilot.pause()
-            await pilot.pause()
-            assert not isinstance(app.screen, ProjectSelectModal)
-            # apr-api project has 4 tasks: Design API, Endpoint design, Auth middleware, DB migrations
-            assert len(app.query(TaskCard)) == 4
-            assert _board(app)._project_filter_id == ids["project_id"]
-
-    async def test_clear_project_filter(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            # First set a filter
-            await pilot.press("p")
-            await pilot.pause()
-            await pilot.press("down")
-            await pilot.pause()
-            await pilot.press("enter")
-            await pilot.pause()
-            await pilot.pause()
-            assert len(app.query(TaskCard)) == 4
-            # Now clear the filter via "All Projects"
-            await pilot.press("p")
-            await pilot.pause()
-            # Navigate up to "All Projects" (first option)
-            await pilot.press("up")
-            await pilot.pause()
-            await pilot.press("enter")
-            await pilot.pause()
-            await pilot.pause()
-            assert len(app.query(TaskCard)) == 8
-            assert _board(app)._project_filter_id is None
-
-    async def test_filter_to_project_with_tasks_in_nonzero_column(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        """Filter to a project whose tasks only exist in a non-first column.
-        Focus should land on a TaskCard and keybindings should work."""
-        db_path, ids = seeded_tui_db
-        # Create a project with tasks only in In Progress (col 1)
-        from sticky_notes.connection import get_connection
-
-        conn = get_connection(db_path)
-        proj = service.create_project(conn, ids["board_id"], "mid-only")
-        service.create_task(
-            conn, ids["board_id"], "Mid task", ids["status_ids"]["in_progress"],
-            project_id=proj.id, priority=1,
-        )
-        conn.close()
-
-        app = StickyNotesApp(db_path=db_path)
+    async def test_column_titles_update_after_move(self, app):
+        app, ids = app
         async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            # Open project select and pick "mid-only" (third option: All, apr-api, mid-only)
-            await pilot.press("p")
-            await pilot.pause()
-            await pilot.press("down", "down")
-            await pilot.pause()
-            await pilot.press("enter")
-            await pilot.pause()
-            await pilot.pause()
-            assert not isinstance(app.screen, ProjectSelectModal)
-            # Only 1 task visible, focus should be on it
-            assert len(app.query(TaskCard)) == 1
-            focused = app.focused
-            assert isinstance(focused, TaskCard)
-            # Keybinding 'n' should open create form
-            await pilot.press("n")
-            await pilot.pause()
-            assert isinstance(app.screen, TaskFormModal)
-
-    async def test_filter_to_empty_project_bindings_still_work(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        """Filter to a project with zero tasks — b and p bindings still work."""
-        db_path, ids = seeded_tui_db
-        # Create an empty project
-        from sticky_notes.connection import get_connection
+            todo_id = ids["status_ids"]["todo"]
+            ip_id = ids["status_ids"]["in_progress"]
 
-        conn = get_connection(db_path)
-        service.create_project(conn, ids["board_id"], "empty-proj")
-        conn.close()
+            assert self._col_title(app, todo_id) == "(4) Todo"
+            assert self._col_title(app, ip_id) == "(2) In Progress"
 
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            # Open project select and pick "empty-proj" (third option)
-            await pilot.press("p")
-            await pilot.pause()
-            await pilot.press("down", "down")
-            await pilot.pause()
-            await pilot.press("enter")
-            await pilot.pause()
-            await pilot.pause()
-            assert not isinstance(app.screen, ProjectSelectModal)
-            assert len(app.query(TaskCard)) == 0
-            # 'b' should still open board select
-            await pilot.press("b")
-            await pilot.pause()
-            assert isinstance(app.screen, BoardSelectModal)
-            await pilot.press("escape")
-            await pilot.pause()
-            # 'p' should still open project select to allow clearing filter
-            await pilot.press("p")
-            await pilot.pause()
-            assert isinstance(app.screen, ProjectSelectModal)
-
-    async def test_board_switch_resets_project_filter(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        # Create a second board with a column
-        from sticky_notes.connection import get_connection
-
-        conn = get_connection(db_path)
-        board2 = service.create_board(conn, "Other")
-        service.create_status(conn, board2.id, "Backlog")
-        conn.close()
-
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            # Set project filter
-            await pilot.press("p")
-            await pilot.pause()
-            await pilot.press("down")
+            todo_col = app.query_one(f"#status-col-{todo_id}")
+            card = todo_col.query(TaskCard).first()
+            app.set_focus(card)
             await pilot.pause()
-            await pilot.press("enter")
-            await pilot.pause()
-            await pilot.pause()
-            assert _board(app)._project_filter_id == ids["project_id"]
-            # Switch board
-            await pilot.press("b")
-            await pilot.pause()
-            await pilot.press("down")
-            await pilot.pause()
-            await pilot.press("enter")
+
+            await pilot.press("alt+right")
             await pilot.pause()
             await pilot.pause()
-            # Project filter should be reset
-            assert _board(app)._project_filter_id is None
-
 
-# ---- All Tasks screen tests ----
+            assert self._col_title(app, todo_id) == "(3) Todo"
+            assert self._col_title(app, ip_id) == "(3) In Progress"
 
-
-class TestAllTasksScreen:
-    """Pressing 'a' opens the All Tasks screen."""
-
-    async def test_all_tasks_screen_opens(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            await pilot.press("a")
-            await pilot.pause()
-            assert isinstance(app.screen, AllTasksScreen)
-
-    async def test_all_tasks_shows_all_tasks(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            await pilot.press("a")
-            await pilot.pause()
-            cards = app.screen.query(TaskCard)
-            assert len(cards) == 8
-
-    async def test_all_tasks_has_project_headers(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            await pilot.press("a")
-            await pilot.pause()
-            headers = app.screen.query(".project-group-header")
-            header_texts = [str(h.render()) for h in headers]
-            assert any("apr-api" in t for t in header_texts)
-            assert any("No Project" in t for t in header_texts)
-
-    async def test_all_tasks_escape_pops(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            await pilot.press("a")
-            await pilot.pause()
-            assert isinstance(app.screen, AllTasksScreen)
-            await pilot.press("escape")
-            await pilot.pause()
-            assert not isinstance(app.screen, AllTasksScreen)
-
-    async def test_all_tasks_navigation(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            await pilot.press("a")
-            await pilot.pause()
-            screen = app.screen
-            assert isinstance(screen, AllTasksScreen)
-            # Initial focus on first card
-            assert screen._card_idx == 0
-            focused = app.focused
-            assert isinstance(focused, TaskCard)
-            first_task_id = focused.task_data.id
-            # Move down
-            await pilot.press("down")
-            await pilot.pause()
-            assert screen._card_idx == 1
-            focused = app.focused
-            assert isinstance(focused, TaskCard)
-            assert focused.task_data.id != first_task_id
-            # Move back up
-            await pilot.press("up")
-            await pilot.pause()
-            assert screen._card_idx == 0
-
-    async def test_c_opens_column_filter(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            await pilot.press("a")
-            await pilot.pause()
-            assert isinstance(app.screen, AllTasksScreen)
-            await pilot.press("c")
-            await pilot.pause()
-            assert isinstance(app.screen, StatusFilterModal)
-
-    async def test_column_filter_escape_no_change(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            await pilot.press("a")
-            await pilot.pause()
-            assert len(app.screen.query(TaskCard)) == 8
-            await pilot.press("c")
-            await pilot.pause()
-            assert isinstance(app.screen, StatusFilterModal)
-            await pilot.press("escape")
-            await pilot.pause()
-            assert isinstance(app.screen, AllTasksScreen)
-            assert len(app.screen.query(TaskCard)) == 8
-
-    async def test_column_filter_deselect_done(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        """Toggle 'Done' off -> confirm; only 6 cards remain (seed has 2 in Done)."""
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            await pilot.press("a")
-            await pilot.pause()
-            assert len(app.screen.query(TaskCard)) == 8
-            await pilot.press("c")
-            await pilot.pause()
-            assert isinstance(app.screen, StatusFilterModal)
-            # Done is the first status (index 0) alphabetically — no navigation needed
-            # Toggle it off with space
-            await pilot.press("space")
-            await pilot.pause()
-            # Confirm with enter
-            await pilot.press("enter")
-            await pilot.pause()
-            await pilot.pause()
-            assert isinstance(app.screen, AllTasksScreen)
-            assert len(app.screen.query(TaskCard)) == 6
-
-    async def test_column_filter_deselect_then_reselect(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        """Deselect a column, confirm, reopen, reselect, confirm -> all 8 cards."""
-        db_path, ids = seeded_tui_db
-        app = StickyNotesApp(db_path=db_path)
+    async def test_model_consistent_after_move(self, app):
+        app, ids = app
         async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            await pilot.press("a")
-            await pilot.pause()
-            # Deselect Done (index 0 alphabetically — no navigation needed)
-            await pilot.press("c")
-            await pilot.pause()
-            await pilot.press("space")
-            await pilot.pause()
-            await pilot.press("enter")
-            await pilot.pause()
+            todo_col = app.query_one(f"#status-col-{ids['status_ids']['todo']}")
+            card = todo_col.query(TaskCard).first()
+            app.set_focus(card)
             await pilot.pause()
-            assert len(app.screen.query(TaskCard)) == 6
-            # Reopen and reselect Done
-            await pilot.press("c")
-            await pilot.pause()
-            assert isinstance(app.screen, StatusFilterModal)
-            await pilot.press("space")
-            await pilot.pause()
-            await pilot.press("enter")
+            task_id = card.task_data.id
+
+            await pilot.press("alt+right")
             await pilot.pause()
             await pilot.pause()
-            assert isinstance(app.screen, AllTasksScreen)
-            assert len(app.screen.query(TaskCard)) == 8
-
-    async def test_board_switch_resets_column_filter(
-        self, seeded_tui_db: tuple[Path, dict]
-    ):
-        db_path, ids = seeded_tui_db
-        from sticky_notes.connection import get_connection
 
-        conn = get_connection(db_path)
-        board2 = service.create_board(conn, "Other")
-        service.create_status(conn, board2.id, "Backlog")
-        conn.close()
+            # Model should reflect the new status
+            model_task = next(t for t in app._model.all_tasks if t.id == task_id)
+            assert model_task.status_id == ids["status_ids"]["in_progress"]
 
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            await pilot.press("a")
-            await pilot.pause()
-            screen = app.screen
-            assert isinstance(screen, AllTasksScreen)
-            # Set column filter (deselect Done)
-            await pilot.press("c")
-            await pilot.pause()
-            await pilot.press("down", "down")
-            await pilot.pause()
-            await pilot.press("space")
-            await pilot.pause()
-            await pilot.press("enter")
-            await pilot.pause()
-            await pilot.pause()
-            assert screen._status_filter_ids is not None
-            # Switch board
-            await pilot.press("b")
-            await pilot.pause()
-            await pilot.press("down")
-            await pilot.pause()
-            await pilot.press("enter")
-            await pilot.pause()
-            await pilot.pause()
-            # Column filter should be reset
-            assert screen._status_filter_ids is None
-
-
-# ---- Move task to board modal ----
-
-
-def _seed_two_boards(tmp_path: Path) -> tuple[Path, dict]:
-    """Seed a DB with two boards: 'Coding' (seeded) and 'Ops' (empty columns only)."""
-    db_path = tmp_path / "tui-two-boards.db"
-    c = get_connection(db_path)
-    init_db(c)
-    from tests.seed import seed_board
-
-    ids = seed_board(c, db_path=db_path)
-    # Second board with columns
-    ops = service.create_board(c, "Ops")
-    ops_backlog = service.create_status(c, ops.id, "Backlog")
-    ops_doing = service.create_status(c, ops.id, "Doing")
-    ops_proj = service.create_project(c, ops.id, "infra")
-    c.close()
-    ids["ops_board_id"] = ops.id
-    ids["ops_status_ids"] = {"backlog": ops_backlog.id, "doing": ops_doing.id}
-    ids["ops_project_id"] = ops_proj.id
-    return db_path, ids
-
-
-class TestMoveTaskToBoard:
-    async def test_m_opens_move_modal(self, tmp_path: Path):
-        db_path, ids = _seed_two_boards(tmp_path)
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            await pilot.press("m")
-            await pilot.pause()
-            assert isinstance(app.screen, MoveTaskModal)
-
-    async def test_move_modal_cancel(self, tmp_path: Path):
-        db_path, ids = _seed_two_boards(tmp_path)
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            await pilot.press("m")
-            await pilot.pause()
-            assert isinstance(app.screen, MoveTaskModal)
-            await pilot.press("escape")
-            await pilot.pause()
-            assert not isinstance(app.screen, MoveTaskModal)
-
-    async def test_move_modal_same_board_error(self, tmp_path: Path):
-        db_path, ids = _seed_two_boards(tmp_path)
-        app = StickyNotesApp(db_path=db_path)
-        async with app.run_test() as pilot:
-            await _wait_for_board(pilot)
-            # Focus a task without deps (ci_pipeline in Done column)
-            board_view = app.query_one(BoardView)
-            # Navigate to scaffold task (done column, no deps)
-            cards = app.query(TaskCard)
-            scaffold_card = [c for c in cards if c.task_data.title == "Scaffold project"][0]
-            scaffold_card.focus()
-            await pilot.pause()
-            await pilot.press("m")
-            await pilot.pause()
-            assert isinstance(app.screen, MoveTaskModal)
-            # Submit without changing board
-            await pilot.press("ctrl+s")
-            await pilot.pause()
-            # Should still be on modal with error
-            assert isinstance(app.screen, MoveTaskModal)
-            error_text = str(app.screen.query_one("#move-error", Static).render())
-            assert "already on this board" in error_text
+            # Card task_data should also be current
+            new_card = next(c for c in app.query(TaskCard) if c.task_data.id == task_id)
+            assert new_card.task_data.status_id == ids["status_ids"]["in_progress"]

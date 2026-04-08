@@ -1,31 +1,61 @@
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import replace
+from enum import StrEnum
 from pathlib import Path
 
+from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual.containers import Vertical, Horizontal
+from textual.message import Message
 from textual.widgets import Header, Footer
 
+from sticky_notes.active_workspace import get_active_workspace_id, set_active_workspace_id
 from sticky_notes.connection import DEFAULT_DB_PATH, get_connection, init_db
+from sticky_notes.models import Group, Project, Status, Task, Workspace
+from sticky_notes.service import get_group_detail, get_project_detail, get_task_detail, get_workspace, list_workspaces, update_group, update_project, update_task, update_workspace
 from sticky_notes.tui.config import TuiConfig, load_config
-from sticky_notes.tui.screens.settings import SettingsScreen
-from sticky_notes.tui.widgets import BoardView
+from sticky_notes.tui.model import WorkspaceModel, load_workspace_model
+from sticky_notes.tui.screens import GroupEditModal, ProjectEditModal, TaskEditModal, WorkspaceEditModal, WorkspaceSwitchModal
+from sticky_notes.tui.widgets import KanbanBoard, TaskCard, WorkspaceTree
+
+
+class ActivePanel(StrEnum):
+    TREE = "tree"
+    KANBAN = "kanban"
+
+
+class _RefreshRequested(Message):
+    """Coalescing refresh message — duplicates in the queue merge into one."""
+
+    def can_replace(self, message: Message) -> bool:
+        return isinstance(message, _RefreshRequested)
 
 
 class StickyNotesApp(App):
     CSS_PATH = "sticky_notes.tcss"
-    TITLE = "Sticky Notes"
-
+    TITLE = "\U0001f4cc Sticky Notes \U0001f4cc"
     BINDINGS = [
-        Binding("q", "quit", "Quit"),
-        Binding("s", "push_screen('settings')", "Settings"),
+        Binding("alt+w", "focus_tree", "Workspace", show=True),
+        Binding("alt+b", "focus_kanban", "Board", show=True),
+        Binding("r", "refresh", "Refresh", show=True),
+        Binding("e", "edit", "Edit", show=True),
+        Binding("alt+j", "status_left", "◀ Status", show=False),
+        Binding("alt+left", "status_left", show=False),
+        Binding("alt+l", "status_right", "Status ▶", show=False),
+        Binding("alt+right", "status_right", show=False),
+        Binding("s", "switch_workspace", "Switch", show=True),
+        Binding("ctrl+q", "quit", "Quit", show=True),
     ]
-
-    SCREENS = {"settings": SettingsScreen}
 
     conn: sqlite3.Connection
     config: TuiConfig
+    active_panel: ActivePanel = ActivePanel.TREE
+    _kanban_last_focused: TaskCard | None = None
+    _workspace_id: int | None = None
+    _model: WorkspaceModel | None = None
 
     def __init__(self, db_path: Path | None = None):
         super().__init__()
@@ -36,12 +66,225 @@ class StickyNotesApp(App):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        yield BoardView()
+
+        with Horizontal(id="main-panels"):
+            with Vertical(id="workspaces-panel"):
+                yield WorkspaceTree("Root", id="workspaces-tree")
+            with Vertical(id="kanban-panel"):
+                yield KanbanBoard(id="kanban-columns")
         yield Footer()
 
-    def on_mount(self) -> None:
-        self.dark = self.config.theme == "dark"
+    async def on_mount(self) -> None:
+        tree = self.query_one(WorkspaceTree)
+        kanban = self.query_one(KanbanBoard)
+        self._workspace_id = get_active_workspace_id(self.db_path)
+        if self._workspace_id is None:
+            tree.show_empty("No active workspace")
+            return
+        try:
+            model = load_workspace_model(self.conn, self._workspace_id)
+        except LookupError:
+            tree.show_empty("Workspace not found")
+            return
+        model = replace(model, statuses=self._order_statuses(model.statuses))
+        self._model = model
+        tree.load(model)
+        await kanban.load(model)
+        tree.focus()
+        self.set_interval(self.config.auto_refresh_seconds, self.request_refresh)
 
-    def on_unmount(self) -> None:
-        if hasattr(self, "conn"):
-            self.conn.close()
+    def request_refresh(self) -> None:
+        self.post_message(_RefreshRequested())
+
+    def action_refresh(self) -> None:
+        self.request_refresh()
+
+    async def on__refresh_requested(self, event: _RefreshRequested) -> None:
+        if self._workspace_id is None:
+            return
+        try:
+            model = load_workspace_model(self.conn, self._workspace_id)
+        except LookupError:
+            return
+        model = replace(model, statuses=self._order_statuses(model.statuses))
+        tree = self.query_one(WorkspaceTree)
+        kanban = self.query_one(KanbanBoard)
+        # Remember focused task id before reload
+        prev_task_id: int | None = None
+        if self._kanban_last_focused is not None:
+            prev_task_id = self._kanban_last_focused.task_data.id
+        self._model = model
+        tree.load(model)
+        await kanban.sync(model)
+        # Restore focus
+        if self.active_panel == ActivePanel.KANBAN and prev_task_id is not None:
+            for card in self.query(TaskCard):
+                if card.task_data.id == prev_task_id:
+                    self._kanban_last_focused = card
+                    self.set_focus(card)
+                    return
+            # Task no longer exists — focus first card or fall back to tree
+            cards = self.query(TaskCard)
+            if cards:
+                self._kanban_last_focused = cards.first()
+                self.set_focus(cards.first())
+            else:
+                self.set_focus(tree)
+        else:
+            self.set_focus(tree)
+
+    def on_descendant_focus(self, event: events.DescendantFocus) -> None:
+        widget = event.widget
+        if isinstance(widget, WorkspaceTree):
+            self.active_panel = ActivePanel.TREE
+        elif isinstance(widget, TaskCard):
+            self.active_panel = ActivePanel.KANBAN
+            self._kanban_last_focused = widget
+
+    def action_status_left(self) -> None:
+        self.query_one(KanbanBoard)._move_status(-1)
+
+    def action_status_right(self) -> None:
+        self.query_one(KanbanBoard)._move_status(1)
+
+    def action_focus_tree(self) -> None:
+        self.set_focus(self.query_one(WorkspaceTree))
+
+    def action_focus_kanban(self) -> None:
+        if self._kanban_last_focused is not None and self._kanban_last_focused.parent is not None:
+            self.set_focus(self._kanban_last_focused)
+        else:
+            cards = self.query("TaskCard")
+            if cards:
+                self.set_focus(cards.first())
+
+    def action_edit(self) -> None:
+        if self._model is None:
+            return
+        if self.active_panel == ActivePanel.TREE:
+            tree = self.query_one(WorkspaceTree)
+            node = tree.cursor_node
+            if node is not None:
+                if isinstance(node.data, Task):
+                    self._edit_task(node.data)
+                elif isinstance(node.data, Project):
+                    self._edit_project(node.data)
+                elif isinstance(node.data, Group):
+                    self._edit_group(node.data)
+                elif isinstance(node.data, Workspace):
+                    self._edit_workspace(node.data)
+        elif self._kanban_last_focused is not None:
+            self._edit_task(self._kanban_last_focused.task_data)
+
+    def _edit_task(self, task: Task) -> None:
+        detail = get_task_detail(self.conn, task.id)
+        statuses = self._model.statuses
+        projects = tuple(p.project for p in self._model.projects)
+        self.push_screen(
+            TaskEditModal(detail, statuses, projects),
+            callback=self._on_task_edit_dismiss,
+        )
+
+    def _on_task_edit_dismiss(self, result: dict | None) -> None:
+        if result is None:
+            return
+        try:
+            update_task(self.conn, result["task_id"], result["changes"], source="tui")
+        except ValueError as e:
+            self.notify(str(e), severity="error")
+            return
+        self.request_refresh()
+
+    def _edit_project(self, project: Project) -> None:
+        detail = get_project_detail(self.conn, project.id)
+        self.push_screen(
+            ProjectEditModal(detail),
+            callback=self._on_project_edit_dismiss,
+        )
+
+    def _on_project_edit_dismiss(self, result: dict | None) -> None:
+        if result is None:
+            return
+        try:
+            update_project(self.conn, result["project_id"], result["changes"])
+        except ValueError as e:
+            self.notify(str(e), severity="error")
+            return
+        self.request_refresh()
+
+    def _edit_group(self, group: Group) -> None:
+        detail = get_group_detail(self.conn, group.id)
+        self.push_screen(
+            GroupEditModal(detail),
+            callback=self._on_group_edit_dismiss,
+        )
+
+    def _on_group_edit_dismiss(self, result: dict | None) -> None:
+        if result is None:
+            return
+        try:
+            update_group(self.conn, result["group_id"], result["changes"])
+        except ValueError as e:
+            self.notify(str(e), severity="error")
+            return
+        self.request_refresh()
+
+    def _edit_workspace(self, workspace: Workspace) -> None:
+        fresh = get_workspace(self.conn, workspace.id)
+        self.push_screen(
+            WorkspaceEditModal(fresh),
+            callback=self._on_workspace_edit_dismiss,
+        )
+
+    def _on_workspace_edit_dismiss(self, result: dict | None) -> None:
+        if result is None:
+            return
+        try:
+            update_workspace(self.conn, result["workspace_id"], result["changes"])
+        except ValueError as e:
+            self.notify(str(e), severity="error")
+            return
+        self.request_refresh()
+
+    async def on_kanban_board_task_status_move(self, event: KanbanBoard.TaskStatusMove) -> None:
+        try:
+            update_task(self.conn, event.task.id, {"status_id": event.new_status_id}, source="tui")
+        except ValueError as e:
+            self.notify(str(e), severity="error")
+            return
+        self.request_refresh()
+
+    def action_switch_workspace(self) -> None:
+        workspaces = list_workspaces(self.conn)
+        if not workspaces or self._workspace_id is None:
+            return
+        self.push_screen(
+            WorkspaceSwitchModal(workspaces, self._workspace_id),
+            callback=self._on_workspace_switch,
+        )
+
+    async def _on_workspace_switch(self, workspace_id: int | None) -> None:
+        if workspace_id is None or workspace_id == self._workspace_id:
+            return
+        set_active_workspace_id(self.db_path, workspace_id)
+        self._workspace_id = workspace_id
+        try:
+            model = load_workspace_model(self.conn, workspace_id)
+        except LookupError:
+            self.notify("Workspace not found", severity="error")
+            return
+        model = replace(model, statuses=self._order_statuses(model.statuses))
+        self._model = model
+        self._kanban_last_focused = None
+        tree = self.query_one(WorkspaceTree)
+        kanban = self.query_one(KanbanBoard)
+        tree.load(model)
+        await kanban.load(model)
+        tree.focus()
+
+    def _order_statuses(self, statuses: tuple[Status, ...]) -> tuple[Status, ...]:
+        order = self.config.status_order
+        if not order:
+            return statuses
+        order_map = {sid: i for i, sid in enumerate(order)}
+        return tuple(sorted(statuses, key=lambda s: (order_map.get(s.id, len(order)), s.id)))

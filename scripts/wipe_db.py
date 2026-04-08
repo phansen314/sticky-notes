@@ -4,7 +4,7 @@
 Usage:
     python scripts/wipe_db.py [DB_PATH] [--yes]
 
-Deletes: <DB_PATH>, <DB_PATH>-wal, <DB_PATH>-shm, and <DB_DIR>/active-board.
+Deletes: <DB_PATH>, <DB_PATH>-wal, <DB_PATH>-shm, and <DB_DIR>/active-workspace.
 This is intentionally NOT a `todo` subcommand — destructive operations are
 kept off the agent-accessible CLI surface.
 
@@ -18,13 +18,13 @@ import argparse
 import sys
 from pathlib import Path
 
-from sticky_notes.active_board import active_board_path
+from sticky_notes.active_workspace import active_workspace_path
 from sticky_notes.connection import DEFAULT_DB_PATH
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Delete the sticky-notes database and active-board pointer."
+        description="Delete the sticky-notes database and active-workspace pointer."
     )
     parser.add_argument(
         "db",
@@ -40,7 +40,7 @@ def main() -> None:
         db,
         db.with_name(db.name + "-wal"),
         db.with_name(db.name + "-shm"),
-        active_board_path(db),
+        active_workspace_path(db),
     ]
 
     existing = [p for p in targets if p.exists()]
@@ -68,9 +68,9 @@ def main() -> None:
             print(f"(already gone): {p}")
 
     print()
-    print("To recreate a board, run one of:")
-    print("  todo board create <name>")
-    print("  todo board use <existing-name>")
+    print("To recreate a workspace, run one of:")
+    print("  todo workspace create <name>")
+    print("  todo workspace use <existing-name>")
 
 
 if __name__ == "__main__":
