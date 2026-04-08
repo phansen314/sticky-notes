@@ -39,15 +39,15 @@ class StickyNotesApp(App):
     CSS_PATH = "sticky_notes.tcss"
     TITLE = "\U0001f4cc Sticky Notes \U0001f4cc"
     BINDINGS = [
-        Binding("alt+w", "focus_tree", "Workspace", show=True),
-        Binding("alt+b", "focus_kanban", "Board", show=True),
+        Binding("w", "focus_tree", "Workspace", show=True),
+        Binding("b", "focus_kanban", "Board", show=True),
         Binding("r", "refresh", "Refresh", show=True),
         Binding("e", "edit", "Edit", show=True),
-        Binding("alt+j", "status_left", "◀ Status", show=False),
-        Binding("alt+left", "status_left", show=False),
-        Binding("alt+l", "status_right", "Status ▶", show=False),
-        Binding("alt+right", "status_right", show=False),
-        Binding("alt+n", "new", "New", show=True),
+        Binding("[", "status_left", "◀ Status", show=False),
+        Binding("shift+left", "status_left", show=False),
+        Binding("]", "status_right", "Status ▶", show=False),
+        Binding("shift+right", "status_right", show=False),
+        Binding("n", "new", "New", show=True),
         Binding("s", "switch_workspace", "Switch", show=True),
         Binding("ctrl+q", "quit", "Quit", show=True),
     ]

@@ -96,18 +96,18 @@ Entry point: `todo tui` (or `todo tui --db path/to/db`).
 - **Model** (`tui/model.py`): `WorkspaceModel` loads all non-archived data for the active workspace via existing service functions, then organizes it into a tree: `WorkspaceModel` → `ProjectNode` → `GroupNode` (recursive). Tasks without a project live in `unassigned_tasks`. Groups nest recursively via `parent_id`. Dependency-aware topological ordering for both tree and kanban.
 - **View / Controller** (`tui/app.py`): `StickyNotesApp` — two-panel layout. Left: `#workspaces-panel` (25% width) with `WorkspaceTree`. Right: `#kanban-panel` with `KanbanBoard` — one scrollable column per status with `TaskCard` widgets. Diff-based kanban sync with coalescing refresh (duplicates merge in the message queue). `app.py` acts as both view and controller — dispatches keybindings, pushes modals, calls service layer on dismiss.
 - **Screens**: `BaseEditModal` provides shared form scaffolding: save/cancel buttons, error display, field navigation (`ctrl+n`/`ctrl+b`), date parsing (`_parse_date_field`), change diffing (`_diff_and_dismiss`). Edit modals diff form values against the original entity and dismiss with changes only. Create modals dismiss with the full form data dict. `_dismiss_callback` in `app.py` wraps the common null-check → try/except → notify → refresh pattern for all modal callbacks.
-- **Widgets**: `WorkspaceTree` (tree with emoji prefixes: workspace, project, group, task — node `data` carries the model object), `KanbanBoard` (diff-based card sync, status-move via alt+j/alt+l), `TaskCard` (focusable, renders task summary), `MarkdownEditor` (edit/preview toggle for description fields).
+- **Widgets**: `WorkspaceTree` (tree with emoji prefixes: workspace, project, group, task — node `data` carries the model object), `KanbanBoard` (diff-based card sync, status-move via `[`/`]`), `TaskCard` (focusable, renders task summary), `MarkdownEditor` (edit/preview toggle for description fields).
 
 **Keybindings:**
 | Key | Action |
 |-----|--------|
-| `alt+w` | Focus workspace tree |
-| `alt+b` | Focus kanban board |
+| `w` | Focus workspace tree |
+| `b` | Focus kanban board |
 | `r` | Refresh |
 | `e` | Edit selected entity |
-| `alt+n` | Create new (task/group/project selector) |
+| `n` | Create new (task/group/project selector) |
 | `s` | Switch workspace |
-| `alt+j` / `alt+l` | Move task left/right across statuses |
+| `[` / `]` | Move task left/right across statuses |
 | `ctrl+q` | Quit |
 
 **Config:** `~/.config/sticky-notes/tui.toml` — theme, show_archived, confirm_archive, default_priority, status_order, auto_refresh_seconds. Loaded via `TuiConfig` dataclass in `tui/config.py`.
