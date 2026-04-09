@@ -1834,3 +1834,145 @@ class TestDepReCreation:
         self.cli("dep", "archive", "2", "1")
         out, _ = self.cli("dep", "create", "2", "1")
         assert "now blocked by" in out
+
+
+# ---- End-to-end smoke test ----
+
+
+class TestEndToEndSmoke:
+    """Full lifecycle: build a rich workspace tree, query it, mutate it,
+    then cascade-archive everything."""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, cli, db_path):
+        self.cli = cli
+        self.db_path = db_path
+        # Workspace + statuses
+        cli("workspace", "create", "dev")
+        cli("status", "create", "todo")
+        cli("status", "create", "in-progress")
+        cli("status", "create", "done")
+        # Projects
+        cli("project", "create", "backend")
+        cli("project", "create", "frontend")
+        # Groups (nested)
+        cli("group", "create", "api", "--project", "backend")
+        cli("group", "create", "endpoints", "--parent", "api", "--project", "backend")
+        cli("group", "create", "db", "--project", "backend")
+        # Tags
+        cli("tag", "create", "bug")
+        cli("tag", "create", "urgent")
+        cli("tag", "create", "tech-debt")
+        # Tasks
+        cli("task", "create", "Design API", "-S", "todo", "-p", "backend", "--tag", "bug")
+        cli("task", "create", "Implement routes", "-S", "in-progress", "-p", "backend", "--tag", "urgent")
+        cli("task", "create", "Write migrations", "-S", "todo", "-p", "backend")
+        cli("task", "create", "Dashboard UI", "-S", "done", "-p", "frontend")
+        cli("task", "create", "Cleanup", "-S", "todo")
+        # Group assignments
+        cli("group", "assign", "1", "api", "--project", "backend")
+        cli("group", "assign", "2", "endpoints", "--project", "backend")
+        cli("group", "assign", "3", "db", "--project", "backend")
+        # Task dependencies
+        cli("dep", "create", "2", "1")   # t2 blocked-by t1
+        cli("dep", "create", "3", "1")   # t3 blocked-by t1
+        # Group dependencies
+        cli("group-dep", "create", "endpoints", "db", "--project", "backend")
+
+    def test_listing_commands(self):
+        out, _ = self.cli("task", "ls")
+        assert "Design API" in out
+        assert "Implement routes" in out
+        assert "Write migrations" in out
+        assert "Dashboard UI" in out
+        assert "Cleanup" in out
+
+        out, _ = self.cli("task", "ls", "--status", "todo")
+        assert "Design API" in out
+        assert "Cleanup" in out
+        assert "Implement routes" not in out
+
+        out, _ = self.cli("status", "ls")
+        assert "todo" in out
+        assert "in-progress" in out
+        assert "done" in out
+
+        out, _ = self.cli("project", "ls")
+        assert "backend" in out
+        assert "frontend" in out
+
+        out, _ = self.cli("group", "ls", "--project", "backend")
+        assert "api" in out
+        assert "endpoints" in out
+        assert "db" in out
+
+        out, _ = self.cli("group", "ls", "--project", "backend", "--tree")
+        # Tree output indents children under parents
+        assert "api" in out
+        assert "endpoints" in out
+
+        out, _ = self.cli("tag", "ls")
+        assert "bug" in out
+        assert "urgent" in out
+        assert "tech-debt" in out
+
+    def test_show_and_detail(self):
+        # t2 is blocked by t1
+        out, _ = self.cli("task", "show", "2")
+        assert "task-0001" in out  # blocked-by reference
+
+        out, _ = self.cli("project", "show", "backend")
+        assert "backend" in out
+
+        out, _ = self.cli("group", "show", "api", "--project", "backend")
+        assert "api" in out
+
+    def test_context(self):
+        out, _ = self.cli("context")
+        assert "todo" in out
+        assert "in-progress" in out
+        assert "done" in out
+        assert "Design API" in out
+        assert "backend" in out
+        assert "bug" in out
+
+    def test_export(self):
+        out, _ = self.cli("export", "--md")
+        assert "dev" in out
+        assert "Design API" in out
+        assert "Dashboard UI" in out
+
+    def test_task_edit_and_move(self):
+        self.cli("task", "edit", "5", "--title", "Cleanup v2", "--priority", "3")
+        self.cli("task", "mv", "5", "in-progress")
+        out, _ = self.cli("task", "show", "5")
+        assert "Cleanup v2" in out
+        assert "in-progress" in out
+
+    def test_dep_archive_and_recreate(self):
+        self.cli("dep", "archive", "2", "1")
+        out, _ = self.cli("task", "show", "2")
+        assert "Blocked by" not in out  # no longer blocked by t1
+
+        self.cli("dep", "create", "2", "1")
+        out, _ = self.cli("task", "show", "2")
+        assert "task-0001" in out  # blocked again
+
+    def test_dry_run_workspace(self):
+        out, _ = self.cli("workspace", "archive", "--dry-run")
+        assert "dry-run" in out
+        assert "projects: 2" in out
+        assert "groups: 3" in out
+        assert "statuses: 3" in out
+        assert "tasks: 5" in out
+        # Nothing actually archived
+        out, _ = self.cli("task", "ls")
+        assert "Design API" in out
+
+    def test_cascade_archive_workspace(self):
+        self.cli("workspace", "archive", "--force")
+        assert get_active_workspace_id(self.db_path) is None
+        out, _ = self.cli("workspace", "ls")
+        assert "dev" not in out
+        out, _ = self.cli("workspace", "ls", "--all")
+        assert "dev" in out
