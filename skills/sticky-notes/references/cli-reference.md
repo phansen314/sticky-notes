@@ -54,7 +54,7 @@ todo task create "Add tests" -S "To Do" --tag backend --tag ci
 todo task create "Fix layout" -S "To Do" --group "Frontend" --project "Q2 launch"
 ```
 
-> **JSON and tags:** The `task create` JSON response returns the raw `Task` object which has no `tags` field. Tags attached via `--tag` are not reflected in the response. To see attached tags, follow up with `todo task show <task_num>` which returns a `TaskDetail` with a `tags` array.
+The JSON response is a full `TaskDetail` (same shape as `todo task show`), including any tags attached via `--tag`.
 
 ---
 
@@ -484,7 +484,8 @@ Resolves a task by title string instead of `task-NNNN` ID. Accepted by:
 
 | Command | `data` shape |
 |---|---|
-| `task create`, `task edit`, `task archive`, `task mv` | full Task object |
+| `task create` | full TaskDetail (with `status`, `project`, `group`, `tags`, `blocked_by`, `blocks`, `history`, `metadata`) |
+| `task edit`, `task archive`, `task mv` | full Task object |
 | `workspace create/rename/archive` | full Workspace object |
 | `status create/rename/archive` | full Status object |
 | `project create/archive` | full Project object |

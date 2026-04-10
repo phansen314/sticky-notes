@@ -139,7 +139,8 @@ def cmd_task_create(conn: sqlite3.Connection, args: argparse.Namespace, db_path:
         group_id=group_id,
         tags=tuple(args.tag or ()),
     )
-    return Ok(data=task, text=f"created {format_task_num(task.id)}: {task.title}")
+    detail = service.get_task_detail(conn, task.id)
+    return Ok(data=detail, text=f"created {format_task_num(task.id)}: {task.title}")
 
 
 def cmd_task_ls(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:

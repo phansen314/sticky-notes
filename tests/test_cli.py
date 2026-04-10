@@ -250,6 +250,11 @@ class TestTaskCommands:
         data = json.loads(out)
         assert data["data"]["description"] is None
 
+    def test_create_json_includes_tags(self, cli):
+        out, _ = cli("--json", "task", "create", "Tagged", "-S", "todo", "--tag", "backend", "--tag", "urgent")
+        data = json.loads(out)["data"]
+        assert [t["name"] for t in data["tags"]] == ["backend", "urgent"]
+
     def test_ls_grouped_by_column(self, cli):
         cli("task", "create", "Task A", "-S", "todo")
         cli("task", "create", "Task B", "-S", "in progress")
