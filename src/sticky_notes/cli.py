@@ -446,8 +446,8 @@ def cmd_project_archive(conn: sqlite3.Connection, args: argparse.Namespace, db_p
 def cmd_dep_create(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
     workspace = _resolve_workspace(conn, args, db_path)
     by_title = args.by_title
-    task_id = _resolve_task(conn, workspace, args.task_num, by_title=by_title)
-    depends_on_id = _resolve_task(conn, workspace, args.depends_on_num, by_title=by_title)
+    task_id = _resolve_task(conn, workspace, args.task, by_title=by_title)
+    depends_on_id = _resolve_task(conn, workspace, args.blocked_by, by_title=by_title)
     service.add_dependency(conn, task_id, depends_on_id)
     return Ok(
         data={"task_id": task_id, "depends_on_id": depends_on_id},
@@ -458,8 +458,8 @@ def cmd_dep_create(conn: sqlite3.Connection, args: argparse.Namespace, db_path: 
 def cmd_dep_archive(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
     workspace = _resolve_workspace(conn, args, db_path)
     by_title = args.by_title
-    task_id = _resolve_task(conn, workspace, args.task_num, by_title=by_title)
-    depends_on_id = _resolve_task(conn, workspace, args.depends_on_num, by_title=by_title)
+    task_id = _resolve_task(conn, workspace, args.task, by_title=by_title)
+    depends_on_id = _resolve_task(conn, workspace, args.blocked_by, by_title=by_title)
     service.archive_dependency(conn, task_id, depends_on_id)
     return Ok(
         data={"task_id": task_id, "depends_on_id": depends_on_id},
@@ -1229,14 +1229,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_da = dep_sub.add_parser("create", help="add a dependency")
     p_da.set_defaults(command="dep_create")
-    p_da.add_argument("task_num")
-    p_da.add_argument("depends_on_num")
+    p_da.add_argument("--task", required=True, help="task that will be blocked")
+    p_da.add_argument("--blocked-by", dest="blocked_by", required=True, help="task that blocks --task")
     p_da.add_argument("--by-title", action="store_true", help="resolve tasks by title string")
 
     p_dr = dep_sub.add_parser("archive", help="archive a dependency")
     p_dr.set_defaults(command="dep_archive")
-    p_dr.add_argument("task_num")
-    p_dr.add_argument("depends_on_num")
+    p_dr.add_argument("--task", required=True, help="task that was blocked")
+    p_dr.add_argument("--blocked-by", dest="blocked_by", required=True, help="task that was blocking --task")
     p_dr.add_argument("--by-title", action="store_true", help="resolve tasks by title string")
 
     # ---- Group subcommands ----

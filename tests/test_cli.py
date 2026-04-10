@@ -328,7 +328,7 @@ class TestTaskCommands:
     def test_show_with_deps(self, cli):
         cli("task", "create", "Task A", "-S", "todo")
         cli("task", "create", "Task B", "-S", "todo")
-        cli("dep", "create", "2", "1")
+        cli("dep", "create", "--task", "2", "--blocked-by", "1")
         out, _ = cli("task", "show", "2")
         assert "Blocked by:  task-0001" in out
         # Also check the "Blocks" line from the other side
@@ -439,7 +439,7 @@ class TestTaskCommands:
     def test_dep_create_by_title(self, cli):
         cli("task", "create", "Task A", "-S", "todo")
         cli("task", "create", "Task B", "-S", "todo")
-        out, _ = cli("dep", "create", "Task B", "Task A", "--by-title")
+        out, _ = cli("dep", "create", "--task", "Task B", "--blocked-by", "Task A", "--by-title")
         assert "task-0002 now blocked by task-0001" in out
 
 
@@ -527,14 +527,14 @@ class TestDependencyCommands:
     def test_add(self, cli):
         cli("task", "create", "Task A", "-S", "todo")
         cli("task", "create", "Task B", "-S", "todo")
-        out, _ = cli("dep", "create", "2", "1")
+        out, _ = cli("dep", "create", "--task", "2", "--blocked-by", "1")
         assert "task-0002 now blocked by task-0001" in out
 
     def test_rm(self, cli):
         cli("task", "create", "Task A", "-S", "todo")
         cli("task", "create", "Task B", "-S", "todo")
-        cli("dep", "create", "2", "1")
-        out, _ = cli("dep", "archive", "2", "1")
+        cli("dep", "create", "--task", "2", "--blocked-by", "1")
+        out, _ = cli("dep", "archive", "--task", "2", "--blocked-by", "1")
         assert "archived dependency" in out
 
 
@@ -742,7 +742,7 @@ class TestMvWorkspace:
         cli("workspace", "use", "dev")
         cli("task", "create", "Task A", "-S", "todo")
         cli("task", "create", "Task B", "-S", "todo")
-        cli("dep", "create", "2", "1")
+        cli("dep", "create", "--task", "2", "--blocked-by", "1")
         out, _ = cli("task", "transfer", "1", "--to", "ops", "--status", "backlog", "--dry-run")
         assert "dependencies" in out
         assert "FAIL" in out
@@ -1181,7 +1181,7 @@ class TestJsonOutput:
         cli("status", "create", "Todo")
         cli("task", "create", "T1", "-S", "todo")
         cli("task", "create", "T2", "-S", "todo")
-        data = self._json(cli, "dep", "create", "1", "2")
+        data = self._json(cli, "dep", "create", "--task", "1", "--blocked-by", "2")
         assert data["ok"] is True
         assert data["data"]["task_id"] == 1
         assert data["data"]["depends_on_id"] == 2
@@ -1996,9 +1996,9 @@ class TestDepReCreation:
         cli("task", "create", "b", "-S", "todo")
 
     def test_readd_task_dep_after_archive(self):
-        self.cli("dep", "create", "2", "1")
-        self.cli("dep", "archive", "2", "1")
-        out, _ = self.cli("dep", "create", "2", "1")
+        self.cli("dep", "create", "--task", "2", "--blocked-by", "1")
+        self.cli("dep", "archive", "--task", "2", "--blocked-by", "1")
+        out, _ = self.cli("dep", "create", "--task", "2", "--blocked-by", "1")
         assert "now blocked by" in out
 
 
@@ -2040,8 +2040,8 @@ class TestEndToEndSmoke:
         cli("group", "assign", "2", "endpoints", "--project", "backend")
         cli("group", "assign", "3", "db", "--project", "backend")
         # Task dependencies
-        cli("dep", "create", "2", "1")   # t2 blocked-by t1
-        cli("dep", "create", "3", "1")   # t3 blocked-by t1
+        cli("dep", "create", "--task", "2", "--blocked-by", "1")
+        cli("dep", "create", "--task", "3", "--blocked-by", "1")
         # Group dependencies
         cli("group", "dep", "create", "endpoints", "db", "--project", "backend")
 
@@ -2116,11 +2116,11 @@ class TestEndToEndSmoke:
         assert "in-progress" in out
 
     def test_dep_archive_and_recreate(self):
-        self.cli("dep", "archive", "2", "1")
+        self.cli("dep", "archive", "--task", "2", "--blocked-by", "1")
         out, _ = self.cli("task", "show", "2")
         assert "Blocked by" not in out  # no longer blocked by t1
 
-        self.cli("dep", "create", "2", "1")
+        self.cli("dep", "create", "--task", "2", "--blocked-by", "1")
         out, _ = self.cli("task", "show", "2")
         assert "task-0001" in out  # blocked again
 

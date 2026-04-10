@@ -345,16 +345,16 @@ todo status archive "Old Status" --force
 
 ## `todo dep` Subcommands
 
-Semantics: `todo dep create <task> <depends-on>` means **task is blocked by depends-on**. No `dep ls` — use `todo task show <task>` to see `blocked_by` and `blocks` arrays.
+Flags are explicit about direction: `--task X --blocked-by Y` means **X is blocked by Y**. No `dep ls` — use `todo task show <task>` to see `blocked_by` and `blocks` arrays.
 
-| Command | Args | Flags | Description |
-|---|---|---|---|
-| `dep create` | `task_num depends_on_num` | `--by-title` | Add dependency |
-| `dep archive` | `task_num depends_on_num` | `--by-title` | Archive dependency (soft-delete) |
+| Command | Flags | Description |
+|---|---|---|
+| `dep create` | `--task TASK --blocked-by TASK` (both required), `--by-title` | Add dependency |
+| `dep archive` | `--task TASK --blocked-by TASK` (both required), `--by-title` | Archive dependency (soft-delete) |
 
 ```sh
-todo dep create task-0003 task-0001   # task-0003 is blocked by task-0001
-todo dep archive task-0003 task-0001
+todo dep create --task task-0003 --blocked-by task-0001   # task-0003 is blocked by task-0001
+todo dep archive --task task-0003 --blocked-by task-0001
 ```
 
 ---

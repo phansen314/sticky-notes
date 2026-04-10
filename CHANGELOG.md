@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **`group mv`** replaces the `--parent ''` magic sentinel with an explicit `--to-top` flag. `--parent TITLE` and `--to-top` are now mutually exclusive and one is required. Breaking.
 - **`todo export -o FILE`** now refuses to clobber an existing file unless `--overwrite` is passed. Matches the `todo backup` contract. Breaking for scripts that relied on silent overwrite.
 - **`todo group-dep`** moved under `todo group dep`. The top-level hyphenated verb is gone; use `todo group dep create` / `todo group dep archive` instead. Breaking.
+- **`todo dep create` / `todo dep archive`** now take `--task TASK --blocked-by TASK` flags instead of two positional arguments. Removes the "which came first, the blocker or the blocked?" ambiguity. Breaking.
 
 ## [0.7.0] — 2026-04-10
 
