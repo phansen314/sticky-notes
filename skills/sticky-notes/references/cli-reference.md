@@ -396,6 +396,8 @@ todo tag archive backend --unassign
 
 Groups are project-scoped hierarchical collections of tasks. All group commands accept `--project/-p` to scope to a project.
 
+**Project flag asymmetry:** `group create` requires `--project` because groups cannot exist outside a project. `group ls` makes it optional — omit it to list every group in the workspace across all projects. This is intentional: creation demands the scope, listing is allowed to span it for convenience.
+
 | Command | Args | Flags | Description |
 |---|---|---|---|
 | `group create` | `title` | `--project/-p` (**required**), `--parent TITLE`, `--desc/-d` | Create group; optionally nested under parent |

@@ -1234,11 +1234,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_gc.add_argument("title")
     p_gc.add_argument("--desc", "-d", default=None, help="group description")
     p_gc.add_argument("--parent", default=None, help="parent group title")
-    p_gc.add_argument("--project", "-p", required=True, help="project name")
+    p_gc.add_argument("--project", "-p", required=True, help="project name (required; groups are project-scoped)")
 
     p_gl = grp_sub.add_parser("ls", help="list groups")
     p_gl.set_defaults(command="group_ls")
-    p_gl.add_argument("--project", "-p", default=None, help="filter by project name")
+    p_gl.add_argument("--project", "-p", default=None, help="filter by project name (optional; lists all projects when omitted)")
     p_gl.add_argument("--all", "-a", action="store_true", help="include archived")
     p_gl.add_argument("--tree", action="store_true", help="tree view")
 
