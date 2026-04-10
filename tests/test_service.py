@@ -2196,3 +2196,124 @@ class TestTaskMeta:
         service.set_task_meta(conn, tid, "Branch", "old")
         service.set_task_meta(conn, tid, "BRANCH", "new")
         assert service.get_task(conn, tid).metadata == {"branch": "new"}
+
+
+# ---- Workspace / Project / Group metadata ----
+
+
+class TestWorkspaceMeta:
+    def _setup(self, conn: sqlite3.Connection) -> int:
+        return insert_workspace(conn, "w")
+
+    def test_set_get(self, conn: sqlite3.Connection) -> None:
+        wid = self._setup(conn)
+        ws = service.set_workspace_meta(conn, wid, "env", "prod")
+        assert ws.metadata == {"env": "prod"}
+        assert service.get_workspace_meta(conn, wid, "env") == "prod"
+
+    def test_set_normalizes_case(self, conn: sqlite3.Connection) -> None:
+        wid = self._setup(conn)
+        service.set_workspace_meta(conn, wid, "ENV", "prod")
+        assert service.get_workspace(conn, wid).metadata == {"env": "prod"}
+
+    def test_get_case_insensitive(self, conn: sqlite3.Connection) -> None:
+        wid = self._setup(conn)
+        service.set_workspace_meta(conn, wid, "env", "prod")
+        assert service.get_workspace_meta(conn, wid, "ENV") == "prod"
+
+    def test_remove(self, conn: sqlite3.Connection) -> None:
+        wid = self._setup(conn)
+        service.set_workspace_meta(conn, wid, "env", "prod")
+        service.remove_workspace_meta(conn, wid, "env")
+        assert service.get_workspace(conn, wid).metadata == {}
+
+    def test_remove_missing_key_raises(self, conn: sqlite3.Connection) -> None:
+        wid = self._setup(conn)
+        with pytest.raises(LookupError, match="not found"):
+            service.remove_workspace_meta(conn, wid, "nope")
+
+    def test_get_missing_key_raises(self, conn: sqlite3.Connection) -> None:
+        wid = self._setup(conn)
+        with pytest.raises(LookupError, match="not found"):
+            service.get_workspace_meta(conn, wid, "nope")
+
+    def test_value_too_long_raises(self, conn: sqlite3.Connection) -> None:
+        wid = self._setup(conn)
+        with pytest.raises(ValueError, match="500"):
+            service.set_workspace_meta(conn, wid, "k", "v" * 501)
+
+    def test_key_invalid_raises(self, conn: sqlite3.Connection) -> None:
+        wid = self._setup(conn)
+        with pytest.raises(ValueError, match="must match"):
+            service.set_workspace_meta(conn, wid, "BAD KEY", "v")
+
+
+class TestProjectMeta:
+    def _setup(self, conn: sqlite3.Connection) -> int:
+        bid = insert_workspace(conn, "w")
+        return insert_project(conn, bid, "p")
+
+    def test_set_get(self, conn: sqlite3.Connection) -> None:
+        pid = self._setup(conn)
+        proj = service.set_project_meta(conn, pid, "owner", "alice")
+        assert proj.metadata == {"owner": "alice"}
+        assert service.get_project_meta(conn, pid, "owner") == "alice"
+
+    def test_set_normalizes_case(self, conn: sqlite3.Connection) -> None:
+        pid = self._setup(conn)
+        service.set_project_meta(conn, pid, "OWNER", "alice")
+        assert service.get_project(conn, pid).metadata == {"owner": "alice"}
+
+    def test_get_case_insensitive(self, conn: sqlite3.Connection) -> None:
+        pid = self._setup(conn)
+        service.set_project_meta(conn, pid, "owner", "alice")
+        assert service.get_project_meta(conn, pid, "OWNER") == "alice"
+
+    def test_remove(self, conn: sqlite3.Connection) -> None:
+        pid = self._setup(conn)
+        service.set_project_meta(conn, pid, "owner", "alice")
+        service.remove_project_meta(conn, pid, "owner")
+        assert service.get_project(conn, pid).metadata == {}
+
+    def test_remove_missing_key_raises(self, conn: sqlite3.Connection) -> None:
+        pid = self._setup(conn)
+        with pytest.raises(LookupError, match="not found"):
+            service.remove_project_meta(conn, pid, "nope")
+
+
+class TestGroupMeta:
+    def _setup(self, conn: sqlite3.Connection) -> int:
+        bid = insert_workspace(conn, "w")
+        pid = insert_project(conn, bid, "p")
+        return service.create_group(conn, pid, "g").id
+
+    def test_set_get(self, conn: sqlite3.Connection) -> None:
+        gid = self._setup(conn)
+        grp = service.set_group_meta(conn, gid, "sprint", "3")
+        assert grp.metadata == {"sprint": "3"}
+        assert service.get_group_meta(conn, gid, "sprint") == "3"
+
+    def test_set_normalizes_case(self, conn: sqlite3.Connection) -> None:
+        gid = self._setup(conn)
+        service.set_group_meta(conn, gid, "SPRINT", "3")
+        assert service.get_group(conn, gid).metadata == {"sprint": "3"}
+
+    def test_get_case_insensitive(self, conn: sqlite3.Connection) -> None:
+        gid = self._setup(conn)
+        service.set_group_meta(conn, gid, "sprint", "3")
+        assert service.get_group_meta(conn, gid, "SPRINT") == "3"
+
+    def test_remove(self, conn: sqlite3.Connection) -> None:
+        gid = self._setup(conn)
+        service.set_group_meta(conn, gid, "sprint", "3")
+        service.remove_group_meta(conn, gid, "sprint")
+        assert service.get_group(conn, gid).metadata == {}
+
+    def test_remove_missing_key_raises(self, conn: sqlite3.Connection) -> None:
+        gid = self._setup(conn)
+        with pytest.raises(LookupError, match="not found"):
+            service.remove_group_meta(conn, gid, "nope")
+
+    def test_nonexistent_entity_raises(self, conn: sqlite3.Connection) -> None:
+        with pytest.raises(LookupError):
+            service.set_group_meta(conn, 9999, "k", "v")

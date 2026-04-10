@@ -52,7 +52,7 @@ Entry point: `todo`
 | `todo task mv <task> <status> [pos]` | Move task to a status (within-workspace only) |
 | `todo task archive <task> [--force] [--dry-run]` | Archive a task (with confirmation) |
 | `todo task log <task>` | Show task change history |
-| `todo task meta ls\|get\|set\|del <task> ...` | JSON key/value metadata CRUD (lowercase-normalized keys) |
+| `todo task meta ls\|get\|set\|del <task> ...` | JSON key/value metadata CRUD (lowercase-normalized keys; workspaces, projects, and groups expose the same four verbs) |
 
 Use `--by-title` on any task command to resolve `<task>` by title string instead of ID.
 
@@ -75,13 +75,13 @@ Use `--by-title` on any task command to resolve `<task>` by title string instead
 
 | Command | Description |
 |---------|-------------|
-| `todo workspace ...` | `create [--statuses a,b,c]`, `ls`, `use`, `rename`, `archive [--force\|--dry-run]` |
+| `todo workspace ...` | `create [--statuses a,b,c]`, `ls`, `use`, `rename`, `archive [--force\|--dry-run]`, `meta ls\|get\|set\|del` |
 | `todo status ...` | `create`, `ls`, `rename`, `archive [--reassign-to STATUS\|--force]` |
-| `todo project ...` | `create [--desc]`, `ls`, `show`, `edit [--desc\|--name]`, `archive [--force\|--dry-run]` |
+| `todo project ...` | `create [--desc]`, `ls`, `show`, `edit [--desc\|--name]`, `archive [--force\|--dry-run]`, `meta ls\|get\|set\|del <name>` |
 | `todo dep ...` | `create`, `archive` |
 | `todo group-dep ...` | `create`, `archive` (group-level dependencies) |
 | `todo tag ...` | `create`, `ls`, `archive [--unassign\|--force\|--dry-run]` |
-| `todo group ...` | `create [--desc]`, `ls [--tree]`, `show`, `rename`, `edit [--desc]`, `archive [--force\|--dry-run]`, `mv`, `assign`, `unassign` |
+| `todo group ...` | `create [--desc]`, `ls [--tree]`, `show`, `rename`, `edit [--desc]`, `archive [--force\|--dry-run]`, `mv`, `assign`, `unassign`, `meta ls\|get\|set\|del <title> [--project]` |
 | `todo context` | One-call workspace summary: statuses, tasks, projects, tags, groups |
 | `todo export` | Export database as JSON (default) or Markdown (`--md`) |
 | `todo info` | Show sticky-notes file locations |

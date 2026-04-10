@@ -1,6 +1,7 @@
 CREATE TABLE IF NOT EXISTS workspaces (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL COLLATE NOCASE,
+    metadata TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata)),
     archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),
     created_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
@@ -10,6 +11,7 @@ CREATE TABLE IF NOT EXISTS projects (
     workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE RESTRICT,
     name TEXT NOT NULL COLLATE NOCASE,
     description TEXT,
+    metadata TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata)),
     archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),
     created_at INTEGER NOT NULL DEFAULT (unixepoch()),
     UNIQUE (id, workspace_id)
@@ -31,6 +33,7 @@ CREATE TABLE IF NOT EXISTS groups (
     parent_id    INTEGER,
     title        TEXT NOT NULL COLLATE NOCASE,
     description  TEXT,
+    metadata     TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata)),
     position     INTEGER NOT NULL DEFAULT 0 CHECK (position >= 0),
     archived     INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),
     created_at   INTEGER NOT NULL DEFAULT (unixepoch()),
