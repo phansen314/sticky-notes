@@ -83,6 +83,7 @@ def row_to_group(row: Row) -> Group:
         workspace_id=row["workspace_id"],
         project_id=row["project_id"],
         title=row["title"],
+        description=row["description"],
         parent_id=row["parent_id"],
         position=row["position"],
         archived=bool(row["archived"]),

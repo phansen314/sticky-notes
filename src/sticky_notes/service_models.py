@@ -39,6 +39,7 @@ class GroupRef:
     workspace_id: int
     project_id: int
     title: str
+    description: str | None
     parent_id: int | None
     position: int
     archived: bool
@@ -113,6 +114,7 @@ class GroupDetail:
     workspace_id: int
     project_id: int
     title: str
+    description: str | None
     parent_id: int | None
     position: int
     archived: bool

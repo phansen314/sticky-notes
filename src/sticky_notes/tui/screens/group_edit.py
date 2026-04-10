@@ -6,6 +6,7 @@ from textual.widgets import Button, Footer, Input, Static
 
 from sticky_notes.service_models import GroupDetail
 from sticky_notes.tui.screens.base_edit import BaseEditModal, ModalScroll
+from sticky_notes.tui.widgets.markdown_editor import MarkdownEditor
 
 
 class GroupEditModal(BaseEditModal):
@@ -25,6 +26,13 @@ class GroupEditModal(BaseEditModal):
                 classes="form-field",
             )
 
+            yield Static("Description (ctrl+e edit | ctrl+r preview)", classes="form-label")
+            yield MarkdownEditor(
+                self.detail.description or "",
+                id="group-edit-desc",
+                classes="form-field",
+            )
+
             yield Static("", id="modal-error", classes="modal-error")
             with Horizontal(classes="modal-buttons"):
                 yield Button("Save", variant="primary", id="modal-save")
@@ -40,4 +48,10 @@ class GroupEditModal(BaseEditModal):
             self._show_error("Title is required")
             return
 
-        self._diff_and_dismiss("group_id", self.detail.id, self.detail, {"title": title})
+        desc_text = self.query_one("#group-edit-desc", MarkdownEditor).text.strip()
+        description = desc_text or None
+
+        self._diff_and_dismiss("group_id", self.detail.id, self.detail, {
+            "title": title,
+            "description": description,
+        })

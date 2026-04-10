@@ -408,6 +408,7 @@ def create_task(
     position: int = 0,
     start_date: int | None = None,
     finish_date: int | None = None,
+    group_id: int | None = None,
     tags: tuple[str, ...] = (),
 ) -> Task:
     fields: dict[str, Any] = {
@@ -420,6 +421,16 @@ def create_task(
         fields["finish_date"] = finish_date
     _validate_task_fields(fields, workspace_id=workspace_id, conn=conn)
     with transaction(conn), _friendly_errors():
+        if group_id is not None:
+            group = get_group(conn, group_id)
+            if group.archived:
+                raise ValueError(f"group {group_id} is archived")
+            if project_id is None:
+                project_id = group.project_id
+            elif project_id != group.project_id:
+                raise ValueError(
+                    f"project {project_id} does not match group's project {group.project_id}"
+                )
         task = repo.insert_task(
             conn,
             NewTask(
@@ -433,6 +444,7 @@ def create_task(
                 position=position,
                 start_date=start_date,
                 finish_date=finish_date,
+                group_id=group_id,
             ),
         )
         for tag_name in tags:
@@ -887,6 +899,7 @@ def create_group(
     title: str,
     parent_id: int | None = None,
     position: int = 0,
+    description: str | None = None,
 ) -> Group:
     with transaction(conn), _friendly_errors():
         project = get_project(conn, project_id)
@@ -905,6 +918,7 @@ def create_group(
                 workspace_id=project.workspace_id,
                 project_id=project_id,
                 title=title,
+                description=description,
                 parent_id=parent_id,
                 position=position,
             ),

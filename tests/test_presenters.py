@@ -234,7 +234,7 @@ class TestFormatTaskDetail:
         d = self._detail(
             project=_project(5, "proj"),
             project_id=5,
-            group=Group(id=3, workspace_id=1, project_id=5, title="g", parent_id=None, position=0, archived=False, created_at=0),
+            group=Group(id=3, workspace_id=1, project_id=5, title="g", description=None, parent_id=None, position=0, archived=False, created_at=0),
             tags=(_tag(1, "bug"), _tag(2, "urgent")),
             description="do the thing",
             due_date=1_000_000,
@@ -313,7 +313,7 @@ class TestFormatWorkspaceContext:
         return WorkspaceContext(view=view, projects=projects, tags=tags, groups=groups)
 
     def _ref(self, id: int, proj_id: int, title: str) -> GroupRef:
-        return GroupRef(id=id, workspace_id=1, project_id=proj_id, title=title, parent_id=None,
+        return GroupRef(id=id, workspace_id=1, project_id=proj_id, title=title, description=None, parent_id=None,
                         position=0, archived=False, created_at=0)
 
     def test_workspace_header(self):
@@ -351,7 +351,7 @@ class TestFormatWorkspaceContext:
 class TestFormatGroupList:
     def _ref(self, id: int, title: str, *, archived: bool = False, task_count: int = 0) -> GroupRef:
         return GroupRef(
-            id=id, workspace_id=1, project_id=1, title=title, parent_id=None, position=0,
+            id=id, workspace_id=1, project_id=1, title=title, description=None, parent_id=None, position=0,
             archived=archived, created_at=0,
             task_ids=tuple(range(task_count)), child_ids=(),
         )
@@ -391,7 +391,7 @@ class TestFormatGroupList:
 class TestFormatGroupTrees:
     def _node(self, id: int, title: str, children=()) -> GroupTreeNode:
         ref = GroupRef(
-            id=id, workspace_id=1, project_id=1, title=title, parent_id=None, position=0,
+            id=id, workspace_id=1, project_id=1, title=title, description=None, parent_id=None, position=0,
             archived=False, created_at=0, task_ids=(), child_ids=(),
         )
         return GroupTreeNode(group=ref, children=children)
@@ -443,7 +443,7 @@ class TestFormatGroupTrees:
 class TestFormatGroupDetail:
     def test_minimal(self):
         d = GroupDetail(
-            id=1, workspace_id=1, project_id=1, title="G", parent_id=None, position=0,
+            id=1, workspace_id=1, project_id=1, title="G", description=None, parent_id=None, position=0,
             archived=False, created_at=0,
             tasks=(), children=(), parent=None,
         )
@@ -453,10 +453,30 @@ class TestFormatGroupDetail:
         assert "Path:    G" in out
         assert "Tasks:   0" in out
 
-    def test_with_children_and_tasks(self):
-        child = Group(id=2, workspace_id=1, project_id=1, title="ChildA", parent_id=1, position=0, archived=False, created_at=0)
+    def test_description_rendered(self):
         d = GroupDetail(
-            id=1, workspace_id=1, project_id=1, title="Root", parent_id=None, position=0,
+            id=1, workspace_id=1, project_id=1, title="G", description="Important group", parent_id=None, position=0,
+            archived=False, created_at=0,
+            tasks=(), children=(), parent=None,
+        )
+        out = presenters.format_group_detail(d, project_name="P", ancestry_titles=("G",))
+        assert "Important group" in out
+
+    def test_no_description_omitted(self):
+        d = GroupDetail(
+            id=1, workspace_id=1, project_id=1, title="G", description=None, parent_id=None, position=0,
+            archived=False, created_at=0,
+            tasks=(), children=(), parent=None,
+        )
+        out = presenters.format_group_detail(d, project_name="P", ancestry_titles=("G",))
+        lines = out.splitlines()
+        assert lines[0].startswith("Group: G")
+        assert lines[1].startswith("  Project:")
+
+    def test_with_children_and_tasks(self):
+        child = Group(id=2, workspace_id=1, project_id=1, title="ChildA", description=None, parent_id=1, position=0, archived=False, created_at=0)
+        d = GroupDetail(
+            id=1, workspace_id=1, project_id=1, title="Root", description=None, parent_id=None, position=0,
             archived=False, created_at=0,
             tasks=(_task(10, "work", priority=3, due_date=1_000_000),),
             children=(child,), parent=None,

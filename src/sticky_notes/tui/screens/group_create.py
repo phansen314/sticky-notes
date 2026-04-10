@@ -6,6 +6,7 @@ from textual.widgets import Button, Footer, Input, Select, Static
 
 from sticky_notes.models import Project
 from sticky_notes.tui.screens.base_edit import BaseEditModal, ModalScroll
+from sticky_notes.tui.widgets.markdown_editor import MarkdownEditor
 
 
 class GroupCreateModal(BaseEditModal):
@@ -23,6 +24,13 @@ class GroupCreateModal(BaseEditModal):
             yield Input(
                 placeholder="Group title",
                 id="group-create-title",
+                classes="form-field",
+            )
+
+            yield Static("Description (ctrl+e edit | ctrl+r preview)", classes="form-label")
+            yield MarkdownEditor(
+                "",
+                id="group-create-desc",
                 classes="form-field",
             )
 
@@ -55,4 +63,7 @@ class GroupCreateModal(BaseEditModal):
             self._show_error("Project is required")
             return
 
-        self.dismiss({"project_id": project_val, "title": title})
+        desc_text = self.query_one("#group-create-desc", MarkdownEditor).text.strip()
+        description = desc_text or None
+
+        self.dismiss({"project_id": project_val, "title": title, "description": description})

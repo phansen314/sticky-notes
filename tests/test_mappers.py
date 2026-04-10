@@ -263,7 +263,7 @@ def _status() -> Status:
 
 
 def _group() -> Group:
-    return Group(id=1, workspace_id=1, project_id=1, title="g", parent_id=None, position=0, archived=False, created_at=0)
+    return Group(id=1, workspace_id=1, project_id=1, title="g", description=None, parent_id=None, position=0, archived=False, created_at=0)
 
 
 class TestTaskToListItem:
@@ -362,7 +362,7 @@ class TestGroupToRef:
 class TestGroupToDetail:
     def test_creates_detail(self) -> None:
         group = _group()
-        child = Group(id=2, workspace_id=1, project_id=1, title="child", parent_id=1, position=0, archived=False, created_at=0)
+        child = Group(id=2, workspace_id=1, project_id=1, title="child", description=None, parent_id=1, position=0, archived=False, created_at=0)
         detail = group_to_detail(group, tasks=(), children=(child,), parent=None)
         assert isinstance(detail, GroupDetail)
         assert detail.title == "g"

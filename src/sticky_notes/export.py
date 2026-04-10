@@ -113,6 +113,8 @@ def _render_groups_section(
             g = group_by_id[gid]
             prefix = "  " * indent + "- "
             lines.append(f"{prefix}**{_md_escape(g.title)}** ({format_group_num(g.id)})")
+            if g.description:
+                lines.append(f"  {'  ' * indent}  {_md_escape(g.description)}")
             for tid in g.task_ids:
                 t = task_by_id.get(tid)
                 if t:

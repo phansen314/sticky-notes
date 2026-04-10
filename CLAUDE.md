@@ -32,7 +32,7 @@ src/sticky_notes/
   mappers.py         # row→model, model→ref, ref→listitem, ref→detail converters
   export.py          # full-database Markdown + Mermaid export
   schema.sql         # DDL (current schema, used for fresh databases)
-  migrations/        # numbered SQL migration files (001_*.sql ... 006_*.sql)
+  migrations/        # numbered SQL migration files (001_*.sql ... 009_*.sql)
   tui/
     app.py           # StickyNotesApp — main Textual app, two-panel layout, keybindings, modal dispatch
     model.py         # WorkspaceModel — loads workspace hierarchy via service, builds tree
@@ -84,8 +84,10 @@ Entry point: `todo = "sticky_notes.__main__:main"`.
 **Active workspace:** persisted at `~/.local/share/sticky-notes/active-workspace`. CLI resolves workspace from `--workspace`/`-w` flag, falling back to this file. Set via `todo workspace create` or `todo workspace use`.
 
 **Command structure:**
-- Task subcommands: `todo task create|ls|show|edit|mv|transfer|archive|log`
-- Other subcommand groups: `workspace`, `status`, `project`, `dep`, `group-dep`, `group`, `tag`
+- Task subcommands: `todo task create|ls|show|edit|mv|transfer|archive|log` (`create` accepts `--group/-g`)
+- Project subcommands: `todo project create|ls|show|edit|archive`
+- Group subcommands: `todo group create|ls|show|rename|edit|archive|mv|assign|unassign`
+- Other subcommand groups: `workspace`, `status`, `dep`, `group-dep`, `tag`
 - Standalone commands: `context`, `export`, `info`, `backup`
 
 ## TUI

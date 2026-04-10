@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS groups (
     project_id   INTEGER NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
     parent_id    INTEGER,
     title        TEXT NOT NULL COLLATE NOCASE,
+    description  TEXT,
     position     INTEGER NOT NULL DEFAULT 0 CHECK (position >= 0),
     archived     INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),
     created_at   INTEGER NOT NULL DEFAULT (unixepoch()),

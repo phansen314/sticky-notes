@@ -220,6 +220,8 @@ def format_group_detail(
     ancestry_titles: tuple[str, ...],
 ) -> str:
     lines = [f"Group: {detail.title} ({format_group_num(detail.id)})"]
+    if detail.description:
+        lines.append(f"  {detail.description}")
     lines.append(f"  Project: {project_name}")
     lines.append(f"  Path:    {' > '.join(ancestry_titles)}")
     lines.append(f"  Tasks:   {len(detail.tasks)}")

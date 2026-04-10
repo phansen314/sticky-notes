@@ -54,7 +54,7 @@ _TASK_UPDATABLE: frozenset[str] = frozenset({
 })
 _TAG_UPDATABLE: frozenset[str] = frozenset({"name", "archived"})
 _GROUP_UPDATABLE: frozenset[str] = frozenset({
-    "title", "parent_id", "position", "archived",
+    "title", "description", "parent_id", "position", "archived",
 })
 
 
@@ -256,8 +256,8 @@ def insert_task(conn: sqlite3.Connection, new: NewTask) -> Task:
     d = _asdict_for_insert(new)
     cur = conn.execute(
         "INSERT INTO tasks "
-        "(workspace_id, title, status_id, project_id, description, priority, due_date, position, start_date, finish_date) "
-        "VALUES (:workspace_id, :title, :status_id, :project_id, :description, :priority, :due_date, :position, :start_date, :finish_date)",
+        "(workspace_id, title, status_id, project_id, description, priority, due_date, position, start_date, finish_date, group_id) "
+        "VALUES (:workspace_id, :title, :status_id, :project_id, :description, :priority, :due_date, :position, :start_date, :finish_date, :group_id)",
         d,
     )
     row = conn.execute("SELECT * FROM tasks WHERE id = ?", (cur.lastrowid,)).fetchone()
@@ -754,8 +754,8 @@ def list_task_ids_by_project(
 def insert_group(conn: sqlite3.Connection, new: NewGroup) -> Group:
     d = _asdict_for_insert(new)
     cur = conn.execute(
-        "INSERT INTO groups (workspace_id, project_id, title, parent_id, position) "
-        "VALUES (:workspace_id, :project_id, :title, :parent_id, :position)",
+        "INSERT INTO groups (workspace_id, project_id, title, description, parent_id, position) "
+        "VALUES (:workspace_id, :project_id, :title, :description, :parent_id, :position)",
         d,
     )
     row = conn.execute("SELECT * FROM groups WHERE id = ?", (cur.lastrowid,)).fetchone()
@@ -962,12 +962,12 @@ def get_group_ancestry(
     """Return groups from root to the given group, inclusive."""
     rows = conn.execute(
         "WITH RECURSIVE ancestry AS ("
-        "  SELECT id, workspace_id, project_id, title, parent_id, position, archived, created_at, 0 AS depth "
+        "  SELECT id, workspace_id, project_id, title, description, parent_id, position, archived, created_at, 0 AS depth "
         "  FROM groups WHERE id = ? "
         "  UNION ALL "
-        "  SELECT g.id, g.workspace_id, g.project_id, g.title, g.parent_id, g.position, g.archived, g.created_at, a.depth + 1 "
+        "  SELECT g.id, g.workspace_id, g.project_id, g.title, g.description, g.parent_id, g.position, g.archived, g.created_at, a.depth + 1 "
         "  FROM groups g JOIN ancestry a ON g.id = a.parent_id"
-        ") SELECT id, workspace_id, project_id, title, parent_id, position, archived, created_at "
+        ") SELECT id, workspace_id, project_id, title, description, parent_id, position, archived, created_at "
         "FROM ancestry ORDER BY depth DESC",
         (group_id,),
     ).fetchall()

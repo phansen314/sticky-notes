@@ -45,11 +45,13 @@ Apply to every command. Place before the subcommand:  `todo [global flags] <comm
 | `--priority` | `-P` | `1` | Priority 1–5 (convention: 1=lowest; range only is enforced) |
 | `--due` | — | — | Due date `YYYY-MM-DD` |
 | `--tag` | `-t` | — | Tag name (repeatable) |
+| `--group` | `-g` | — | Group title (infers project from group if `--project` not given) |
 
 ```sh
 todo task create "Write README" -S "To Do"
 todo task create "Deploy to prod" -S Backlog --project "Q2 launch" -P 3 --due 2026-05-01
 todo task create "Add tests" -S "To Do" --tag backend --tag ci
+todo task create "Fix layout" -S "To Do" --group "Frontend" --project "Q2 launch"
 ```
 
 > **JSON and tags:** The `task create` JSON response returns the raw `Task` object which has no `tags` field. Tags attached via `--tag` are not reflected in the response. To see attached tags, follow up with `todo task show <task_num>` which returns a `TaskDetail` with a `tags` array.
@@ -228,9 +230,8 @@ todo status archive "Old Status" --force
 | `project create` | `name` | `--desc` / `-d` | Create project |
 | `project ls` | — | — | List projects |
 | `project show` | `name` | — | Show project detail |
+| `project edit` | `name` | `--desc` / `-d`, `--name` / `-n` | Edit project description or rename |
 | `project archive` | `name` | `--force`, `--dry-run` | Cascade-archive project and all groups/tasks. Prompts y/N unless `--force`. |
-
-> **No `project rename`.** To rename: create a new project, reassign tasks via `todo task edit --project "new name"`, then archive the old one.
 
 ---
 
@@ -292,17 +293,18 @@ Groups are project-scoped hierarchical collections of tasks. All group commands 
 
 | Command | Args | Flags | Description |
 |---|---|---|---|
-| `group create` | `title` | `--project/-p` (**required**), `--parent TITLE` | Create group; optionally nested under parent |
+| `group create` | `title` | `--project/-p` (**required**), `--parent TITLE`, `--desc/-d` | Create group; optionally nested under parent |
 | `group ls` | — | `--project/-p`, `--all/-a`, `--tree` | List (flat or tree view) |
 | `group show` | `title` | `--project/-p` | Show detail with ancestry |
 | `group rename` | `title new_title` | `--project/-p` | Rename |
+| `group edit` | `title` | `--desc/-d`, `--project/-p` | Edit group description |
 | `group archive` | `title` | `--project/-p`, `--force`, `--dry-run` | Cascade-archive group and all descendant groups/tasks. Prompts y/N unless `--force`. |
 | `group mv` | `title` | `--parent` (**required**), `--project/-p` | Reparent; `--parent ''` promotes to top-level |
 | `group assign` | `task group_title` | `--project/-p`, `--by-title` | Assign task to group |
 | `group unassign` | `task` | `--by-title` | Unassign task from its group |
 
 ```sh
-todo group create "Backend" --project "API rewrite"
+todo group create "Backend" --project "API rewrite" --desc "Core API services"
 todo group create "Auth" --project "API rewrite" --parent "Backend"
 todo group assign task-0005 "Auth" --project "API rewrite"
 todo group ls --project "API rewrite" --tree

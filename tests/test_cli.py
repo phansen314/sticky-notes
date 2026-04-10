@@ -442,6 +442,23 @@ class TestProjectCommands:
         out, _ = cli("project", "archive", "backend", "--force")
         assert "archived project 'backend'" in out
 
+    def test_edit_description(self, cli):
+        cli("project", "create", "backend")
+        out, _ = cli("project", "edit", "backend", "--desc", "API services")
+        assert "updated project 'backend'" in out
+        out, _ = cli("project", "show", "backend")
+        assert "API services" in out
+
+    def test_edit_rename(self, cli):
+        cli("project", "create", "backend")
+        out, _ = cli("project", "edit", "backend", "--name", "api")
+        assert "updated project 'api'" in out
+
+    def test_edit_no_changes(self, cli):
+        cli("project", "create", "backend")
+        out, _ = cli("project", "edit", "backend")
+        assert "nothing to update" in out
+
 
 # ---- Dependency commands ----
 
@@ -817,6 +834,36 @@ class TestGroupCLI:
         _, err = self.cli("group", "mv", "A", "--parent", "B", "--project", "sprint1", expect_exit=1)
         assert "cycle" in err
 
+    def test_create_with_description(self):
+        out, _ = self.cli("group", "create", "Frontend", "--project", "sprint1", "--desc", "UI components")
+        assert "created group 'Frontend'" in out
+        out, _ = self.cli("group", "show", "Frontend", "--project", "sprint1")
+        assert "UI components" in out
+
+    def test_edit_description(self):
+        self.cli("group", "create", "Frontend", "--project", "sprint1")
+        out, _ = self.cli("group", "edit", "Frontend", "--project", "sprint1", "--desc", "UI layer")
+        assert "updated group 'Frontend'" in out
+
+    def test_edit_no_changes(self):
+        self.cli("group", "create", "Frontend", "--project", "sprint1")
+        out, _ = self.cli("group", "edit", "Frontend", "--project", "sprint1")
+        assert "nothing to update" in out
+
+    def test_task_create_with_group(self):
+        self.cli("group", "create", "Frontend", "--project", "sprint1")
+        out, _ = self.cli("task", "create", "Fix bug", "-S", "todo", "--group", "Frontend")
+        assert "created task-0001" in out
+        out, _ = self.cli("task", "show", "task-0001")
+        assert "Frontend" in out
+        assert "sprint1" in out
+
+    def test_task_create_group_infers_project(self):
+        self.cli("group", "create", "Frontend", "--project", "sprint1")
+        self.cli("task", "create", "Fix bug", "-S", "todo", "--group", "Frontend")
+        out, _ = self.cli("task", "show", "task-0001")
+        assert "sprint1" in out
+
 
 # ---- Tag ----
 
@@ -980,6 +1027,10 @@ class TestContext:
         assert "Projects:" not in out
         assert "Tags:" not in out
         assert "Groups:" not in out
+
+    def test_context_no_active_workspace(self, cli):
+        out, _ = cli("context")
+        assert "no active workspace" in out
 
 
 # ---- JSON output ----
@@ -1518,8 +1569,6 @@ class TestInfo:
         out, _ = cli("info")
         for label in ["database", "wal sidecar", "shm sidecar", "active-workspace pointer"]:
             assert label in out
-        assert "wipe_db.py" in out
-
     def test_info_text_existence_markers(self, cli, db_path):
         cli("workspace", "create", "X")
         cli("status", "create", "todo")
@@ -1533,7 +1582,6 @@ class TestInfo:
         data = json.loads(out)
         assert data["ok"] is True
         assert data["data"]["db"] == str(db_path)
-        assert "reset_command" in data["data"]
         assert isinstance(data["data"]["existing"], list)
 
 

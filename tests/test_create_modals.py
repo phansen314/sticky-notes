@@ -211,4 +211,4 @@ class TestGroupCreateModal:
             app.screen.query_one("#group-create-title", Input).value = "Sprint 1"
             app.screen.action_save()
             await pilot.pause()
-            assert app.result == {"project_id": 1, "title": "Sprint 1"}
+            assert app.result == {"project_id": 1, "title": "Sprint 1", "description": None}
