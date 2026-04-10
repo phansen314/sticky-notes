@@ -79,9 +79,8 @@ Use `--by-title` on any task command to resolve `<task>` by title string instead
 | `todo status ...` | `create`, `ls`, `rename`, `order <workspace> <statuses...>`, `archive [--reassign-to STATUS\|--force]` |
 | `todo project ...` | `create [--desc]`, `ls`, `show`, `edit [--desc]`, `rename`, `archive [--force\|--dry-run]`, `meta ls\|get\|set\|del <name>` |
 | `todo dep ...` | `create`, `archive` |
-| `todo group-dep ...` | `create`, `archive` (group-level dependencies) |
 | `todo tag ...` | `create`, `ls`, `rename`, `archive [--unassign\|--force\|--dry-run]` |
-| `todo group ...` | `create [--desc]`, `ls [--tree]`, `show`, `rename`, `edit [--desc]`, `archive [--force\|--dry-run]`, `mv`, `assign`, `unassign`, `meta ls\|get\|set\|del <title> [--project]` |
+| `todo group ...` | `create [--desc]`, `ls [--tree]`, `show`, `rename`, `edit [--desc]`, `archive [--force\|--dry-run]`, `mv`, `assign`, `unassign`, `dep create\|archive`, `meta ls\|get\|set\|del <title> [--project]` |
 | `todo context` | One-call workspace summary: statuses, tasks, projects, tags, groups |
 | `todo export` | Export database as JSON (default) or Markdown (`--md`) |
 | `todo info` | Show sticky-notes file locations |

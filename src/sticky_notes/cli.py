@@ -1239,23 +1239,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_dr.add_argument("depends_on_num")
     p_dr.add_argument("--by-title", action="store_true", help="resolve tasks by title string")
 
-    # ---- Group dependency subcommands ----
-
-    p_gdep = sub.add_parser("group-dep", help="group dependency management")
-    gdep_sub = p_gdep.add_subparsers()
-
-    p_gda = gdep_sub.add_parser("create", help="add a group dependency")
-    p_gda.set_defaults(command="group_dep_create")
-    p_gda.add_argument("group_title")
-    p_gda.add_argument("depends_on_title")
-    p_gda.add_argument("--project", "-p", default=None, help="disambiguate by project name")
-
-    p_gdr = gdep_sub.add_parser("archive", help="archive a group dependency")
-    p_gdr.set_defaults(command="group_dep_archive")
-    p_gdr.add_argument("group_title")
-    p_gdr.add_argument("depends_on_title")
-    p_gdr.add_argument("--project", "-p", default=None, help="disambiguate by project name")
-
     # ---- Group subcommands ----
 
     p_grp = sub.add_parser("group", help="group management")
@@ -1344,6 +1327,22 @@ def build_parser() -> argparse.ArgumentParser:
     p_gmeta_del.add_argument("title", help="group title")
     p_gmeta_del.add_argument("key")
     p_gmeta_del.add_argument("--project", "-p", default=None, help="disambiguate by project")
+
+    # Group dependencies — nested under `group dep`
+    p_gdep = grp_sub.add_parser("dep", help="group dependency management")
+    gdep_sub = p_gdep.add_subparsers()
+
+    p_gda = gdep_sub.add_parser("create", help="add a group dependency")
+    p_gda.set_defaults(command="group_dep_create")
+    p_gda.add_argument("group_title")
+    p_gda.add_argument("depends_on_title")
+    p_gda.add_argument("--project", "-p", default=None, help="disambiguate by project name")
+
+    p_gdr = gdep_sub.add_parser("archive", help="archive a group dependency")
+    p_gdr.set_defaults(command="group_dep_archive")
+    p_gdr.add_argument("group_title")
+    p_gdr.add_argument("depends_on_title")
+    p_gdr.add_argument("--project", "-p", default=None, help="disambiguate by project name")
 
     # ---- Tag subcommands ----
 

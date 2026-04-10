@@ -359,21 +359,6 @@ todo dep archive task-0003 task-0001
 
 ---
 
-## `todo group-dep` Subcommands
-
-Semantics: `todo group-dep create <group> <depends-on>` means **group is blocked by depends-on**. Groups are resolved by title within the active workspace's projects.
-
-| Command | Args | Flags | Description |
-|---|---|---|---|
-| `group-dep create` | `group_title depends_on_title` | — | Add group dependency |
-| `group-dep archive` | `group_title depends_on_title` | — | Archive group dependency (soft-delete) |
-
-```sh
-todo group-dep create "Sprint 2" "Sprint 1"
-todo group-dep archive "Sprint 2" "Sprint 1"
-```
-
----
 
 ## `todo tag` Subcommands
 
@@ -411,6 +396,8 @@ Groups are project-scoped hierarchical collections of tasks. All group commands 
 | `group mv` | `title` | `--parent TITLE` **or** `--to-top` (required), `--project/-p` | Reparent under another group, or `--to-top` to promote to top-level |
 | `group assign` | `task group_title` | `--project/-p`, `--by-title` | Assign task to group |
 | `group unassign` | `task` | `--by-title` | Unassign task from its group |
+| `group dep create` | `group_title depends_on_title` | `--project/-p` | Add group dependency (group blocked by depends-on) |
+| `group dep archive` | `group_title depends_on_title` | `--project/-p` | Archive group dependency (soft-delete) |
 
 ```sh
 todo group create "Backend" --project "API rewrite" --desc "Core API services"
@@ -419,6 +406,7 @@ todo group assign task-0005 "Auth" --project "API rewrite"
 todo group ls --project "API rewrite" --tree
 todo group mv "Auth" --parent "Frontend" --project "API rewrite"
 todo group mv "Backend" --to-top --project "API rewrite"  # promote to top-level
+todo group dep create "Sprint 2" "Sprint 1"   # Sprint 2 blocked by Sprint 1
 ```
 
 ---
