@@ -229,12 +229,14 @@ class TestShallowFields:
             id=1, workspace_id=1, title="t", project_id=None, description=None,
             status_id=1, priority=1, due_date=None, position=0,
             archived=False, created_at=0, start_date=None, finish_date=None, group_id=None,
+            metadata={},
         )
         fields = shallow_fields(task, Task)
         assert set(fields.keys()) == {
             "id", "workspace_id", "title", "project_id", "description",
             "status_id", "priority", "due_date", "position",
             "archived", "created_at", "start_date", "finish_date", "group_id",
+            "metadata",
         }
 
     def test_rejects_non_dataclass(self) -> None:
@@ -255,6 +257,7 @@ def _task() -> Task:
         id=1, workspace_id=1, title="t", project_id=None, description=None,
         status_id=1, priority=1, due_date=None, position=0,
         archived=False, created_at=0, start_date=None, finish_date=None, group_id=None,
+        metadata={},
     )
 
 
@@ -263,7 +266,7 @@ def _status() -> Status:
 
 
 def _group() -> Group:
-    return Group(id=1, workspace_id=1, project_id=1, title="g", parent_id=None, position=0, archived=False, created_at=0)
+    return Group(id=1, workspace_id=1, project_id=1, title="g", description=None, parent_id=None, position=0, archived=False, created_at=0)
 
 
 class TestTaskToListItem:
@@ -362,7 +365,7 @@ class TestGroupToRef:
 class TestGroupToDetail:
     def test_creates_detail(self) -> None:
         group = _group()
-        child = Group(id=2, workspace_id=1, project_id=1, title="child", parent_id=1, position=0, archived=False, created_at=0)
+        child = Group(id=2, workspace_id=1, project_id=1, title="child", description=None, parent_id=1, position=0, archived=False, created_at=0)
         detail = group_to_detail(group, tasks=(), children=(child,), parent=None)
         assert isinstance(detail, GroupDetail)
         assert detail.title == "g"
@@ -455,8 +458,8 @@ class TestNewTaskFieldsMatchSchema:
         """NewTask fields + DB-defaulted/service-managed columns should cover all tasks columns."""
         schema_cols = _schema_columns(conn, "tasks")
         db_defaulted = {"id", "created_at", "archived"}
-        # group_id is managed by assign_task_to_group, not at insert time
-        service_managed = {"group_id"}
+        # metadata starts as the SQL default '{}' and is managed via json_set afterwards
+        service_managed = {"metadata"}
         new_task_fields = {f.name for f in dataclasses.fields(NewTask)}
         assert new_task_fields | db_defaulted | service_managed == schema_cols
 
@@ -568,3 +571,27 @@ class TestMapperFieldCoverage:
         }
         actual = {f.name for f in dataclasses.fields(hist) if getattr(hist, f.name) is not None}
         assert non_nullable <= actual
+
+
+class TestRowToTaskMetadata:
+    def test_parses_json_metadata(self, conn: sqlite3.Connection) -> None:
+        with transaction(conn):
+            wid = insert_workspace(conn)
+            sid = insert_status(conn, wid)
+            tid = insert_task(conn, wid, "t", sid)
+            conn.execute(
+                '''UPDATE tasks SET metadata = '{"branch":"feat/kv","jira":"PROJ-1"}' WHERE id = ?''',
+                (tid,),
+            )
+        row = conn.execute("SELECT * FROM tasks WHERE id = ?", (tid,)).fetchone()
+        task = row_to_task(row)
+        assert task.metadata == {"branch": "feat/kv", "jira": "PROJ-1"}
+
+    def test_empty_metadata_default(self, conn: sqlite3.Connection) -> None:
+        with transaction(conn):
+            wid = insert_workspace(conn)
+            sid = insert_status(conn, wid)
+            tid = insert_task(conn, wid, "t", sid)
+        row = conn.execute("SELECT * FROM tasks WHERE id = ?", (tid,)).fetchone()
+        task = row_to_task(row)
+        assert task.metadata == {}

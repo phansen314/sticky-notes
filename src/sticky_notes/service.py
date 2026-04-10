@@ -152,6 +152,50 @@ def _validate_task_fields(
                 raise ValueError(f"project {proj.id} is archived")
 
 
+def _validate_group_project_consistency(
+    conn: sqlite3.Connection,
+    old: Task,
+    changes: dict[str, Any],
+) -> None:
+    """Enforce the (project_id, group_id) invariant on update.
+
+    After applying `changes` on top of `old`, the task's group (if any) must
+    belong to the task's project. This check fires whenever either field is
+    in `changes`, so it catches both scenarios:
+
+      1. Assigning/changing a group → must match current or new project.
+      2. Changing project out from under an existing group → must clear or
+         re-point the group in the same update.
+
+    Intentional side-effect: if a task's *existing* group was archived after
+    assignment, any update that also touches `project_id` (even a no-op
+    project set) will surface the archived-group error. The task is in an
+    inconsistent state and the user must explicitly clear or reassign the
+    group before other edits in the same group/project axis. Updates that
+    don't touch group_id/project_id are unaffected.
+    """
+    effective_group_id = changes.get("group_id", old.group_id)
+    if effective_group_id is None:
+        return
+    grp = repo.get_group(conn, effective_group_id)
+    if grp is None:
+        raise LookupError(f"group {effective_group_id} not found")
+    if grp.workspace_id != old.workspace_id:
+        raise ValueError(
+            f"group {grp.id} belongs to workspace {grp.workspace_id}, not {old.workspace_id}"
+        )
+    if grp.archived:
+        raise ValueError(f"group {grp.id} is archived")
+    effective_project_id = changes.get("project_id", old.project_id)
+    if effective_project_id is None:
+        raise ValueError(f"cannot assign group {grp.id}: task has no project")
+    if effective_project_id != grp.project_id:
+        raise ValueError(
+            f"group {grp.id} belongs to project {grp.project_id}, "
+            f"not task project {effective_project_id}"
+        )
+
+
 def _ensure_tag(conn: sqlite3.Connection, workspace_id: int, name: str) -> Tag:
     """Return the active tag on workspace_id matching name, creating it if absent."""
     tag = repo.get_tag_by_name(conn, workspace_id, name)
@@ -408,6 +452,7 @@ def create_task(
     position: int = 0,
     start_date: int | None = None,
     finish_date: int | None = None,
+    group_id: int | None = None,
     tags: tuple[str, ...] = (),
 ) -> Task:
     fields: dict[str, Any] = {
@@ -420,6 +465,16 @@ def create_task(
         fields["finish_date"] = finish_date
     _validate_task_fields(fields, workspace_id=workspace_id, conn=conn)
     with transaction(conn), _friendly_errors():
+        if group_id is not None:
+            group = get_group(conn, group_id)
+            if group.archived:
+                raise ValueError(f"group {group_id} is archived")
+            if project_id is None:
+                project_id = group.project_id
+            elif project_id != group.project_id:
+                raise ValueError(
+                    f"project {project_id} does not match group's project {group.project_id}"
+                )
         task = repo.insert_task(
             conn,
             NewTask(
@@ -433,6 +488,7 @@ def create_task(
                 position=position,
                 start_date=start_date,
                 finish_date=finish_date,
+                group_id=group_id,
             ),
         )
         for tag_name in tags:
@@ -596,30 +652,53 @@ def update_task(
     if not changes and not add_tags and not remove_tags:
         return get_task(conn, task_id)
     with transaction(conn), _friendly_errors():
-        old = get_task(conn, task_id)
-        merged: dict[str, Any] = {}
-        if "start_date" in changes or "finish_date" in changes:
-            merged["start_date"] = changes.get("start_date", old.start_date)
-            merged["finish_date"] = changes.get("finish_date", old.finish_date)
-        merged.update(changes)
-        _validate_task_fields(merged, workspace_id=old.workspace_id, conn=conn)
-        if changes:
-            updated = repo.update_task(conn, task_id, changes)
-            _record_changes(conn, task_id, old, changes, source)
-        else:
-            updated = old
-        for tag_name in add_tags:
-            tag = _ensure_tag(conn, old.workspace_id, tag_name)
-            repo.add_tag_to_task(conn, task_id, tag.id)
-        for tag_name in remove_tags:
-            tag = repo.get_tag_by_name(conn, old.workspace_id, tag_name)
-            if tag is None:
-                raise LookupError(f"tag {tag_name!r} not found")
-            existing = repo.list_tag_ids_by_task(conn, task_id)
-            if tag.id not in existing:
-                raise LookupError(f"task {task_id} is not tagged {tag_name!r}")
-            repo.remove_tag_from_task(conn, task_id, tag.id)
-        return updated
+        return _update_task_body(
+            conn, task_id, changes, source,
+            add_tags=add_tags, remove_tags=remove_tags,
+        )
+
+
+def _update_task_body(
+    conn: sqlite3.Connection,
+    task_id: int,
+    changes: dict[str, Any],
+    source: str,
+    *,
+    add_tags: tuple[str, ...] = (),
+    remove_tags: tuple[str, ...] = (),
+) -> Task:
+    """Inner body of update_task. Assumes the caller holds a transaction.
+
+    Split out so service functions that already hold a transaction (e.g. the
+    `assign_task_to_group` wrapper) can call into update_task's logic without
+    triggering the transaction manager's anti-nesting guard.
+    """
+    old = get_task(conn, task_id)
+    merged: dict[str, Any] = {}
+    if "start_date" in changes or "finish_date" in changes:
+        merged["start_date"] = changes.get("start_date", old.start_date)
+        merged["finish_date"] = changes.get("finish_date", old.finish_date)
+    merged.update(changes)
+    _validate_task_fields(merged, workspace_id=old.workspace_id, conn=conn)
+    if "group_id" in changes or "project_id" in changes:
+        _validate_group_project_consistency(conn, old, changes)
+    if changes:
+        updated = repo.update_task(conn, task_id, changes)
+        _record_changes(conn, task_id, old, changes, source)
+    else:
+        updated = old
+    for tag_name in add_tags:
+        tag = _ensure_tag(conn, old.workspace_id, tag_name)
+        repo.add_tag_to_task(conn, task_id, tag.id)
+    for tag_name in remove_tags:
+        tag = repo.get_tag_by_name(conn, old.workspace_id, tag_name)
+        if tag is None:
+            raise LookupError(f"tag {tag_name!r} not found")
+        existing = repo.list_tag_ids_by_task(conn, task_id)
+        if tag.id not in existing:
+            raise LookupError(f"task {task_id} is not tagged {tag_name!r}")
+        repo.remove_tag_from_task(conn, task_id, tag.id)
+    return updated
 
 
 def move_task(
@@ -746,9 +825,82 @@ def move_task_to_workspace(
                 target_tag = repo.insert_tag(conn, NewTag(workspace_id=target_workspace_id, name=tag.name))
             repo.add_tag_to_task(conn, new.id, target_tag.id)
 
+        repo.copy_task_metadata(conn, task_id, new.id)
+
         repo.update_task(conn, task_id, {"archived": True})
         _record_changes(conn, task_id, old, {"archived": True}, source)
-        return new
+        # Refetch: `new` was built before tags/metadata were attached.
+        return get_task(conn, new.id)
+
+
+# ---- Task metadata ----
+
+
+_META_KEY_RE = re.compile(r"^[a-z0-9_.-]+$")
+_META_VALUE_MAX = 500
+
+
+def _normalize_meta_key(key: str) -> str:
+    """Lowercase and validate a metadata key.
+
+    Keys are stored lowercase to match the codebase's COLLATE NOCASE convention.
+    JSON-stored fields cannot use column collation, so we normalize at the
+    application layer instead.
+    """
+    normalized = key.lower()
+    if not normalized or len(normalized) > 64:
+        raise ValueError("metadata key must be 1-64 characters")
+    if not _META_KEY_RE.match(normalized):
+        raise ValueError(f"metadata key must match [a-z0-9_.-]+, got {key!r}")
+    return normalized
+
+
+def get_task_meta(
+    conn: sqlite3.Connection,
+    task_id: int,
+    key: str,
+) -> str:
+    """Get a metadata value by key.
+
+    Keys are normalized to lowercase before lookup. Raises ``ValueError`` if
+    the key has an invalid shape, ``LookupError`` if the task doesn't exist
+    or the key isn't present.
+    """
+    normalized = _normalize_meta_key(key)
+    task = get_task(conn, task_id)
+    if normalized not in task.metadata:
+        raise LookupError(f"metadata key {key!r} not found on task {task_id}")
+    return task.metadata[normalized]
+
+
+def set_task_meta(
+    conn: sqlite3.Connection,
+    task_id: int,
+    key: str,
+    value: str,
+) -> Task:
+    """Set a metadata key on a task. Key is normalized to lowercase."""
+    normalized = _normalize_meta_key(key)
+    if len(value) > _META_VALUE_MAX:
+        raise ValueError(f"metadata value must be \u2264 {_META_VALUE_MAX} characters")
+    with transaction(conn), _friendly_errors():
+        repo.set_task_metadata_key(conn, task_id, normalized, value)
+        return get_task(conn, task_id)
+
+
+def remove_task_meta(
+    conn: sqlite3.Connection,
+    task_id: int,
+    key: str,
+) -> Task:
+    """Remove a metadata key from a task. Raises LookupError if key doesn't exist."""
+    normalized = _normalize_meta_key(key)
+    with transaction(conn), _friendly_errors():
+        old = get_task(conn, task_id)
+        if normalized not in old.metadata:
+            raise LookupError(f"metadata key {key!r} not found on task {task_id}")
+        repo.remove_task_metadata_key(conn, task_id, normalized)
+        return get_task(conn, task_id)
 
 
 # ---- Dependency ----
@@ -887,6 +1039,7 @@ def create_group(
     title: str,
     parent_id: int | None = None,
     position: int = 0,
+    description: str | None = None,
 ) -> Group:
     with transaction(conn), _friendly_errors():
         project = get_project(conn, project_id)
@@ -905,6 +1058,7 @@ def create_group(
                 workspace_id=project.workspace_id,
                 project_id=project_id,
                 title=title,
+                description=description,
                 parent_id=parent_id,
                 position=position,
             ),
@@ -1065,23 +1219,20 @@ def assign_task_to_group(
     *,
     source: str,
 ) -> Task:
+    """Assign a group to a task, auto-inferring project_id from the group
+    when the task has none. Preserves the CLI `group assign` convenience.
+
+    Holds a single outer transaction so the reads (task, group) stay
+    consistent with the subsequent update — closing the TOCTOU window that
+    would otherwise exist between the reads and a separate update_task call.
+    """
     with transaction(conn), _friendly_errors():
         task = get_task(conn, task_id)
-        group = get_group(conn, group_id)
-        if group.archived:
-            raise ValueError(f"group {group_id} is archived")
+        group = get_group(conn, group_id)  # raises LookupError on miss
         changes: dict[str, Any] = {"group_id": group_id}
         if task.project_id is None:
             changes["project_id"] = group.project_id
-            repo.update_task(conn, task_id, {"project_id": group.project_id})
-        elif task.project_id != group.project_id:
-            raise ValueError(
-                f"task belongs to project {task.project_id}, "
-                f"group belongs to project {group.project_id}"
-            )
-        repo.set_task_group_id(conn, task_id, group_id)
-        _record_changes(conn, task_id, task, changes, source)
-        return get_task(conn, task_id)
+        return _update_task_body(conn, task_id, changes, source)
 
 
 def unassign_task_from_group(
@@ -1090,11 +1241,7 @@ def unassign_task_from_group(
     *,
     source: str,
 ) -> Task:
-    with transaction(conn), _friendly_errors():
-        task = get_task(conn, task_id)
-        repo.set_task_group_id(conn, task_id, None)
-        _record_changes(conn, task_id, task, {"group_id": None}, source)
-        return get_task(conn, task_id)
+    return update_task(conn, task_id, {"group_id": None}, source=source)
 
 
 # ---- Task-group queries ----

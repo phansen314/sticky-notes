@@ -9,6 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from typing import Any
 
 from .active_workspace import active_workspace_path, clear_active_workspace_id, get_active_workspace_id, set_active_workspace_id
 from .connection import DEFAULT_DB_PATH, get_connection, init_db
@@ -119,6 +120,12 @@ def cmd_task_create(conn: sqlite3.Connection, args: argparse.Namespace, db_path:
     workspace = _resolve_workspace(conn, args, db_path)
     col = service.get_status_by_name(conn, workspace.id, args.status)
     project_id = service.get_project_by_name(conn, workspace.id, args.project).id if args.project else None
+    group_id = None
+    if args.group:
+        grp = service.resolve_group(conn, workspace.id, args.group, project_name=args.project)
+        group_id = grp.id
+        if project_id is None:
+            project_id = grp.project_id
     due = parse_date(args.due) if args.due else None
     task = service.create_task(
         conn,
@@ -126,9 +133,10 @@ def cmd_task_create(conn: sqlite3.Connection, args: argparse.Namespace, db_path:
         title=args.title,
         status_id=col.id,
         project_id=project_id,
-        description=args.desc,
+        description=(args.desc or "").strip() or None,
         priority=args.priority,
         due_date=due,
+        group_id=group_id,
         tags=tuple(args.tag or ()),
     )
     return Ok(data=task, text=f"created {format_task_num(task.id)}: {task.title}")
@@ -354,7 +362,8 @@ def cmd_status_archive(conn: sqlite3.Connection, args: argparse.Namespace, db_pa
 
 def cmd_project_create(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
     workspace = _resolve_workspace(conn, args, db_path)
-    proj = service.create_project(conn, workspace.id, args.name, description=args.desc)
+    description = (args.desc or "").strip() or None
+    proj = service.create_project(conn, workspace.id, args.name, description=description)
     return Ok(data=proj, text=f"created project '{proj.name}'")
 
 
@@ -369,6 +378,20 @@ def cmd_project_show(conn: sqlite3.Connection, args: argparse.Namespace, db_path
     proj = service.get_project_by_name(conn, workspace.id, args.name)
     detail = service.get_project_detail(conn, proj.id)
     return Ok(data=detail, text=presenters.format_project_detail(detail))
+
+
+def cmd_project_edit(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
+    workspace = _resolve_workspace(conn, args, db_path)
+    proj = service.get_project_by_name(conn, workspace.id, args.name)
+    changes: dict[str, Any] = {}
+    if args.desc is not None:
+        changes["description"] = args.desc.strip() or None
+    if args.new_name is not None:
+        changes["name"] = args.new_name
+    if not changes:
+        return Ok(data=proj, text="nothing to update")
+    updated = service.update_project(conn, proj.id, changes)
+    return Ok(data=updated, text=f"updated project '{updated.name}'")
 
 
 def cmd_project_archive(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
@@ -447,7 +470,8 @@ def cmd_group_create(conn: sqlite3.Connection, args: argparse.Namespace, db_path
     if args.parent:
         parent = service.resolve_group(conn, workspace.id, args.parent, project_name=args.project)
         parent_id = parent.id
-    grp = service.create_group(conn, proj.id, args.title, parent_id=parent_id)
+    description = (args.desc or "").strip() or None
+    grp = service.create_group(conn, proj.id, args.title, parent_id=parent_id, description=description)
     return Ok(data=grp, text=f"created group '{grp.title}' ({format_group_num(grp.id)})")
 
 
@@ -501,6 +525,18 @@ def cmd_group_rename(conn: sqlite3.Connection, args: argparse.Namespace, db_path
     grp = service.resolve_group(conn, workspace.id, args.title, project_name=args.project)
     updated = service.update_group(conn, grp.id, {"title": args.new_title})
     return Ok(data=updated, text=f"renamed group '{args.title}' -> '{args.new_title}'")
+
+
+def cmd_group_edit(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
+    workspace = _resolve_workspace(conn, args, db_path)
+    grp = service.resolve_group(conn, workspace.id, args.title, project_name=args.project)
+    changes: dict[str, Any] = {}
+    if args.desc is not None:
+        changes["description"] = args.desc.strip() or None
+    if not changes:
+        return Ok(data=grp, text="nothing to update")
+    updated = service.update_group(conn, grp.id, changes)
+    return Ok(data=updated, text=f"updated group '{updated.title}'")
 
 
 def cmd_group_archive(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
@@ -658,19 +694,55 @@ def cmd_info(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) 
         "shm": str(shm),
         "active_workspace": str(ab_path),
         "existing": [str(p) for _, p in entries if p.exists()],
-        "reset_command": "python scripts/wipe_db.py",
     }
     width = max(len(label) for label, _ in entries)
     lines = ["sticky-notes files:"]
     for label, p in entries:
         marker = "exists" if p.exists() else "missing"
         lines.append(f"  {label:<{width}}  {p}  [{marker}]")
-    lines.append("")
-    lines.append("To wipe all state: python scripts/wipe_db.py")
     return Ok(data=data, text="\n".join(lines))
 
 
 # ---- TUI ----
+
+
+def cmd_task_meta_ls(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
+    workspace = _resolve_workspace(conn, args, db_path)
+    task_id = _resolve_task(conn, workspace, args.task_num, by_title=args.by_title)
+    task = service.get_task(conn, task_id)
+    records = [{"key": k, "value": v} for k, v in sorted(task.metadata.items())]
+    if not records:
+        return Ok(data=records, text="no metadata")
+    width = max(len(r["key"]) for r in records) + 2
+    lines = [f"  {r['key']:<{width}}{r['value']}" for r in records]
+    return Ok(data=records, text="\n".join(lines))
+
+
+def cmd_task_meta_get(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
+    workspace = _resolve_workspace(conn, args, db_path)
+    task_id = _resolve_task(conn, workspace, args.task_num, by_title=args.by_title)
+    value = service.get_task_meta(conn, task_id, args.key)
+    key = args.key.lower()
+    return Ok(data={"key": key, "value": value}, text=value)
+
+
+def cmd_task_meta_set(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
+    workspace = _resolve_workspace(conn, args, db_path)
+    task_id = _resolve_task(conn, workspace, args.task_num, by_title=args.by_title)
+    service.set_task_meta(conn, task_id, args.key, args.value)
+    key = args.key.lower()
+    return Ok(data={"key": key, "value": args.value}, text=f"set {key}={args.value} on {format_task_num(task_id)}")
+
+
+def cmd_task_meta_del(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
+    workspace = _resolve_workspace(conn, args, db_path)
+    task_id = _resolve_task(conn, workspace, args.task_num, by_title=args.by_title)
+    # Capture the value before deletion so we can include it in the response.
+    # get_task_meta raises LookupError for missing keys, same as remove_task_meta.
+    removed = service.get_task_meta(conn, task_id, args.key)
+    service.remove_task_meta(conn, task_id, args.key)
+    key = args.key.lower()
+    return Ok(data={"key": key, "value": removed}, text=f"removed {key} from {format_task_num(task_id)}")
 
 
 def cmd_tui(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
@@ -693,6 +765,10 @@ HANDLERS: dict[str, CommandHandler] = {
     "task_transfer": cmd_task_transfer,
     "task_archive": cmd_task_archive,
     "task_log": cmd_task_log,
+    "task_meta_ls": cmd_task_meta_ls,
+    "task_meta_get": cmd_task_meta_get,
+    "task_meta_set": cmd_task_meta_set,
+    "task_meta_del": cmd_task_meta_del,
     "workspace_create": cmd_workspace_create,
     "workspace_ls": cmd_workspace_ls,
     "workspace_use": cmd_workspace_use,
@@ -705,6 +781,7 @@ HANDLERS: dict[str, CommandHandler] = {
     "project_create": cmd_project_create,
     "project_ls": cmd_project_ls,
     "project_show": cmd_project_show,
+    "project_edit": cmd_project_edit,
     "project_archive": cmd_project_archive,
     "dep_create": cmd_dep_create,
     "dep_archive": cmd_dep_archive,
@@ -714,6 +791,7 @@ HANDLERS: dict[str, CommandHandler] = {
     "group_ls": cmd_group_ls,
     "group_show": cmd_group_show,
     "group_rename": cmd_group_rename,
+    "group_edit": cmd_group_edit,
     "group_archive": cmd_group_archive,
     "group_mv": cmd_group_mv,
     "group_assign": cmd_group_assign,
@@ -753,6 +831,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_create.add_argument("--priority", "-P", type=int, default=1)
     p_create.add_argument("--due", default=None, help="YYYY-MM-DD")
     p_create.add_argument("--tag", "-t", action="append", default=None, help="tag name (repeatable)")
+    p_create.add_argument("--group", "-g", default=None, help="group title")
 
     p_ls = task_sub.add_parser("ls", help="list tasks")
     p_ls.set_defaults(command="task_ls")
@@ -810,6 +889,33 @@ def build_parser() -> argparse.ArgumentParser:
     p_log.set_defaults(command="task_log")
     p_log.add_argument("task_num")
     p_log.add_argument("--by-title", action="store_true", help="resolve task by title string")
+
+    p_meta = task_sub.add_parser("meta", help="task metadata key/value management")
+    meta_sub = p_meta.add_subparsers()
+
+    p_meta_ls = meta_sub.add_parser("ls", help="list all metadata")
+    p_meta_ls.set_defaults(command="task_meta_ls")
+    p_meta_ls.add_argument("task_num")
+    p_meta_ls.add_argument("--by-title", action="store_true", help="resolve task by title string")
+
+    p_meta_get = meta_sub.add_parser("get", help="get a metadata value")
+    p_meta_get.set_defaults(command="task_meta_get")
+    p_meta_get.add_argument("task_num")
+    p_meta_get.add_argument("key")
+    p_meta_get.add_argument("--by-title", action="store_true", help="resolve task by title string")
+
+    p_meta_set = meta_sub.add_parser("set", help="set a metadata key/value")
+    p_meta_set.set_defaults(command="task_meta_set")
+    p_meta_set.add_argument("task_num")
+    p_meta_set.add_argument("key")
+    p_meta_set.add_argument("value")
+    p_meta_set.add_argument("--by-title", action="store_true", help="resolve task by title string")
+
+    p_meta_del = meta_sub.add_parser("del", help="delete a metadata key")
+    p_meta_del.set_defaults(command="task_meta_del")
+    p_meta_del.add_argument("task_num")
+    p_meta_del.add_argument("key")
+    p_meta_del.add_argument("--by-title", action="store_true", help="resolve task by title string")
 
     # ---- Workspace subcommands ----
 
@@ -881,6 +987,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_ps.set_defaults(command="project_show")
     p_ps.add_argument("name")
 
+    p_pe = proj_sub.add_parser("edit", help="edit a project")
+    p_pe.set_defaults(command="project_edit")
+    p_pe.add_argument("name")
+    p_pe.add_argument("--desc", "-d", default=None, help="project description")
+    p_pe.add_argument("--name", "-n", dest="new_name", default=None, help="new project name")
+
     p_parc = proj_sub.add_parser("archive", help="cascade-archive project and all groups/tasks")
     p_parc.set_defaults(command="project_archive")
     p_parc.add_argument("name")
@@ -929,6 +1041,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_gc = grp_sub.add_parser("create", help="create a group")
     p_gc.set_defaults(command="group_create")
     p_gc.add_argument("title")
+    p_gc.add_argument("--desc", "-d", default=None, help="group description")
     p_gc.add_argument("--parent", default=None, help="parent group title")
     p_gc.add_argument("--project", "-p", required=True, help="project name")
 
@@ -948,6 +1061,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_grn.add_argument("title")
     p_grn.add_argument("new_title")
     p_grn.add_argument("--project", "-p", default=None, help="disambiguate by project")
+
+    p_ge = grp_sub.add_parser("edit", help="edit a group")
+    p_ge.set_defaults(command="group_edit")
+    p_ge.add_argument("title")
+    p_ge.add_argument("--desc", "-d", default=None, help="group description")
+    p_ge.add_argument("--project", "-p", default=None, help="disambiguate by project")
 
     p_garc = grp_sub.add_parser("archive", help="cascade-archive group and all descendant groups/tasks")
     p_garc.set_defaults(command="group_archive")

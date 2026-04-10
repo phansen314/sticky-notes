@@ -45,11 +45,13 @@ Apply to every command. Place before the subcommand:  `todo [global flags] <comm
 | `--priority` | `-P` | `1` | Priority 1–5 (convention: 1=lowest; range only is enforced) |
 | `--due` | — | — | Due date `YYYY-MM-DD` |
 | `--tag` | `-t` | — | Tag name (repeatable) |
+| `--group` | `-g` | — | Group title (infers project from group if `--project` not given) |
 
 ```sh
 todo task create "Write README" -S "To Do"
 todo task create "Deploy to prod" -S Backlog --project "Q2 launch" -P 3 --due 2026-05-01
 todo task create "Add tests" -S "To Do" --tag backend --tag ci
+todo task create "Fix layout" -S "To Do" --group "Frontend" --project "Q2 launch"
 ```
 
 > **JSON and tags:** The `task create` JSON response returns the raw `Task` object which has no `tags` field. Tags attached via `--tag` are not reflected in the response. To see attached tags, follow up with `todo task show <task_num>` which returns a `TaskDetail` with a `tags` array.
@@ -144,6 +146,42 @@ Shows the full audit trail of field changes (TaskHistory).
 
 ---
 
+### `todo task meta` — Task Metadata Key/Value Store
+
+Each task carries a JSON key/value blob for arbitrary metadata (external IDs, branch names, JIRA tickets, etc.). Keys are **case-insensitive** (normalized to lowercase on write); lookups with any casing resolve to the stored lowercase form.
+
+**Key rules:** charset `[a-z0-9_.-]+` after lowercase-normalization, 1–64 characters.
+**Value rules:** free-form text, up to 500 characters.
+
+| Command | Args | Description |
+|---|---|---|
+| `task meta ls` | `task_num` | List all metadata entries; empty → `"no metadata"` |
+| `task meta get` | `task_num key` | Get the value for a key. `LookupError` if key not set. |
+| `task meta set` | `task_num key value` | Set (create or overwrite) a key's value |
+| `task meta del` | `task_num key` | Remove a key. `LookupError` if key not set. |
+
+All four accept `--by-title` to resolve the task by title.
+
+**JSON `data` shape** — uniform across all four commands:
+
+- `task meta ls` → `[{"key": "...", "value": "..."}]` (sorted by key; empty list if no metadata)
+- `task meta get` → `{"key": "...", "value": "..."}`
+- `task meta set` → `{"key": "...", "value": "..."}` (the just-set record; key is the lowercase-normalized form)
+- `task meta del` → `{"key": "...", "value": "..."}` (the just-removed record)
+
+```sh
+todo task meta set task-0001 branch feat/kv
+todo task meta set task-0001 jira PROJ-123
+todo task meta set task-0001 BRANCH feat/kv-v2   # "BRANCH" normalizes to "branch"; overwrites
+todo task meta ls task-0001
+todo task meta get task-0001 branch
+todo task meta del task-0001 jira
+```
+
+Metadata is also shown by `todo task show` and included in `todo export --md` (dedicated "Metadata" section per task) and `todo export` (JSON `tasks[].metadata` object). Cross-workspace `todo task transfer` copies metadata verbatim to the new task.
+
+---
+
 ### `todo context`
 
 Single-call workspace snapshot. No arguments. Outputs: statuses with task counts, tasks, projects, tags, groups. Designed as a one-shot startup view for AI sessions.
@@ -228,9 +266,8 @@ todo status archive "Old Status" --force
 | `project create` | `name` | `--desc` / `-d` | Create project |
 | `project ls` | — | — | List projects |
 | `project show` | `name` | — | Show project detail |
+| `project edit` | `name` | `--desc` / `-d`, `--name` / `-n` | Edit project description or rename |
 | `project archive` | `name` | `--force`, `--dry-run` | Cascade-archive project and all groups/tasks. Prompts y/N unless `--force`. |
-
-> **No `project rename`.** To rename: create a new project, reassign tasks via `todo task edit --project "new name"`, then archive the old one.
 
 ---
 
@@ -292,17 +329,18 @@ Groups are project-scoped hierarchical collections of tasks. All group commands 
 
 | Command | Args | Flags | Description |
 |---|---|---|---|
-| `group create` | `title` | `--project/-p` (**required**), `--parent TITLE` | Create group; optionally nested under parent |
+| `group create` | `title` | `--project/-p` (**required**), `--parent TITLE`, `--desc/-d` | Create group; optionally nested under parent |
 | `group ls` | — | `--project/-p`, `--all/-a`, `--tree` | List (flat or tree view) |
 | `group show` | `title` | `--project/-p` | Show detail with ancestry |
 | `group rename` | `title new_title` | `--project/-p` | Rename |
+| `group edit` | `title` | `--desc/-d`, `--project/-p` | Edit group description |
 | `group archive` | `title` | `--project/-p`, `--force`, `--dry-run` | Cascade-archive group and all descendant groups/tasks. Prompts y/N unless `--force`. |
 | `group mv` | `title` | `--parent` (**required**), `--project/-p` | Reparent; `--parent ''` promotes to top-level |
 | `group assign` | `task group_title` | `--project/-p`, `--by-title` | Assign task to group |
 | `group unassign` | `task` | `--by-title` | Unassign task from its group |
 
 ```sh
-todo group create "Backend" --project "API rewrite"
+todo group create "Backend" --project "API rewrite" --desc "Core API services"
 todo group create "Auth" --project "API rewrite" --parent "Backend"
 todo group assign task-0005 "Auth" --project "API rewrite"
 todo group ls --project "API rewrite" --tree
@@ -343,7 +381,7 @@ todo info
 todo --json info
 ```
 
-JSON `data` shape: `{"db": "...", "wal": "...", "shm": "...", "active_workspace": "...", "existing": [...], "reset_command": "python scripts/wipe_db.py"}`
+JSON `data` shape: `{"db": "...", "wal": "...", "shm": "...", "active_workspace": "...", "existing": [...]}`
 
 ---
 
@@ -368,7 +406,7 @@ Launches the Textual TUI interface. No JSON output. Useful for interactive explo
 
 Resolves a task by title string instead of `task-NNNN` ID. Accepted by:
 
-`task show` · `task edit` · `task mv` · `task transfer` · `task archive` · `task log` · `dep create` · `dep archive` · `group assign` · `group unassign`
+`task show` · `task edit` · `task mv` · `task transfer` · `task archive` · `task log` · `task meta ls` · `task meta get` · `task meta set` · `task meta del` · `dep create` · `dep archive` · `group assign` · `group unassign`
 
 ---
 
@@ -393,13 +431,15 @@ Resolves a task by title string instead of `task-NNNN` ID. Accepted by:
 | `project ls` | array of Project objects |
 | `tag ls` | array of Tag objects |
 | `group ls` | array of GroupRef objects |
-| `task show` | full TaskDetail (with `status`, `project`, `group`, `tags`, `blocked_by`, `blocks`, `history`) |
+| `task show` | full TaskDetail (with `status`, `project`, `group`, `tags`, `blocked_by`, `blocks`, `history`, `metadata`) |
 | `project show` | ProjectDetail with `tasks` array |
 | `group show` | GroupDetail with `tasks` and `children` arrays |
 | `task log` | array of TaskHistory objects |
 | `context` | `{"view": {"workspace": {...}, "statuses": [...]}, "projects": [...], "tags": [...], "groups": [...]}` |
 | `export` | `{"markdown": "..."}` or `{"output_path": "...", "bytes": N}` when `-o FILE` |
 | `backup` | `{"source": "...", "dest": "...", "bytes": N}` |
-| `info` | `{"db": "...", "wal": "...", "shm": "...", "active_workspace": "...", "existing": [...], "reset_command": "..."}` |
+| `info` | `{"db": "...", "wal": "...", "shm": "...", "active_workspace": "...", "existing": [...]}` |
+| `task meta ls` | `[{"key": "...", "value": "..."}]` (sorted; empty list if no metadata) |
+| `task meta get`, `task meta set`, `task meta del` | `{"key": "...", "value": "..."}` |
 
 > **`context` vs `ls` shape asymmetry:** `ls` returns `{"workspace": {...}, "statuses": [...]}` directly at the top level. `context` wraps the same workspace+statuses shape inside a `"view"` key — they are **not** interchangeable payloads.

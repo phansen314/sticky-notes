@@ -27,6 +27,7 @@ class TaskListItem:
     start_date: int | None
     finish_date: int | None
     group_id: int | None
+    metadata: dict[str, str]
     project_name: str | None = None
     tag_names: tuple[str, ...] = ()
 
@@ -39,6 +40,7 @@ class GroupRef:
     workspace_id: int
     project_id: int
     title: str
+    description: str | None
     parent_id: int | None
     position: int
     archived: bool
@@ -87,6 +89,7 @@ class TaskDetail:
     start_date: int | None
     finish_date: int | None
     group_id: int | None
+    metadata: dict[str, str]
     status: Status
     project: Project | None
     group: Group | None
@@ -113,6 +116,7 @@ class GroupDetail:
     workspace_id: int
     project_id: int
     title: str
+    description: str | None
     parent_id: int | None
     position: int
     archived: bool

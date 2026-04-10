@@ -92,6 +92,10 @@ def format_task_detail(detail: TaskDetail) -> str:
     if detail.tags:
         tag_str = ", ".join(t.name for t in detail.tags)
         lines.append(f"  Tags:        {tag_str}")
+    if detail.metadata:
+        lines.append("  Metadata:")
+        for k, v in sorted(detail.metadata.items()):
+            lines.append(f"    {k}: {v}")
     lines.append(f"  Priority:    {detail.priority}")
     if detail.due_date:
         lines.append(f"  Due:         {format_timestamp(detail.due_date)}")
@@ -220,9 +224,11 @@ def format_group_detail(
     ancestry_titles: tuple[str, ...],
 ) -> str:
     lines = [f"Group: {detail.title} ({format_group_num(detail.id)})"]
-    lines.append(f"  Project: {project_name}")
-    lines.append(f"  Path:    {' > '.join(ancestry_titles)}")
-    lines.append(f"  Tasks:   {len(detail.tasks)}")
+    if detail.description:
+        lines.append(f"  Description: {detail.description}")
+    lines.append(f"  Project:     {project_name}")
+    lines.append(f"  Path:        {' > '.join(ancestry_titles)}")
+    lines.append(f"  Tasks:       {len(detail.tasks)}")
     if detail.children:
         child_names = ", ".join(c.title for c in detail.children)
         lines.append(f"  Sub-groups: {child_names}")

@@ -116,23 +116,60 @@ class StickyNotesApp(App):
         self.request_refresh()
 
     async def on__refresh_requested(self, event: _RefreshRequested) -> None:
-        if self._active_workspace_id is None:
+        # Skip auto-refresh while a modal is open to avoid stealing focus
+        if len(self.screen_stack) > 1:
             return
+
+        tree = self.query_one(WorkspaceTree)
+        kanban = self.query_one(KanbanBoard)
+
+        self._reconcile_workspaces()
+
+        if not self._models:
+            self._active_workspace_id = None
+            tree.show_empty("No workspaces")
+            await kanban.remove_children()
+            return
+
+        if self._active_workspace_id not in self._models:
+            self._active_workspace_id = next(iter(self._models))
+
+        model = self._reload_active_model()
+        if model is None:
+            return
+
+        await self._rerender(tree, kanban, model)
+
+    def _reconcile_workspaces(self) -> None:
+        """Sync self._models with the live workspace list — add new, drop archived."""
+        live_ids = {ws.id for ws in list_workspaces(self.conn)}
+        for stale_id in set(self._models) - live_ids:
+            del self._models[stale_id]
+        for ws_id in live_ids - set(self._models):
+            try:
+                model = load_workspace_model(self.conn, ws_id)
+                model = replace(model, statuses=self._order_statuses(model.statuses, ws_id))
+                self._models[ws_id] = model
+            except LookupError:
+                continue
+
+    def _reload_active_model(self) -> WorkspaceModel | None:
+        """Reload the active workspace from disk. Returns None if it's gone."""
         try:
             model = load_workspace_model(self.conn, self._active_workspace_id)
         except LookupError:
-            return
+            return None
         model = replace(model, statuses=self._order_statuses(model.statuses, self._active_workspace_id))
         self._models[self._active_workspace_id] = model
-        tree = self.query_one(WorkspaceTree)
-        kanban = self.query_one(KanbanBoard)
-        # Remember focused task id before reload
+        return model
+
+    async def _rerender(self, tree: WorkspaceTree, kanban: KanbanBoard, model: WorkspaceModel) -> None:
+        """Redraw the tree + kanban and restore focus to the previously focused card if possible."""
         prev_task_id: int | None = None
         if self._kanban_last_focused is not None:
             prev_task_id = self._kanban_last_focused.task_data.id
         tree.load(self._models, expand_workspace_id=self._active_workspace_id)
         await kanban.sync(model)
-        # Restore focus
         if self.active_panel == ActivePanel.KANBAN and prev_task_id is not None:
             for card in self.query(TaskCard):
                 if card.task_data.id == prev_task_id:
@@ -222,10 +259,8 @@ class StickyNotesApp(App):
     def _edit_task(self, task: Task) -> None:
         detail = get_task_detail(self.conn, task.id)
         model = self._models[task.workspace_id]
-        statuses = model.statuses
-        projects = tuple(p.project for p in model.projects)
         self.push_screen(
-            TaskEditModal(detail, statuses, projects),
+            TaskEditModal(detail, model.statuses, model.projects),
             callback=self._on_task_edit_dismiss,
         )
 
@@ -290,9 +325,8 @@ class StickyNotesApp(App):
         if not statuses:
             self.notify("No statuses — create one first", severity="warning")
             return
-        projects = tuple(p.project for p in self._active_model.projects)
         self.push_screen(
-            TaskCreateModal(statuses, projects),
+            TaskCreateModal(statuses, self._active_model.projects),
             callback=self._on_task_create_dismiss,
         )
 

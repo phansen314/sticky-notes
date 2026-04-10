@@ -63,6 +63,7 @@ class NewTask:
     position: int = 0
     start_date: int | None = None
     finish_date: int | None = None
+    group_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -70,6 +71,7 @@ class NewGroup:
     workspace_id: int
     project_id: int
     title: str
+    description: str | None = None
     parent_id: int | None = None
     position: int = 0
 
@@ -145,6 +147,7 @@ class Task:
     start_date: int | None
     finish_date: int | None
     group_id: int | None
+    metadata: dict[str, str]
 
 
 @dataclass(frozen=True)
@@ -153,6 +156,7 @@ class Group:
     workspace_id: int
     project_id: int
     title: str
+    description: str | None
     parent_id: int | None
     position: int
     archived: bool

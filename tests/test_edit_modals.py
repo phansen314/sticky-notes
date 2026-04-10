@@ -37,6 +37,7 @@ def make_group_detail(**overrides) -> GroupDetail:
         workspace_id=1,
         project_id=1,
         title="Sprint 1",
+        description=None,
         parent_id=None,
         position=0,
         archived=False,

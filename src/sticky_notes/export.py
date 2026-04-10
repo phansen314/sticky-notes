@@ -113,6 +113,8 @@ def _render_groups_section(
             g = group_by_id[gid]
             prefix = "  " * indent + "- "
             lines.append(f"{prefix}**{_md_escape(g.title)}** ({format_group_num(g.id)})")
+            if g.description:
+                lines.append(f"  {'  ' * indent}  {_md_escape(g.description)}")
             for tid in g.task_ids:
                 t = task_by_id.get(tid)
                 if t:
@@ -178,6 +180,22 @@ def _render_descriptions_section(
         lines.append(f"#### {format_task_num(tid)}: {_md_escape(title)}")
         lines.append("")
         lines.append(desc)
+        lines.append("")
+    return lines
+
+
+def _render_metadata_section(
+    tasks: tuple,
+) -> list[str]:
+    has_meta = [(t.id, t.title, t.metadata) for t in tasks if t.metadata]
+    if not has_meta:
+        return []
+    lines = ["### Metadata", ""]
+    for tid, title, meta in has_meta:
+        lines.append(f"#### {format_task_num(tid)}: {_md_escape(title)}")
+        lines.append("")
+        for k, v in sorted(meta.items()):
+            lines.append(f"- **{_md_escape(k)}**: {_md_escape(v)}")
         lines.append("")
     return lines
 
@@ -301,6 +319,7 @@ def export_markdown(conn: sqlite3.Connection) -> str:
         lines += _render_groups_section(conn, projects)
         lines += _render_tasks_section(statuses, tasks_by_status, proj_map, tag_map, task_tag_map)
         lines += _render_descriptions_section(tasks)
+        lines += _render_metadata_section(tasks)
 
         workspace_deps = [
             (tid, did)

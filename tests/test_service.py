@@ -1354,6 +1354,99 @@ class TestTaskGroupAssignment:
         assert service.get_task(conn, tid).group_id is None
 
 
+class TestUpdateTaskGroupId:
+    """update_task now accepts group_id directly; these tests cover the invariant."""
+
+    def _setup(self, conn: sqlite3.Connection) -> tuple[int, int, int]:
+        bid = insert_workspace(conn, "workspace1")
+        cid = insert_status(conn, bid, "todo")
+        pid = insert_project(conn, bid, "proj1")
+        return bid, cid, pid
+
+    def test_update_task_sets_group_id(self, conn: sqlite3.Connection) -> None:
+        bid, cid, pid = self._setup(conn)
+        grp = service.create_group(conn, pid, "g")
+        tid = insert_task(conn, bid, "t", cid, project_id=pid)
+        service.update_task(conn, tid, {"group_id": grp.id}, source="test")
+        assert service.get_task(conn, tid).group_id == grp.id
+
+    def test_update_task_clears_group_id(self, conn: sqlite3.Connection) -> None:
+        bid, cid, pid = self._setup(conn)
+        grp = service.create_group(conn, pid, "g")
+        tid = insert_task(conn, bid, "t", cid, project_id=pid)
+        service.update_task(conn, tid, {"group_id": grp.id}, source="test")
+        service.update_task(conn, tid, {"group_id": None}, source="test")
+        assert service.get_task(conn, tid).group_id is None
+
+    def test_update_task_group_wrong_project_raises(self, conn: sqlite3.Connection) -> None:
+        bid, cid, pid1 = self._setup(conn)
+        pid2 = insert_project(conn, bid, "proj2")
+        grp = service.create_group(conn, pid1, "g")
+        tid = insert_task(conn, bid, "t", cid, project_id=pid2)
+        with pytest.raises(ValueError, match="belongs to project"):
+            service.update_task(conn, tid, {"group_id": grp.id}, source="test")
+
+    def test_update_task_group_without_project_raises(self, conn: sqlite3.Connection) -> None:
+        bid, cid, pid = self._setup(conn)
+        grp = service.create_group(conn, pid, "g")
+        tid = insert_task(conn, bid, "t", cid)  # no project_id
+        with pytest.raises(ValueError, match="no project"):
+            service.update_task(conn, tid, {"group_id": grp.id}, source="test")
+
+    def test_update_task_group_and_project_together(self, conn: sqlite3.Connection) -> None:
+        bid, cid, pid = self._setup(conn)
+        grp = service.create_group(conn, pid, "g")
+        tid = insert_task(conn, bid, "t", cid)  # no project_id
+        service.update_task(
+            conn, tid, {"project_id": pid, "group_id": grp.id}, source="test",
+        )
+        updated = service.get_task(conn, tid)
+        assert updated.project_id == pid
+        assert updated.group_id == grp.id
+
+    def test_update_task_group_archived_raises(self, conn: sqlite3.Connection) -> None:
+        bid, cid, pid = self._setup(conn)
+        grp = service.create_group(conn, pid, "g")
+        service.cascade_archive_group(conn, grp.id, source="test")
+        tid = insert_task(conn, bid, "t", cid, project_id=pid)
+        with pytest.raises(ValueError, match="archived"):
+            service.update_task(conn, tid, {"group_id": grp.id}, source="test")
+
+    def test_update_task_group_on_wrong_workspace_raises(self, conn: sqlite3.Connection) -> None:
+        bid1, cid1, pid1 = self._setup(conn)
+        bid2 = insert_workspace(conn, "workspace2")
+        cid2 = insert_status(conn, bid2, "todo")
+        pid2 = insert_project(conn, bid2, "proj2")
+        grp_other = service.create_group(conn, pid2, "g_other")
+        tid = insert_task(conn, bid1, "t", cid1, project_id=pid1)
+        with pytest.raises(ValueError, match="workspace"):
+            service.update_task(conn, tid, {"group_id": grp_other.id}, source="test")
+
+    def test_update_project_leaves_orphan_group_raises(self, conn: sqlite3.Connection) -> None:
+        """Changing project out from under an existing group must also clear/re-point it."""
+        bid, cid, pid1 = self._setup(conn)
+        pid2 = insert_project(conn, bid, "proj2")
+        grp = service.create_group(conn, pid1, "g")
+        tid = insert_task(conn, bid, "t", cid, project_id=pid1)
+        service.update_task(conn, tid, {"group_id": grp.id}, source="test")
+        with pytest.raises(ValueError, match="belongs to project"):
+            service.update_task(conn, tid, {"project_id": pid2}, source="test")
+
+    def test_update_project_and_clear_group_together(self, conn: sqlite3.Connection) -> None:
+        """Same scenario as above, but the caller clears group_id in the same update."""
+        bid, cid, pid1 = self._setup(conn)
+        pid2 = insert_project(conn, bid, "proj2")
+        grp = service.create_group(conn, pid1, "g")
+        tid = insert_task(conn, bid, "t", cid, project_id=pid1)
+        service.update_task(conn, tid, {"group_id": grp.id}, source="test")
+        service.update_task(
+            conn, tid, {"project_id": pid2, "group_id": None}, source="test",
+        )
+        updated = service.get_task(conn, tid)
+        assert updated.project_id == pid2
+        assert updated.group_id is None
+
+
 class TestTaskGroupHistory:
     def _setup(self, conn: sqlite3.Connection) -> tuple[int, int, int]:
         bid = insert_workspace(conn, "workspace1")
@@ -1995,3 +2088,111 @@ class TestArchivePreviewAndCascade:
         service.add_group_dependency(conn, g1, g2)  # should not crash
         deps = service.list_all_group_dependencies(conn)
         assert (g1, g2) in deps
+
+
+# ---- Task metadata ----
+
+
+class TestTaskMeta:
+    def _setup(self, conn: sqlite3.Connection) -> tuple[int, int]:
+        bid = insert_workspace(conn, "w")
+        sid = insert_status(conn, bid, "todo")
+        tid = insert_task(conn, bid, "task1", sid)
+        return bid, tid
+
+    def test_set_meta(self, conn: sqlite3.Connection) -> None:
+        _, tid = self._setup(conn)
+        task = service.set_task_meta(conn, tid, "branch", "feat/kv")
+        assert task.metadata == {"branch": "feat/kv"}
+
+    def test_set_meta_overwrite(self, conn: sqlite3.Connection) -> None:
+        _, tid = self._setup(conn)
+        service.set_task_meta(conn, tid, "branch", "feat/old")
+        task = service.set_task_meta(conn, tid, "branch", "feat/new")
+        assert task.metadata["branch"] == "feat/new"
+
+    def test_remove_meta(self, conn: sqlite3.Connection) -> None:
+        _, tid = self._setup(conn)
+        service.set_task_meta(conn, tid, "branch", "feat/kv")
+        task = service.remove_task_meta(conn, tid, "branch")
+        assert task.metadata == {}
+
+    def test_remove_nonexistent_key_raises(self, conn: sqlite3.Connection) -> None:
+        _, tid = self._setup(conn)
+        with pytest.raises(LookupError, match="not found"):
+            service.remove_task_meta(conn, tid, "nope")
+
+    def test_key_validation_empty(self, conn: sqlite3.Connection) -> None:
+        _, tid = self._setup(conn)
+        with pytest.raises(ValueError, match="1-64 characters"):
+            service.set_task_meta(conn, tid, "", "v")
+
+    def test_key_validation_too_long(self, conn: sqlite3.Connection) -> None:
+        _, tid = self._setup(conn)
+        with pytest.raises(ValueError, match="1-64 characters"):
+            service.set_task_meta(conn, tid, "k" * 65, "v")
+
+    def test_key_validation_bad_chars(self, conn: sqlite3.Connection) -> None:
+        _, tid = self._setup(conn)
+        with pytest.raises(ValueError, match="must match"):
+            service.set_task_meta(conn, tid, "BAD KEY", "v")
+
+    def test_value_validation_too_long(self, conn: sqlite3.Connection) -> None:
+        _, tid = self._setup(conn)
+        with pytest.raises(ValueError, match="500"):
+            service.set_task_meta(conn, tid, "k", "v" * 501)
+
+    def test_metadata_survives_task_update(self, conn: sqlite3.Connection) -> None:
+        _, tid = self._setup(conn)
+        service.set_task_meta(conn, tid, "branch", "feat/kv")
+        service.update_task(conn, tid, {"title": "new title"}, "test")
+        task = service.get_task(conn, tid)
+        assert task.metadata == {"branch": "feat/kv"}
+
+    def test_get_meta(self, conn: sqlite3.Connection) -> None:
+        _, tid = self._setup(conn)
+        service.set_task_meta(conn, tid, "branch", "feat/kv")
+        assert service.get_task_meta(conn, tid, "branch") == "feat/kv"
+
+    def test_get_meta_missing_key_raises(self, conn: sqlite3.Connection) -> None:
+        _, tid = self._setup(conn)
+        with pytest.raises(LookupError, match="not found"):
+            service.get_task_meta(conn, tid, "nope")
+
+    def test_get_meta_invalid_key_raises(self, conn: sqlite3.Connection) -> None:
+        _, tid = self._setup(conn)
+        with pytest.raises(ValueError, match="must match"):
+            service.get_task_meta(conn, tid, "BAD KEY")
+
+    def test_move_task_to_workspace_copies_metadata(self, conn: sqlite3.Connection) -> None:
+        bid1, tid = self._setup(conn)
+        service.set_task_meta(conn, tid, "branch", "feat/kv")
+        service.set_task_meta(conn, tid, "jira", "PROJ-1")
+        bid2 = insert_workspace(conn, "w2")
+        sid2 = insert_status(conn, bid2, "todo")
+        new_task = service.move_task_to_workspace(conn, tid, bid2, sid2, source="test")
+        assert new_task.metadata == {"branch": "feat/kv", "jira": "PROJ-1"}
+
+    def test_set_meta_normalizes_case(self, conn: sqlite3.Connection) -> None:
+        _, tid = self._setup(conn)
+        service.set_task_meta(conn, tid, "BRANCH", "feat/kv")
+        task = service.get_task(conn, tid)
+        assert task.metadata == {"branch": "feat/kv"}
+
+    def test_get_meta_case_insensitive(self, conn: sqlite3.Connection) -> None:
+        _, tid = self._setup(conn)
+        service.set_task_meta(conn, tid, "branch", "feat/kv")
+        assert service.get_task_meta(conn, tid, "Branch") == "feat/kv"
+        assert service.get_task_meta(conn, tid, "BRANCH") == "feat/kv"
+
+    def test_remove_meta_case_insensitive(self, conn: sqlite3.Connection) -> None:
+        _, tid = self._setup(conn)
+        service.set_task_meta(conn, tid, "branch", "feat/kv")
+        service.remove_task_meta(conn, tid, "BRANCH")
+        assert service.get_task(conn, tid).metadata == {}
+
+    def test_set_meta_overwrites_regardless_of_case(self, conn: sqlite3.Connection) -> None:
+        _, tid = self._setup(conn)
+        service.set_task_meta(conn, tid, "Branch", "old")
+        service.set_task_meta(conn, tid, "BRANCH", "new")
+        assert service.get_task(conn, tid).metadata == {"branch": "new"}

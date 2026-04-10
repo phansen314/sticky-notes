@@ -37,14 +37,12 @@ from .models import (
 _WORKSPACE_UPDATABLE: frozenset[str] = frozenset({"name", "archived"})
 _STATUS_UPDATABLE: frozenset[str] = frozenset({"name", "archived"})
 _PROJECT_UPDATABLE: frozenset[str] = frozenset({"name", "description", "archived"})
-# group_id is intentionally excluded — assignment goes through
-# set_task_group_id / assign_task_to_group which enforce project-matching
-# invariants and record history that update_task would skip.
 _TASK_UPDATABLE: frozenset[str] = frozenset({
     "title",
     "description",
     "status_id",
     "project_id",
+    "group_id",
     "priority",
     "due_date",
     "position",
@@ -54,7 +52,7 @@ _TASK_UPDATABLE: frozenset[str] = frozenset({
 })
 _TAG_UPDATABLE: frozenset[str] = frozenset({"name", "archived"})
 _GROUP_UPDATABLE: frozenset[str] = frozenset({
-    "title", "parent_id", "position", "archived",
+    "title", "description", "parent_id", "position", "archived",
 })
 
 
@@ -256,8 +254,8 @@ def insert_task(conn: sqlite3.Connection, new: NewTask) -> Task:
     d = _asdict_for_insert(new)
     cur = conn.execute(
         "INSERT INTO tasks "
-        "(workspace_id, title, status_id, project_id, description, priority, due_date, position, start_date, finish_date) "
-        "VALUES (:workspace_id, :title, :status_id, :project_id, :description, :priority, :due_date, :position, :start_date, :finish_date)",
+        "(workspace_id, title, status_id, project_id, description, priority, due_date, position, start_date, finish_date, group_id) "
+        "VALUES (:workspace_id, :title, :status_id, :project_id, :description, :priority, :due_date, :position, :start_date, :finish_date, :group_id)",
         d,
     )
     row = conn.execute("SELECT * FROM tasks WHERE id = ?", (cur.lastrowid,)).fetchone()
@@ -388,6 +386,66 @@ def list_tasks_by_ids(
         task_ids,
     ).fetchall()
     return tuple(row_to_task(r) for r in rows)
+
+
+# ---- Task metadata functions ----
+
+
+def set_task_metadata_key(
+    conn: sqlite3.Connection,
+    task_id: int,
+    key: str,
+    value: str,
+) -> None:
+    """Set a single metadata key using SQLite json_set. Creates or overwrites.
+
+    Callers must pre-validate the key (see service._normalize_meta_key). The
+    slug charset enforced there excludes characters that could escape the
+    quoted JSON path literal built below.
+    """
+    path = f'$."{key}"'
+    cur = conn.execute(
+        "UPDATE tasks SET metadata = json_set(metadata, ?, ?) WHERE id = ?",
+        (path, value, task_id),
+    )
+    if cur.rowcount == 0:
+        raise LookupError(f"task {task_id} not found")
+
+
+def remove_task_metadata_key(
+    conn: sqlite3.Connection,
+    task_id: int,
+    key: str,
+) -> None:
+    """Remove a single metadata key using SQLite json_remove.
+
+    Callers must pre-validate the key (see service._normalize_meta_key).
+    """
+    path = f'$."{key}"'
+    cur = conn.execute(
+        "UPDATE tasks SET metadata = json_remove(metadata, ?) WHERE id = ?",
+        (path, task_id),
+    )
+    if cur.rowcount == 0:
+        raise LookupError(f"task {task_id} not found")
+
+
+def copy_task_metadata(
+    conn: sqlite3.Connection,
+    src_task_id: int,
+    dst_task_id: int,
+) -> None:
+    """Copy the entire metadata blob from one task to another.
+
+    Used when a task moves between workspaces — the destination is a fresh
+    row with empty metadata, and we want a byte-for-byte copy of the source.
+    """
+    cur = conn.execute(
+        "UPDATE tasks SET metadata = (SELECT metadata FROM tasks WHERE id = ?) WHERE id = ?",
+        (src_task_id, dst_task_id),
+    )
+    if cur.rowcount == 0:
+        raise LookupError(f"task {dst_task_id} not found")
 
 
 # ---- Task dependency functions ----
@@ -754,8 +812,8 @@ def list_task_ids_by_project(
 def insert_group(conn: sqlite3.Connection, new: NewGroup) -> Group:
     d = _asdict_for_insert(new)
     cur = conn.execute(
-        "INSERT INTO groups (workspace_id, project_id, title, parent_id, position) "
-        "VALUES (:workspace_id, :project_id, :title, :parent_id, :position)",
+        "INSERT INTO groups (workspace_id, project_id, title, description, parent_id, position) "
+        "VALUES (:workspace_id, :project_id, :title, :description, :parent_id, :position)",
         d,
     )
     row = conn.execute("SELECT * FROM groups WHERE id = ?", (cur.lastrowid,)).fetchone()
@@ -962,12 +1020,12 @@ def get_group_ancestry(
     """Return groups from root to the given group, inclusive."""
     rows = conn.execute(
         "WITH RECURSIVE ancestry AS ("
-        "  SELECT id, workspace_id, project_id, title, parent_id, position, archived, created_at, 0 AS depth "
+        "  SELECT id, workspace_id, project_id, title, description, parent_id, position, archived, created_at, 0 AS depth "
         "  FROM groups WHERE id = ? "
         "  UNION ALL "
-        "  SELECT g.id, g.workspace_id, g.project_id, g.title, g.parent_id, g.position, g.archived, g.created_at, a.depth + 1 "
+        "  SELECT g.id, g.workspace_id, g.project_id, g.title, g.description, g.parent_id, g.position, g.archived, g.created_at, a.depth + 1 "
         "  FROM groups g JOIN ancestry a ON g.id = a.parent_id"
-        ") SELECT id, workspace_id, project_id, title, parent_id, position, archived, created_at "
+        ") SELECT id, workspace_id, project_id, title, description, parent_id, position, archived, created_at "
         "FROM ancestry ORDER BY depth DESC",
         (group_id,),
     ).fetchall()

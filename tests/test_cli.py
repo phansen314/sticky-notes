@@ -245,6 +245,11 @@ class TestTaskCommands:
         out, _ = cli("task", "create", "Fix it", "-d", "Full description here", "-S", "todo")
         assert "created task-0001" in out
 
+    def test_add_empty_desc_normalized_to_null(self, cli):
+        out, _ = cli("--json", "task", "create", "Fix it", "-d", "", "-S", "todo")
+        data = json.loads(out)
+        assert data["data"]["description"] is None
+
     def test_ls_grouped_by_column(self, cli):
         cli("task", "create", "Task A", "-S", "todo")
         cli("task", "create", "Task B", "-S", "in progress")
@@ -441,6 +446,33 @@ class TestProjectCommands:
         cli("project", "create", "backend")
         out, _ = cli("project", "archive", "backend", "--force")
         assert "archived project 'backend'" in out
+
+    def test_edit_description(self, cli):
+        cli("project", "create", "backend")
+        out, _ = cli("project", "edit", "backend", "--desc", "API services")
+        assert "updated project 'backend'" in out
+        out, _ = cli("project", "show", "backend")
+        assert "API services" in out
+
+    def test_edit_rename(self, cli):
+        cli("project", "create", "backend")
+        out, _ = cli("project", "edit", "backend", "--name", "api")
+        assert "updated project 'api'" in out
+
+    def test_edit_no_changes(self, cli):
+        cli("project", "create", "backend")
+        out, _ = cli("project", "edit", "backend")
+        assert "nothing to update" in out
+
+    def test_create_empty_desc_normalized_to_null(self, cli):
+        out, _ = cli("--json", "project", "create", "backend", "--desc", "")
+        data = json.loads(out)
+        assert data["data"]["description"] is None
+
+    def test_create_whitespace_desc_normalized_to_null(self, cli):
+        out, _ = cli("--json", "project", "create", "backend", "--desc", "   ")
+        data = json.loads(out)
+        assert data["data"]["description"] is None
 
 
 # ---- Dependency commands ----
@@ -817,6 +849,41 @@ class TestGroupCLI:
         _, err = self.cli("group", "mv", "A", "--parent", "B", "--project", "sprint1", expect_exit=1)
         assert "cycle" in err
 
+    def test_create_with_description(self):
+        out, _ = self.cli("group", "create", "Frontend", "--project", "sprint1", "--desc", "UI components")
+        assert "created group 'Frontend'" in out
+        out, _ = self.cli("group", "show", "Frontend", "--project", "sprint1")
+        assert "UI components" in out
+
+    def test_create_empty_desc_normalized_to_null(self):
+        out, _ = self.cli("--json", "group", "create", "Frontend", "--project", "sprint1", "--desc", "")
+        data = json.loads(out)
+        assert data["data"]["description"] is None
+
+    def test_edit_description(self):
+        self.cli("group", "create", "Frontend", "--project", "sprint1")
+        out, _ = self.cli("group", "edit", "Frontend", "--project", "sprint1", "--desc", "UI layer")
+        assert "updated group 'Frontend'" in out
+
+    def test_edit_no_changes(self):
+        self.cli("group", "create", "Frontend", "--project", "sprint1")
+        out, _ = self.cli("group", "edit", "Frontend", "--project", "sprint1")
+        assert "nothing to update" in out
+
+    def test_task_create_with_group(self):
+        self.cli("group", "create", "Frontend", "--project", "sprint1")
+        out, _ = self.cli("task", "create", "Fix bug", "-S", "todo", "--group", "Frontend")
+        assert "created task-0001" in out
+        out, _ = self.cli("task", "show", "task-0001")
+        assert "Frontend" in out
+        assert "sprint1" in out
+
+    def test_task_create_group_infers_project(self):
+        self.cli("group", "create", "Frontend", "--project", "sprint1")
+        self.cli("task", "create", "Fix bug", "-S", "todo", "--group", "Frontend")
+        out, _ = self.cli("task", "show", "task-0001")
+        assert "sprint1" in out
+
 
 # ---- Tag ----
 
@@ -980,6 +1047,16 @@ class TestContext:
         assert "Projects:" not in out
         assert "Tags:" not in out
         assert "Groups:" not in out
+
+    def test_context_no_active_workspace(self, cli):
+        _, err = cli("context", expect_exit=1)
+        assert "no active workspace" in err
+
+    def test_context_no_active_workspace_json(self, cli):
+        _, err = cli("--json", "context", expect_exit=1)
+        data = json.loads(err)
+        assert data["ok"] is False
+        assert data["code"] == "missing_active_workspace"
 
 
 # ---- JSON output ----
@@ -1518,8 +1595,6 @@ class TestInfo:
         out, _ = cli("info")
         for label in ["database", "wal sidecar", "shm sidecar", "active-workspace pointer"]:
             assert label in out
-        assert "wipe_db.py" in out
-
     def test_info_text_existence_markers(self, cli, db_path):
         cli("workspace", "create", "X")
         cli("status", "create", "todo")
@@ -1533,7 +1608,6 @@ class TestInfo:
         data = json.loads(out)
         assert data["ok"] is True
         assert data["data"]["db"] == str(db_path)
-        assert "reset_command" in data["data"]
         assert isinstance(data["data"]["existing"], list)
 
 
@@ -1976,3 +2050,145 @@ class TestEndToEndSmoke:
         assert "dev" not in out
         out, _ = self.cli("workspace", "ls", "--all")
         assert "dev" in out
+
+
+# ---- Task metadata commands ----
+
+
+class TestTaskMetaCommands:
+    @pytest.fixture(autouse=True)
+    def _setup(self, cli):
+        self.cli = cli
+        cli("workspace", "create", "dev")
+        cli("status", "create", "todo")
+        cli("task", "create", "My task", "-S", "todo")
+
+    def test_meta_ls_empty(self):
+        out, _ = self.cli("task", "meta", "ls", "1")
+        assert "no metadata" in out
+
+    def test_meta_set_and_get(self):
+        self.cli("task", "meta", "set", "1", "branch", "feat/kv")
+        out, _ = self.cli("task", "meta", "get", "1", "branch")
+        assert "feat/kv" in out
+
+    def test_meta_ls_after_set(self):
+        self.cli("task", "meta", "set", "1", "branch", "feat/kv")
+        self.cli("task", "meta", "set", "1", "jira", "PROJ-123")
+        out, _ = self.cli("task", "meta", "ls", "1")
+        assert "branch" in out
+        assert "feat/kv" in out
+        assert "jira" in out
+        assert "PROJ-123" in out
+
+    def test_meta_del(self):
+        self.cli("task", "meta", "set", "1", "branch", "feat/kv")
+        out, _ = self.cli("task", "meta", "del", "1", "branch")
+        assert "removed branch" in out
+        out, _ = self.cli("task", "meta", "ls", "1")
+        assert "no metadata" in out
+
+    def test_meta_del_nonexistent(self):
+        _, err = self.cli("task", "meta", "del", "1", "nope", expect_exit=1)
+        assert "not found" in err
+
+    def test_meta_get_nonexistent(self):
+        _, err = self.cli("task", "meta", "get", "1", "nope", expect_exit=1)
+        assert "not found" in err
+
+    def test_meta_get_invalid_key(self):
+        _, err = self.cli("task", "meta", "get", "1", "BAD KEY", expect_exit=1)
+        assert "must match" in err
+
+    def test_meta_set_invalid_key(self):
+        _, err = self.cli("task", "meta", "set", "1", "BAD KEY", "v", expect_exit=1)
+        assert "must match" in err
+
+    def test_meta_set_json(self):
+        out, _ = self.cli("--json", "task", "meta", "set", "1", "branch", "feat/kv")
+        data = json.loads(out)
+        assert data["ok"] is True
+        assert data["data"] == {"key": "branch", "value": "feat/kv"}
+
+    def test_meta_ls_json(self):
+        self.cli("task", "meta", "set", "1", "k", "v")
+        self.cli("task", "meta", "set", "1", "a", "b")
+        out, _ = self.cli("--json", "task", "meta", "ls", "1")
+        data = json.loads(out)
+        assert data["ok"] is True
+        assert data["data"] == [
+            {"key": "a", "value": "b"},
+            {"key": "k", "value": "v"},
+        ]
+
+    def test_meta_ls_json_empty(self):
+        out, _ = self.cli("--json", "task", "meta", "ls", "1")
+        data = json.loads(out)
+        assert data["ok"] is True
+        assert data["data"] == []
+
+    def test_meta_get_json(self):
+        self.cli("task", "meta", "set", "1", "branch", "feat/kv")
+        out, _ = self.cli("--json", "task", "meta", "get", "1", "branch")
+        data = json.loads(out)
+        assert data["ok"] is True
+        assert data["data"] == {"key": "branch", "value": "feat/kv"}
+
+    def test_meta_del_json(self):
+        self.cli("task", "meta", "set", "1", "branch", "feat/kv")
+        out, _ = self.cli("--json", "task", "meta", "del", "1", "branch")
+        data = json.loads(out)
+        assert data["ok"] is True
+        assert data["data"] == {"key": "branch", "value": "feat/kv"}
+
+    def test_meta_visible_in_show(self):
+        self.cli("task", "meta", "set", "1", "branch", "feat/kv")
+        out, _ = self.cli("task", "show", "1")
+        assert "Metadata:" in out
+        assert "branch: feat/kv" in out
+
+    def test_meta_ls_padding_adapts_to_long_key(self):
+        self.cli("task", "meta", "set", "1", "deployment.environment", "prod")
+        self.cli("task", "meta", "set", "1", "k", "v")
+        out, _ = self.cli("task", "meta", "ls", "1")
+        # Each line: 2-space indent + key + padding + value. Value must not
+        # butt up against the key — there should be at least one space between.
+        for line in out.splitlines():
+            stripped = line.lstrip()
+            key, sep, rest = stripped.partition(" ")
+            assert rest.lstrip() != "", f"no separation between key and value: {line!r}"
+
+    def test_meta_set_nonexistent_task(self):
+        _, err = self.cli("task", "meta", "set", "999", "branch", "feat/kv", expect_exit=1)
+        assert "not found" in err
+
+    def test_meta_key_case_insensitive_roundtrip(self):
+        self.cli("task", "meta", "set", "1", "Branch", "feat/kv")
+        # Stored lowercase — lookups by any case should hit it
+        out, _ = self.cli("task", "meta", "get", "1", "BRANCH")
+        assert "feat/kv" in out
+        out, _ = self.cli("task", "meta", "get", "1", "branch")
+        assert "feat/kv" in out
+
+    def test_meta_key_normalized_in_ls(self):
+        self.cli("task", "meta", "set", "1", "Branch", "feat/kv")
+        out, _ = self.cli("task", "meta", "ls", "1")
+        assert "branch" in out
+        assert "Branch" not in out
+
+    def test_meta_del_mixed_case(self):
+        self.cli("task", "meta", "set", "1", "Branch", "feat/kv")
+        out, _ = self.cli("task", "meta", "del", "1", "BRANCH")
+        assert "removed branch" in out
+        out, _ = self.cli("task", "meta", "ls", "1")
+        assert "no metadata" in out
+
+    def test_meta_by_title(self):
+        self.cli("task", "meta", "set", "My task", "branch", "feat/kv", "--by-title")
+        out, _ = self.cli("task", "meta", "get", "My task", "branch", "--by-title")
+        assert "feat/kv" in out
+        out, _ = self.cli("task", "meta", "ls", "My task", "--by-title")
+        assert "branch" in out
+        self.cli("task", "meta", "del", "My task", "branch", "--by-title")
+        out, _ = self.cli("task", "meta", "ls", "1")
+        assert "no metadata" in out
