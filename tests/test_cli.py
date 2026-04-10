@@ -1696,8 +1696,12 @@ class TestInfo:
         out, _ = cli("--json", "info")
         data = json.loads(out)
         assert data["ok"] is True
-        assert data["data"]["db"] == str(db_path)
-        assert isinstance(data["data"]["existing"], list)
+        assert data["data"]["db"]["path"] == str(db_path)
+        assert isinstance(data["data"]["db"]["exists"], bool)
+        for key in ("db", "wal", "shm", "active_workspace"):
+            assert "path" in data["data"][key]
+            assert "exists" in data["data"][key]
+        assert "existing" not in data["data"]
 
 
 # ---- Archive commands (dry-run, cascade, confirmation) ----

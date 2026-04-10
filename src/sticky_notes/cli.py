@@ -734,21 +734,15 @@ def cmd_info(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) 
     wal = db_path.with_name(db_path.name + "-wal")
     shm = db_path.with_name(db_path.name + "-shm")
     entries = [
-        ("database", db_path),
-        ("wal sidecar", wal),
-        ("shm sidecar", shm),
-        ("active-workspace pointer", ab_path),
+        ("db", "database", db_path),
+        ("wal", "wal sidecar", wal),
+        ("shm", "shm sidecar", shm),
+        ("active_workspace", "active-workspace pointer", ab_path),
     ]
-    data = {
-        "db": str(db_path),
-        "wal": str(wal),
-        "shm": str(shm),
-        "active_workspace": str(ab_path),
-        "existing": [str(p) for _, p in entries if p.exists()],
-    }
-    width = max(len(label) for label, _ in entries)
+    data = {key: {"path": str(p), "exists": p.exists()} for key, _, p in entries}
+    width = max(len(label) for _, label, _ in entries)
     lines = ["sticky-notes files:"]
-    for label, p in entries:
+    for _, label, p in entries:
         marker = "exists" if p.exists() else "missing"
         lines.append(f"  {label:<{width}}  {p}  [{marker}]")
     return Ok(data=data, text="\n".join(lines))
