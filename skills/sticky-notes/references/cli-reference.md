@@ -13,7 +13,9 @@ Apply to every command. Place before the subcommand:  `todo [global flags] <comm
 | `--db PATH` | — | `~/.local/share/sticky-notes/sticky-notes.db` | Path to SQLite DB |
 | `--workspace NAME` | `-w` | active-workspace file | Workspace name override (bypasses `~/.local/share/sticky-notes/active-workspace`) |
 | `--json` | — | off | Emit JSON envelope instead of text |
-| `--quiet` | `-q` | off | Suppress success output |
+| `--quiet` | `-q` | off | Suppress success output (text mode only) |
+
+`--quiet` suppresses success text output only. It has **no effect when `--json` is passed** — JSON output is always emitted to stdout on success. Pipe to `/dev/null` if you want total silence.
 
 **JSON envelope:**
 - Success → stdout: `{"ok": true, "data": ...}`
