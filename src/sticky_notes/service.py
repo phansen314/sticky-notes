@@ -1720,21 +1720,27 @@ def preview_move_task(
     status_id: int,
     position: int,
     *,
-    project_id: Any = _UNSET,
+    project_id: int | None = None,
+    change_project: bool = False,
 ) -> TaskMovePreview:
-    """Compute a from/to snapshot for `move_task`. No DB writes."""
+    """Compute a from/to snapshot for `move_task`. No DB writes.
+
+    Pass `change_project=True` to reassign the project; `project_id` is
+    then the new value (None means unassign). When `change_project=False`
+    the preview reports no project change.
+    """
     task = get_task(conn, task_id)
     from_status = get_status(conn, task.status_id)
     to_status = get_status(conn, status_id)
     from_project = (
         repo.get_project(conn, task.project_id).name if task.project_id is not None else None
     )
-    if project_id is _UNSET:
-        to_project_id = task.project_id
-        project_changed = False
-    else:
+    if change_project:
         to_project_id = project_id
         project_changed = to_project_id != task.project_id
+    else:
+        to_project_id = task.project_id
+        project_changed = False
     to_project = (
         repo.get_project(conn, to_project_id).name if to_project_id is not None else None
     )

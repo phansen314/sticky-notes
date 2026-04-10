@@ -221,16 +221,19 @@ def cmd_task_mv(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Pat
     task_id = _resolve_task(conn, workspace, args.task_num)
     col = service.get_status_by_name(conn, workspace.id, args.status)
     position = args.position if args.position is not None else 0
-    project_id_arg: Any = service._UNSET
-    if args.project:
-        project_id_arg = service.get_project_by_name(conn, workspace.id, args.project).id
+    change_project = args.project is not None
+    project_id = (
+        service.get_project_by_name(conn, workspace.id, args.project).id
+        if change_project else None
+    )
     if args.dry_run:
         preview = service.preview_move_task(
-            conn, task_id, col.id, position, project_id=project_id_arg,
+            conn, task_id, col.id, position,
+            project_id=project_id, change_project=change_project,
         )
         return Ok(data=preview, text=presenters.format_task_move_preview(preview))
-    if project_id_arg is not service._UNSET:
-        updated = service.move_task(conn, task_id, col.id, position, source="cli", project_id=project_id_arg)
+    if change_project:
+        updated = service.move_task(conn, task_id, col.id, position, source="cli", project_id=project_id)
     else:
         updated = service.move_task(conn, task_id, col.id, position, source="cli")
     return Ok(data=updated, text=f"moved {format_task_num(task_id)} -> {col.name}")
