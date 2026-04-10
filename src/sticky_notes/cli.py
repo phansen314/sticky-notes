@@ -566,11 +566,10 @@ def cmd_group_archive(conn: sqlite3.Connection, args: argparse.Namespace, db_pat
 def cmd_group_mv(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
     workspace = _resolve_workspace(conn, args, db_path)
     grp = service.resolve_group(conn, workspace.id, args.title, project_name=args.project)
-    parent_str = args.parent
-    if not parent_str:
+    if args.to_top:
         updated = service.update_group(conn, grp.id, {"parent_id": None})
         return Ok(data=updated, text=f"promoted group '{grp.title}' to top-level")
-    parent = service.resolve_group(conn, workspace.id, parent_str, project_name=args.project)
+    parent = service.resolve_group(conn, workspace.id, args.parent, project_name=args.project)
     updated = service.update_group(conn, grp.id, {"parent_id": parent.id})
     return Ok(data=updated, text=f"moved group '{grp.title}' under '{parent.title}'")
 
@@ -1269,7 +1268,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_gmv = grp_sub.add_parser("mv", help="reparent a group")
     p_gmv.set_defaults(command="group_mv")
     p_gmv.add_argument("title")
-    p_gmv.add_argument("--parent", required=True, help="new parent title, or '' to promote to top-level")
+    p_gmv_parent = p_gmv.add_mutually_exclusive_group(required=True)
+    p_gmv_parent.add_argument("--parent", help="new parent group title")
+    p_gmv_parent.add_argument("--to-top", action="store_true", help="promote to top-level (no parent)")
     p_gmv.add_argument("--project", "-p", default=None, help="disambiguate by project")
 
     p_gasn = grp_sub.add_parser("assign", help="assign task to group")

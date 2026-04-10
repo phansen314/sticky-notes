@@ -406,7 +406,7 @@ Groups are project-scoped hierarchical collections of tasks. All group commands 
 | `group rename` | `title new_title` | `--project/-p` | Rename |
 | `group edit` | `title` | `--desc/-d`, `--project/-p` | Edit group description |
 | `group archive` | `title` | `--project/-p`, `--force`, `--dry-run` | Cascade-archive group and all descendant groups/tasks. Prompts y/N unless `--force`. |
-| `group mv` | `title` | `--parent` (**required**), `--project/-p` | Reparent; `--parent ''` promotes to top-level |
+| `group mv` | `title` | `--parent TITLE` **or** `--to-top` (required), `--project/-p` | Reparent under another group, or `--to-top` to promote to top-level |
 | `group assign` | `task group_title` | `--project/-p`, `--by-title` | Assign task to group |
 | `group unassign` | `task` | `--by-title` | Unassign task from its group |
 
@@ -416,7 +416,7 @@ todo group create "Auth" --project "API rewrite" --parent "Backend"
 todo group assign task-0005 "Auth" --project "API rewrite"
 todo group ls --project "API rewrite" --tree
 todo group mv "Auth" --parent "Frontend" --project "API rewrite"
-todo group mv "Backend" --parent '' --project "API rewrite"  # promote to top-level
+todo group mv "Backend" --to-top --project "API rewrite"  # promote to top-level
 ```
 
 ---

@@ -805,7 +805,7 @@ class TestGroupCLI:
     def test_mv_promote_to_top(self):
         self.cli("group", "create", "Frontend", "--project", "sprint1")
         self.cli("group", "create", "Child", "--project", "sprint1", "--parent", "Frontend")
-        out, _ = self.cli("group", "mv", "Child", "--parent", "", "--project", "sprint1")
+        out, _ = self.cli("group", "mv", "Child", "--to-top", "--project", "sprint1")
         assert "promoted" in out
 
     def test_assign_task(self):
