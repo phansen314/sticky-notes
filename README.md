@@ -243,3 +243,7 @@ For manual TUI testing with seeded data:
 python tests/seed.py tmp/test.db
 todo tui --db tmp/test.db
 ```
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for release notes. Release process is documented in [RELEASING.md](RELEASING.md).

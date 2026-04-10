@@ -146,6 +146,7 @@ Entry point: `todo tui` (or `todo tui --db path/to/db`).
 - **Export** — `export.py` renders the full database to Markdown with Mermaid dependency graphs.
 - **DB path** — `~/.local/share/sticky-notes/sticky-notes.db` (XDG-compliant).
 - **WAL journal mode** — enables concurrent reads from TUI and CLI.
+- **Releases** — version lives in two files that must move together: `pyproject.toml` (Python package) and `.claude-plugin/plugin.json` (Claude Code plugin). See `RELEASING.md` for the full checklist (pre-release tests, version bump, `CHANGELOG.md` promotion, tag, push). User-visible changes go into `CHANGELOG.md` under `## [Unreleased]` as they land, then get promoted to a versioned section at release time.
 
 ## Testing
 
