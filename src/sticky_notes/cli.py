@@ -1038,7 +1038,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_mv.set_defaults(command="task_mv")
     p_mv.add_argument("task_num")
     p_mv.add_argument("--status", "-S", required=True, help="target status name")
-    p_mv.add_argument("position", type=int, nargs="?", default=None)
+    p_mv.add_argument("position", type=int, nargs="?", default=None, help="zero-indexed position within status; 0 = top (default), higher values move further down")
     p_mv.add_argument("--project", "-p", default=None, help="also change task project")
 
     p_transfer = task_sub.add_parser("transfer", help="move task to a different workspace")
