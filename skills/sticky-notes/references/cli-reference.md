@@ -429,6 +429,7 @@ Exports the **entire database**. Default format is JSON; pass `--md` for Markdow
 |---|---|---|
 | `--md` | — | Export as Markdown instead of JSON |
 | `--output` | `-o` | Write to file instead of stdout (creates parent dirs) |
+| `--overwrite` | — | Overwrite destination file if it already exists (required when `-o` points at an existing file) |
 
 With `--json`:
 - stdout (no `-o`): `{"markdown": "..."}`

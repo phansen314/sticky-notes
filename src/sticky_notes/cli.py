@@ -648,8 +648,7 @@ def cmd_export(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path
     if args.md:
         content = export_markdown(conn)
         if args.output:
-            output_path = Path(args.output)
-            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path = _prepare_export_output(Path(args.output), args.overwrite)
             output_path.write_text(content)
             return Ok(
                 data={"output_path": str(args.output), "bytes": len(content.encode())},
@@ -660,14 +659,20 @@ def cmd_export(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path
         dump = export_full_json(conn)
         content = json.dumps(dump, indent=2)
         if args.output:
-            output_path = Path(args.output)
-            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path = _prepare_export_output(Path(args.output), args.overwrite)
             output_path.write_text(content)
             return Ok(
                 data={"output_path": str(args.output), "bytes": len(content.encode())},
                 text=f"wrote {args.output}",
             )
         return Ok(data=dump, text=content)
+
+
+def _prepare_export_output(output_path: Path, overwrite: bool) -> Path:
+    if output_path.exists() and not overwrite:
+        raise ValueError(f"destination already exists: {output_path} (use --overwrite to overwrite)")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    return output_path
 
 
 # ---- Backup ----
@@ -1348,6 +1353,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_export.set_defaults(command="export")
     p_export.add_argument("--md", action="store_true", help="export as markdown instead of JSON")
     p_export.add_argument("-o", "--output", help="write to file instead of stdout")
+    p_export.add_argument("--overwrite", action="store_true", help="overwrite destination file if it exists")
 
     # ---- Backup ----
 

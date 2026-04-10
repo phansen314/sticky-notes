@@ -1547,6 +1547,38 @@ class TestExportJson:
         data = json.loads(output.read_text())
         assert "schema_version" in data
 
+    def test_export_refuses_overwrite_by_default(self, cli, tmp_path):
+        cli("workspace", "create", "B")
+        out_file = tmp_path / "dump.json"
+        out_file.write_text("existing")
+        _, err = cli("export", "-o", str(out_file), expect_exit=4)
+        assert "already exists" in err
+        assert out_file.read_text() == "existing"
+
+    def test_export_overwrite_flag_json(self, cli, tmp_path):
+        import json
+        cli("workspace", "create", "B")
+        out_file = tmp_path / "dump.json"
+        out_file.write_text("old")
+        cli("export", "-o", str(out_file), "--overwrite")
+        data = json.loads(out_file.read_text())
+        assert "schema_version" in data
+
+    def test_export_overwrite_flag_md(self, cli, tmp_path):
+        cli("workspace", "create", "B")
+        out_file = tmp_path / "dump.md"
+        out_file.write_text("old")
+        cli("export", "--md", "-o", str(out_file), "--overwrite")
+        assert "# Sticky Notes Export" in out_file.read_text()
+
+    def test_export_md_refuses_overwrite_by_default(self, cli, tmp_path):
+        cli("workspace", "create", "B")
+        out_file = tmp_path / "dump.md"
+        out_file.write_text("existing")
+        _, err = cli("export", "--md", "-o", str(out_file), expect_exit=4)
+        assert "already exists" in err
+        assert out_file.read_text() == "existing"
+
 
 class TestExportParentDir:
     def test_export_creates_parent_dirs(self, cli, tmp_path):
