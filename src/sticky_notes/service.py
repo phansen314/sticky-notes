@@ -517,21 +517,19 @@ def resolve_task_id(
     conn: sqlite3.Connection,
     workspace_id: int,
     raw: str,
-    *,
-    by_title: bool = False,
 ) -> int:
     """Resolve a task identifier to its ID.
 
-    By default only accepts numeric formats ('1', 'task-0001', '#1').
-    Pass by_title=True to also fall back to title lookup on this workspace.
+    Numeric forms ('1', 'task-0001', '#1') are tried first; anything else
+    falls back to a title lookup on this workspace. A task whose title
+    literally matches `task-NNNN` would be resolved as an ID, not a title —
+    avoid such titles.
     """
     try:
         return parse_task_num(raw)
     except ValueError:
         pass
-    if by_title:
-        return get_task_by_title(conn, workspace_id, raw).id
-    raise LookupError(f"invalid task number {raw!r}; use an integer, 'task-NNNN', or '#N'")
+    return get_task_by_title(conn, workspace_id, raw).id
 
 
 def get_task_detail(conn: sqlite3.Connection, task_id: int) -> TaskDetail:

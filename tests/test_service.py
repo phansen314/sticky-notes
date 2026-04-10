@@ -361,19 +361,12 @@ class TestTaskService:
         bid = insert_workspace(conn)
         cid = insert_status(conn, bid)
         task = service.create_task(conn, bid, "Find me", cid)
-        assert service.resolve_task_id(conn, bid, "Find me", by_title=True) == task.id
-
-    def test_resolve_task_id_no_title_without_flag_raises(self, conn: sqlite3.Connection) -> None:
-        bid = insert_workspace(conn)
-        cid = insert_status(conn, bid)
-        service.create_task(conn, bid, "Find me", cid)
-        with pytest.raises(LookupError):
-            service.resolve_task_id(conn, bid, "Find me")
+        assert service.resolve_task_id(conn, bid, "Find me") == task.id
 
     def test_resolve_task_id_missing_title_raises(self, conn: sqlite3.Connection) -> None:
         bid = insert_workspace(conn)
         with pytest.raises(LookupError):
-            service.resolve_task_id(conn, bid, "nonexistent task", by_title=True)
+            service.resolve_task_id(conn, bid, "nonexistent task")
 
     def test_get_detail(self, conn: sqlite3.Connection) -> None:
         bid = insert_workspace(conn)

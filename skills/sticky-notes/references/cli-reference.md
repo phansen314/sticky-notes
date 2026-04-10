@@ -81,13 +81,13 @@ todo task ls --tag backend --all
 
 ---
 
-### `todo task show <task_num> [--by-title]`
+### `todo task show <task>`
 
-Shows full task detail: description, history, dependencies, group, tags.
+Shows full task detail: description, history, dependencies, group, tags. `<task>` accepts numeric IDs (`1`, `task-0001`, `#1`) or a title string.
 
 ```sh
 todo task show task-0001
-todo task show "Write README" --by-title
+todo task show "Write README"
 ```
 
 ---
@@ -105,7 +105,6 @@ All flags are optional; only provided fields are updated.
 | `--project` | `-p` | — | Change project |
 | `--tag` | `-t` | — | Add tag (repeatable) |
 | `--untag` | — | — | Remove tag (repeatable) |
-| `--by-title` | — | off | Resolve `task_num` as title string |
 
 ```sh
 todo task edit task-0003 --priority 4 --due 2026-06-01
@@ -123,7 +122,6 @@ todo task edit task-0003 --tag urgent --untag backend
 | `status` (positional) | Target status name |
 | `position` (optional positional) | Integer position within status (default: `0` = top) |
 | `--project` / `-p` | Also change the task's project |
-| `--by-title` | Resolve task by title |
 
 ```sh
 todo task mv task-0001 "In Progress"
@@ -135,13 +133,13 @@ todo task mv task-0001 Backlog --project "Next sprint"
 
 ---
 
-### `todo task archive <task_num> [--by-title] [--force] [--dry-run]`
+### `todo task archive <task> [--force] [--dry-run]`
 
 Archives the task (`archived=true`). Prompts for y/N confirmation unless `--force` is passed. `--dry-run` previews without executing. JSON mode (`--json`) auto-confirms. Non-interactive stdin (pipes, CI) requires `--force` or `--dry-run` — the command fails fast rather than hang on `input()`. Tasks remain queryable with `--all` or `--archived`.
 
 ---
 
-### `todo task log <task_num> [--by-title]`
+### `todo task log <task>`
 
 Shows the full audit trail of field changes (TaskHistory).
 
@@ -177,7 +175,7 @@ Markdown export (`todo export --md`) renders metadata under dedicated sections: 
 | `task meta set` | `task_num key value` | Set (create or overwrite) a key's value |
 | `task meta del` | `task_num key` | Remove a key |
 
-All four accept `--by-title` to resolve the task by title. Metadata is also shown by `todo task show`. Cross-workspace `todo task transfer` copies task metadata verbatim to the new task.
+`task_num` accepts numeric IDs or title strings — resolution is automatic. Metadata is also shown by `todo task show`. Cross-workspace `todo task transfer` copies task metadata verbatim to the new task.
 
 ```sh
 todo task meta set task-0001 branch feat/kv
@@ -277,7 +275,6 @@ todo --json context
 | `--status` | `-S` | **yes** | Status on target workspace |
 | `--project` | `-p` | no | Project on target workspace |
 | `--dry-run` | — | no | Preview without executing; validates blocking deps |
-| `--by-title` | — | no | Resolve source task by title |
 
 ```sh
 todo task transfer task-0001 --to ops --status Backlog
@@ -349,8 +346,8 @@ Flags are explicit about direction: `--task X --blocked-by Y` means **X is block
 
 | Command | Flags | Description |
 |---|---|---|
-| `dep create` | `--task TASK --blocked-by TASK` (both required), `--by-title` | Add dependency |
-| `dep archive` | `--task TASK --blocked-by TASK` (both required), `--by-title` | Archive dependency (soft-delete) |
+| `dep create` | `--task TASK --blocked-by TASK` (both required) | Add dependency |
+| `dep archive` | `--task TASK --blocked-by TASK` (both required) | Archive dependency (soft-delete) |
 
 ```sh
 todo dep create --task task-0003 --blocked-by task-0001   # task-0003 is blocked by task-0001
@@ -394,8 +391,8 @@ Groups are project-scoped hierarchical collections of tasks. All group commands 
 | `group edit` | `title` | `--desc/-d`, `--project/-p` | Edit group description |
 | `group archive` | `title` | `--project/-p`, `--force`, `--dry-run` | Cascade-archive group and all descendant groups/tasks. Prompts y/N unless `--force`. |
 | `group mv` | `title` | `--parent TITLE` **or** `--to-top` (required), `--project/-p` | Reparent under another group, or `--to-top` to promote to top-level |
-| `group assign` | `task group_title` | `--project/-p`, `--by-title` | Assign task to group |
-| `group unassign` | `task` | `--by-title` | Unassign task from its group |
+| `group assign` | `task group_title` | `--project/-p` | Assign task to group |
+| `group unassign` | `task` | — | Unassign task from its group |
 | `group dep create` | `group_title depends_on_title` | `--project/-p` | Add group dependency (group blocked by depends-on) |
 | `group dep archive` | `group_title depends_on_title` | `--project/-p` | Archive group dependency (soft-delete) |
 
@@ -466,11 +463,9 @@ Launches the Textual TUI interface. No JSON output. Useful for interactive explo
 
 ---
 
-## `--by-title` Flag
+## Task identifier resolution
 
-Resolves a task by title string instead of `task-NNNN` ID. Accepted by:
-
-`task show` · `task edit` · `task mv` · `task transfer` · `task archive` · `task log` · `task meta ls` · `task meta get` · `task meta set` · `task meta del` · `dep create` · `dep archive` · `group assign` · `group unassign`
+Every task-referencing command auto-detects whether the argument is an ID or a title. Numeric forms (`1`, `task-0001`, `#1`, `0001`) are tried first; anything else is looked up as a title on the active workspace. A task whose title literally looks like `task-NNNN` would be resolved as an ID, not a title — avoid such titles.
 
 ---
 

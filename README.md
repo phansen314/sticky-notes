@@ -54,7 +54,7 @@ Entry point: `todo`
 | `todo task log <task>` | Show task change history |
 | `todo task meta ls\|get\|set\|del <task> ...` | JSON key/value metadata CRUD (lowercase-normalized keys; workspaces, projects, and groups expose the same four verbs) |
 
-Use `--by-title` on any task command to resolve `<task>` by title string instead of ID.
+Task identifiers are auto-detected: numeric forms (`1`, `task-0001`, `#1`) resolve as IDs; anything else is looked up as a title on the active workspace.
 
 ### List Filters
 
