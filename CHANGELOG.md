@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-04-10
+
+### Added
+
+- **`tag rename <old> <new>`** and **`project rename <old> <new>`** subcommands. The rename pattern is now uniform across workspace / status / project / group / tag — all take two positionals. Backs a new `service.update_tag` wrapper.
+- **Distinct exit codes** for CLI errors. Previously all user-facing errors collapsed to exit `1`; they now split into `3` (`not_found`), `4` (`validation`), and `5` (`missing_active_workspace`). `2` (db error) is unchanged. Scripts can now distinguish error classes without parsing `--json`.
+- **Non-TTY confirmation guard** on archive commands. Piped or CI invocations of `task archive` / `group archive` / etc. without `--force` or `--dry-run` now fail fast with a clear validation error instead of hanging on `input()` or crashing on EOF.
+
+### Changed
+
+- **`task create --json`** now returns a full `TaskDetail` (same shape as `task show`) instead of a bare `Task`. Tags attached via `--tag` are finally visible in the response — previously the raw `Task` object had no `tags` field and the footnote in the reference documented the gap.
+- **`task transfer --workspace`** renamed to **`task transfer --to`**. The old name collided with the global `-w/--workspace` flag (which selects the *source* workspace). `--to` is unambiguous. Breaking.
+- **`workspace rename`** now requires both `old` and `new` positional arguments. The previous 1-arg mode ("rename active workspace") silently renamed the active workspace when the user usually meant to rename a named one. Breaking.
+- **`project edit --name/-n`** removed; use the new `project rename` instead. `project edit` now only handles description changes.
+- **Dropped `-P` / `-s` short flags** from `task create` / `task ls` / `task edit`. They case-collided with `-p` (project) and `-S` (status), making shift-key typos silently do the wrong thing. Long forms `--priority` and `--search` remain. Breaking for any script relying on the shorts.
+
+[Unreleased]: https://github.com/phansen314/sticky-notes/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/phansen314/sticky-notes/releases/tag/v0.7.0
+
 ## [0.6.0] — 2026-04-10
 
 ### Added
@@ -26,5 +45,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - Migration runner now restores `PRAGMA foreign_keys = ON` even when a migration fails, preventing the connection from being left with FKs disabled after a failed upgrade.
 
-[Unreleased]: https://github.com/phansen314/sticky-notes/compare/v0.6.0...HEAD
 [0.6.0]: https://github.com/phansen314/sticky-notes/releases/tag/v0.6.0
