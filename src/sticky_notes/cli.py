@@ -299,9 +299,10 @@ def cmd_workspace_create(conn: sqlite3.Connection, args: argparse.Namespace, db_
 
 def cmd_workspace_ls(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
     include_archived = args.archived in ("include", "only")
-    workspaces = service.list_workspaces(conn, include_archived=include_archived)
-    if args.archived == "only":
-        workspaces = tuple(w for w in workspaces if w.archived)
+    only_archived = args.archived == "only"
+    workspaces = service.list_workspaces(
+        conn, include_archived=include_archived, only_archived=only_archived,
+    )
     active_id = get_active_workspace_id(db_path)
     payload = [{**to_dict(w), "active": w.id == active_id} for w in workspaces]
     return Ok(data=payload, text=presenters.format_workspace_list(workspaces, active_id))
@@ -681,9 +682,10 @@ def cmd_tag_rename(conn: sqlite3.Connection, args: argparse.Namespace, db_path: 
 def cmd_tag_ls(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
     workspace = _resolve_workspace(conn, args, db_path)
     include_archived = args.archived in ("include", "only")
-    tags = service.list_tags(conn, workspace.id, include_archived=include_archived)
-    if args.archived == "only":
-        tags = tuple(t for t in tags if t.archived)
+    only_archived = args.archived == "only"
+    tags = service.list_tags(
+        conn, workspace.id, include_archived=include_archived, only_archived=only_archived,
+    )
     return Ok(data=tags, text=presenters.format_tag_list(tags))
 
 

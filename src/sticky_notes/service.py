@@ -258,8 +258,11 @@ def list_workspaces(
     conn: sqlite3.Connection,
     *,
     include_archived: bool = False,
+    only_archived: bool = False,
 ) -> tuple[Workspace, ...]:
-    return repo.list_workspaces(conn, include_archived=include_archived)
+    return repo.list_workspaces(
+        conn, include_archived=include_archived, only_archived=only_archived,
+    )
 
 
 def update_workspace(
@@ -1559,8 +1562,11 @@ def list_tags(
     workspace_id: int,
     *,
     include_archived: bool = False,
+    only_archived: bool = False,
 ) -> tuple[Tag, ...]:
-    return repo.list_tags(conn, workspace_id, include_archived=include_archived)
+    return repo.list_tags(
+        conn, workspace_id, include_archived=include_archived, only_archived=only_archived,
+    )
 
 
 def update_tag(

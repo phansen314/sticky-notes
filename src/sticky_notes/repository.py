@@ -111,8 +111,14 @@ def list_workspaces(
     conn: sqlite3.Connection,
     *,
     include_archived: bool = False,
+    only_archived: bool = False,
 ) -> tuple[Workspace, ...]:
-    archive_clause = "" if include_archived else " WHERE archived = 0"
+    if only_archived:
+        archive_clause = " WHERE archived = 1"
+    elif include_archived:
+        archive_clause = ""
+    else:
+        archive_clause = " WHERE archived = 0"
     rows = conn.execute(
         f"SELECT * FROM workspaces{archive_clause} ORDER BY created_at"
     ).fetchall()
@@ -763,8 +769,14 @@ def list_tags(
     workspace_id: int,
     *,
     include_archived: bool = False,
+    only_archived: bool = False,
 ) -> tuple[Tag, ...]:
-    archive_clause = "" if include_archived else " AND archived = 0"
+    if only_archived:
+        archive_clause = " AND archived = 1"
+    elif include_archived:
+        archive_clause = ""
+    else:
+        archive_clause = " AND archived = 0"
     rows = conn.execute(
         f"SELECT * FROM tags WHERE workspace_id = ?{archive_clause} ORDER BY name",
         (workspace_id,),

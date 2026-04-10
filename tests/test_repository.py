@@ -152,6 +152,14 @@ class TestWorkspaceRepository:
         workspaces = list_workspaces(conn, include_archived=True)
         assert len(workspaces) == 2
 
+    def test_list_workspaces_only_archived(self, conn: sqlite3.Connection) -> None:
+        insert_workspace(conn, NewWorkspace(name="active"))
+        b2 = insert_workspace(conn, NewWorkspace(name="gone"))
+        update_workspace(conn, b2.id, {"archived": True})
+        workspaces = list_workspaces(conn, only_archived=True)
+        assert len(workspaces) == 1
+        assert workspaces[0].name == "gone"
+
     def test_update_workspace(self, conn: sqlite3.Connection) -> None:
         workspace = insert_workspace(conn, NewWorkspace(name="old"))
         updated = update_workspace(conn, workspace.id, {"name": "new"})
@@ -950,6 +958,15 @@ class TestTagRepository:
         update_tag(conn, t2.id, {"archived": True})
         assert len(list_tags(conn, workspace.id)) == 1
         assert len(list_tags(conn, workspace.id, include_archived=True)) == 2
+
+    def test_list_only_archived(self, conn: sqlite3.Connection) -> None:
+        workspace = self._setup(conn)
+        insert_tag(conn, NewTag(workspace_id=workspace.id, name="active"))
+        t2 = insert_tag(conn, NewTag(workspace_id=workspace.id, name="gone"))
+        update_tag(conn, t2.id, {"archived": True})
+        tags = list_tags(conn, workspace.id, only_archived=True)
+        assert len(tags) == 1
+        assert tags[0].name == "gone"
 
     def test_list_ordered_by_name(self, conn: sqlite3.Connection) -> None:
         workspace = self._setup(conn)
