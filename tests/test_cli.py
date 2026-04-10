@@ -649,7 +649,7 @@ class TestMvWorkspace:
         cli("status", "create", "backlog")
         cli("workspace", "use", "dev")
         cli("task", "create", "Task A", "-S", "todo")
-        out, _ = cli("task", "transfer", "1", "--workspace", "ops", "--status", "backlog")
+        out, _ = cli("task", "transfer", "1", "--to", "ops", "--status", "backlog")
         assert "workspace 'ops'" in out
         assert "status 'backlog'" in out
 
@@ -660,14 +660,14 @@ class TestMvWorkspace:
         cli("project", "create", "infra")
         cli("workspace", "use", "dev")
         cli("task", "create", "Task A", "-S", "todo")
-        out, _ = cli("task", "transfer", "1", "--workspace", "ops", "--status", "backlog", "-p", "infra")
+        out, _ = cli("task", "transfer", "1", "--to", "ops", "--status", "backlog", "-p", "infra")
         assert "workspace 'ops'" in out
 
     def test_transfer_no_column_fails(self, cli):
         cli("workspace", "create", "ops")
         cli("workspace", "use", "dev")
         cli("task", "create", "Task A", "-S", "todo")
-        _, err = cli("task", "transfer", "1", "--workspace", "ops", expect_exit=2)
+        _, err = cli("task", "transfer", "1", "--to", "ops", expect_exit=2)
         assert "--status" in err or "required" in err
 
     def test_mv_project_only_use_edit(self, cli):
@@ -687,7 +687,7 @@ class TestMvWorkspace:
         cli("status", "create", "backlog")
         cli("workspace", "use", "dev")
         cli("task", "create", "Task A", "-S", "todo")
-        out, _ = cli("task", "transfer", "1", "--workspace", "ops", "--status", "backlog", "--dry-run")
+        out, _ = cli("task", "transfer", "1", "--to", "ops", "--status", "backlog", "--dry-run")
         assert "dry-run" in out
         assert "transfer OK" in out
 
@@ -699,7 +699,7 @@ class TestMvWorkspace:
         cli("task", "create", "Task A", "-S", "todo")
         cli("task", "create", "Task B", "-S", "todo")
         cli("dep", "create", "2", "1")
-        out, _ = cli("task", "transfer", "1", "--workspace", "ops", "--status", "backlog", "--dry-run")
+        out, _ = cli("task", "transfer", "1", "--to", "ops", "--status", "backlog", "--dry-run")
         assert "dependencies" in out
         assert "FAIL" in out
 
@@ -1278,7 +1278,7 @@ class TestJsonOutput:
         cli("task", "create", "T1", "-S", "todo")
         cli("workspace", "create", "B2")
         cli("status", "create", "Inbox")
-        data = self._json(cli, "task", "transfer", "1", "--workspace", "B2", "--status", "Inbox")
+        data = self._json(cli, "task", "transfer", "1", "--to", "B2", "--status", "Inbox")
         assert data["ok"] is True
         assert data["data"]["task"]["title"] == "T1"
         assert data["data"]["source_task_id"] == 1
@@ -1289,7 +1289,7 @@ class TestJsonOutput:
         cli("task", "create", "T1", "-S", "todo")
         cli("workspace", "create", "B2")
         cli("status", "create", "Inbox")
-        data = self._json(cli, "task", "transfer", "1", "--workspace", "B2", "--status", "Inbox", "--dry-run")
+        data = self._json(cli, "task", "transfer", "1", "--to", "B2", "--status", "Inbox", "--dry-run")
         assert data["ok"] is True
         payload = data["data"]
         assert payload["can_move"] is True

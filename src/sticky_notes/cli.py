@@ -213,7 +213,7 @@ def cmd_task_mv(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Pat
 def cmd_task_transfer(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
     workspace = _resolve_workspace(conn, args, db_path)
     task_id = _resolve_task(conn, workspace, args.task_num, by_title=args.by_title)
-    target_workspace = service.get_workspace_by_name(conn, args.target_workspace)
+    target_workspace = service.get_workspace_by_name(conn, args.to_workspace)
     target_col = service.get_status_by_name(conn, target_workspace.id, args.status)
     project_id = (
         service.get_project_by_name(conn, target_workspace.id, args.project).id
@@ -993,7 +993,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_transfer = task_sub.add_parser("transfer", help="move task to a different workspace")
     p_transfer.set_defaults(command="task_transfer")
     p_transfer.add_argument("task_num")
-    p_transfer.add_argument("--workspace", dest="target_workspace", required=True, help="target workspace name")
+    p_transfer.add_argument("--to", dest="to_workspace", required=True, help="target workspace name")
     p_transfer.add_argument("--status", "-S", required=True, help="status on target workspace")
     p_transfer.add_argument("--project", "-p", default=None, help="project on target workspace")
     p_transfer.add_argument("--dry-run", action="store_true", help="preview without executing")

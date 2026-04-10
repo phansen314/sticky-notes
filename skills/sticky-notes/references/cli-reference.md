@@ -272,19 +272,19 @@ todo --json context
 
 | Flag | Short | Required | Description |
 |---|---|---|---|
-| `--workspace` | — | **yes** | Target workspace name |
+| `--to` | — | **yes** | Target workspace name |
 | `--status` | `-S` | **yes** | Status on target workspace |
 | `--project` | `-p` | no | Project on target workspace |
 | `--dry-run` | — | no | Preview without executing; validates blocking deps |
 | `--by-title` | — | no | Resolve source task by title |
 
 ```sh
-todo task transfer task-0001 --workspace ops --status Backlog
-todo task transfer task-0001 --workspace ops --status Backlog --project infra
-todo task transfer task-0001 --workspace ops --status Backlog --dry-run
+todo task transfer task-0001 --to ops --status Backlog
+todo task transfer task-0001 --to ops --status Backlog --project infra
+todo task transfer task-0001 --to ops --status Backlog --dry-run
 ```
 
-> **Workspace flag disambiguation:** The global `-w/--workspace` selects the **source** workspace (or falls back to the active workspace). The transfer subcommand's own `--workspace` selects the **target** workspace. Both may appear on the same command line.
+> **Workspace flag disambiguation:** The global `-w/--workspace` selects the **source** workspace (or falls back to the active workspace). The transfer subcommand's own `--to` selects the **target** workspace. Both may appear on the same command line.
 
 
 ---
