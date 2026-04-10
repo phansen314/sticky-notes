@@ -763,8 +763,8 @@ def _meta_records(metadata: dict[str, str]) -> list[dict[str, str]]:
 def _format_meta_records(records: list[dict[str, str]]) -> str:
     if not records:
         return "no metadata"
-    width = max(len(r["key"]) for r in records) + 2
-    return "\n".join(f"  {r['key']:<{width}}{r['value']}" for r in records)
+    width = max(len(r["key"]) for r in records)
+    return "\n".join(f"  {r['key']:<{width}}  {r['value']}" for r in records)
 
 
 # ---- Task metadata ----
