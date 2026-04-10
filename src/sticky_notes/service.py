@@ -660,6 +660,28 @@ def update_task(
         )
 
 
+def _validate_task_update(
+    conn: sqlite3.Connection,
+    old: Task,
+    changes: dict[str, Any],
+) -> None:
+    """Merge + validate changes against an existing task. Shared by
+    `_update_task_body` (write path) and `preview_update_task` (dry-run)
+    so both paths enforce identical constraints.
+
+    Mutates nothing on the DB. Raises ValueError on invalid input,
+    LookupError on missing referenced entities.
+    """
+    merged: dict[str, Any] = {}
+    if "start_date" in changes or "finish_date" in changes:
+        merged["start_date"] = changes.get("start_date", old.start_date)
+        merged["finish_date"] = changes.get("finish_date", old.finish_date)
+    merged.update(changes)
+    _validate_task_fields(merged, workspace_id=old.workspace_id, conn=conn)
+    if "group_id" in changes or "project_id" in changes:
+        _validate_group_project_consistency(conn, old, changes)
+
+
 def _update_task_body(
     conn: sqlite3.Connection,
     task_id: int,
@@ -676,14 +698,7 @@ def _update_task_body(
     triggering the transaction manager's anti-nesting guard.
     """
     old = get_task(conn, task_id)
-    merged: dict[str, Any] = {}
-    if "start_date" in changes or "finish_date" in changes:
-        merged["start_date"] = changes.get("start_date", old.start_date)
-        merged["finish_date"] = changes.get("finish_date", old.finish_date)
-    merged.update(changes)
-    _validate_task_fields(merged, workspace_id=old.workspace_id, conn=conn)
-    if "group_id" in changes or "project_id" in changes:
-        _validate_group_project_consistency(conn, old, changes)
+    _validate_task_update(conn, old, changes)
     if changes:
         updated = repo.update_task(conn, task_id, changes)
         _record_changes(conn, task_id, old, changes, source)
@@ -1686,14 +1701,7 @@ def preview_update_task(
     validation errors before commit.
     """
     old = get_task(conn, task_id)
-    merged: dict[str, Any] = {}
-    if "start_date" in changes or "finish_date" in changes:
-        merged["start_date"] = changes.get("start_date", old.start_date)
-        merged["finish_date"] = changes.get("finish_date", old.finish_date)
-    merged.update(changes)
-    _validate_task_fields(merged, workspace_id=old.workspace_id, conn=conn)
-    if "group_id" in changes or "project_id" in changes:
-        _validate_group_project_consistency(conn, old, changes)
+    _validate_task_update(conn, old, changes)
     before, after = _diff_fields(old, changes)
     current_tag_names = tuple(t.name for t in repo.list_tags_by_task(conn, task_id))
     added = tuple(t for t in add_tags if t.lower() not in {n.lower() for n in current_tag_names})

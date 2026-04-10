@@ -597,6 +597,37 @@ class TestTaskService:
         with pytest.raises(ValueError, match="finish date"):
             service.update_task(conn, task.id, {"finish_date": 100}, "test")
 
+    def test_preview_update_task_rejects_same_invalid_inputs_as_update(self, conn: sqlite3.Connection) -> None:
+        """Drift guard: preview_update_task must raise on the same invalid
+        changes that update_task rejects. Any new validation added to
+        update_task (via _validate_task_update) must propagate to preview.
+        """
+        bid = insert_workspace(conn)
+        cid = insert_status(conn, bid)
+        task = service.create_task(conn, bid, "t", cid, start_date=200)
+        # finish before start — date merge edge case shared by both paths
+        with pytest.raises(ValueError, match="finish date"):
+            service.preview_update_task(conn, task.id, {"finish_date": 100})
+        # negative position
+        with pytest.raises(ValueError, match="position"):
+            service.preview_update_task(conn, task.id, {"position": -1})
+        # non-int priority
+        with pytest.raises(ValueError, match="priority"):
+            service.preview_update_task(conn, task.id, {"priority": "high"})  # type: ignore[dict-item]
+
+    def test_preview_update_task_after_matches_real_update(self, conn: sqlite3.Connection) -> None:
+        """Drift guard: preview's `after` dict must equal the actual field
+        values written by update_task for the same changes.
+        """
+        bid = insert_workspace(conn)
+        cid = insert_status(conn, bid)
+        task = service.create_task(conn, bid, "orig", cid, priority=2)
+        changes = {"title": "renamed", "priority": 4}
+        preview = service.preview_update_task(conn, task.id, changes)
+        updated = service.update_task(conn, task.id, changes, "test")
+        assert preview.after["title"] == updated.title
+        assert preview.after["priority"] == updated.priority
+
     def test_update_start_after_existing_finish(self, conn: sqlite3.Connection) -> None:
         bid = insert_workspace(conn)
         cid = insert_status(conn, bid)
