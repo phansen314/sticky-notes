@@ -907,17 +907,19 @@ def _remove_entity_meta(
     remover: Callable[[sqlite3.Connection, int, str], None],
     fetcher: Callable[[sqlite3.Connection, int], Any],
     entity_name: str,
-) -> Any:
+) -> str:
     """Generic entity-metadata removal. Raises ``LookupError`` if the key
-    isn't present on the entity.
+    isn't present on the entity. Returns the old value atomically so
+    callers don't need a separate read.
     """
     normalized = _normalize_meta_key(key)
     with transaction(conn), _friendly_errors():
         old = fetcher(conn, entity_id)
         if normalized not in old.metadata:
             raise LookupError(f"metadata key {key!r} not found on {entity_name} {entity_id}")
+        old_value = old.metadata[normalized]
         remover(conn, entity_id, normalized)
-        return fetcher(conn, entity_id)
+        return old_value
 
 
 def _replace_entity_metadata(
@@ -966,7 +968,7 @@ def set_task_meta(conn: sqlite3.Connection, task_id: int, key: str, value: str) 
     )
 
 
-def remove_task_meta(conn: sqlite3.Connection, task_id: int, key: str) -> Task:
+def remove_task_meta(conn: sqlite3.Connection, task_id: int, key: str) -> str:
     return _remove_entity_meta(
         conn, task_id, key,
         remover=repo.remove_task_metadata_key,
@@ -1009,7 +1011,7 @@ def set_workspace_meta(conn: sqlite3.Connection, workspace_id: int, key: str, va
     )
 
 
-def remove_workspace_meta(conn: sqlite3.Connection, workspace_id: int, key: str) -> Workspace:
+def remove_workspace_meta(conn: sqlite3.Connection, workspace_id: int, key: str) -> str:
     return _remove_entity_meta(
         conn, workspace_id, key,
         remover=repo.remove_workspace_metadata_key,
@@ -1051,7 +1053,7 @@ def set_project_meta(conn: sqlite3.Connection, project_id: int, key: str, value:
     )
 
 
-def remove_project_meta(conn: sqlite3.Connection, project_id: int, key: str) -> Project:
+def remove_project_meta(conn: sqlite3.Connection, project_id: int, key: str) -> str:
     return _remove_entity_meta(
         conn, project_id, key,
         remover=repo.remove_project_metadata_key,
@@ -1093,7 +1095,7 @@ def set_group_meta(conn: sqlite3.Connection, group_id: int, key: str, value: str
     )
 
 
-def remove_group_meta(conn: sqlite3.Connection, group_id: int, key: str) -> Group:
+def remove_group_meta(conn: sqlite3.Connection, group_id: int, key: str) -> str:
     return _remove_entity_meta(
         conn, group_id, key,
         remover=repo.remove_group_metadata_key,

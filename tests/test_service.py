@@ -2109,8 +2109,9 @@ class TestTaskMeta:
     def test_remove_meta(self, conn: sqlite3.Connection) -> None:
         _, tid = self._setup(conn)
         service.set_task_meta(conn, tid, "branch", "feat/kv")
-        task = service.remove_task_meta(conn, tid, "branch")
-        assert task.metadata == {}
+        old = service.remove_task_meta(conn, tid, "branch")
+        assert old == "feat/kv"
+        assert service.get_task(conn, tid).metadata == {}
 
     def test_remove_nonexistent_key_raises(self, conn: sqlite3.Connection) -> None:
         _, tid = self._setup(conn)

@@ -800,10 +800,7 @@ def cmd_task_meta_set(conn: sqlite3.Connection, args: argparse.Namespace, db_pat
 def cmd_task_meta_del(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
     workspace = _resolve_workspace(conn, args, db_path)
     task_id = _resolve_task(conn, workspace, args.task_num)
-    # Capture the value before deletion so we can include it in the response.
-    # get_task_meta raises LookupError for missing keys, same as remove_task_meta.
-    removed = service.get_task_meta(conn, task_id, args.key)
-    service.remove_task_meta(conn, task_id, args.key)
+    removed = service.remove_task_meta(conn, task_id, args.key)
     key = args.key.lower()
     return Ok(data={"key": key, "value": removed}, text=f"removed {key} from task {format_task_num(task_id)}")
 
@@ -833,8 +830,7 @@ def cmd_workspace_meta_set(conn: sqlite3.Connection, args: argparse.Namespace, d
 
 def cmd_workspace_meta_del(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
     workspace = _resolve_workspace(conn, args, db_path)
-    removed = service.get_workspace_meta(conn, workspace.id, args.key)
-    service.remove_workspace_meta(conn, workspace.id, args.key)
+    removed = service.remove_workspace_meta(conn, workspace.id, args.key)
     key = args.key.lower()
     return Ok(data={"key": key, "value": removed}, text=f"removed {key} from workspace '{workspace.name}'")
 
@@ -868,8 +864,7 @@ def cmd_project_meta_set(conn: sqlite3.Connection, args: argparse.Namespace, db_
 def cmd_project_meta_del(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
     workspace = _resolve_workspace(conn, args, db_path)
     project = service.get_project_by_name(conn, workspace.id, args.name)
-    removed = service.get_project_meta(conn, project.id, args.key)
-    service.remove_project_meta(conn, project.id, args.key)
+    removed = service.remove_project_meta(conn, project.id, args.key)
     key = args.key.lower()
     return Ok(data={"key": key, "value": removed}, text=f"removed {key} from project '{project.name}'")
 
@@ -903,8 +898,7 @@ def cmd_group_meta_set(conn: sqlite3.Connection, args: argparse.Namespace, db_pa
 def cmd_group_meta_del(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
     workspace = _resolve_workspace(conn, args, db_path)
     grp = service.resolve_group(conn, workspace.id, args.title, project_name=args.project)
-    removed = service.get_group_meta(conn, grp.id, args.key)
-    service.remove_group_meta(conn, grp.id, args.key)
+    removed = service.remove_group_meta(conn, grp.id, args.key)
     key = args.key.lower()
     return Ok(data={"key": key, "value": removed}, text=f"removed {key} from group '{grp.title}'")
 
