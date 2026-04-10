@@ -164,7 +164,7 @@ class TestWorkspaceCommands:
         assert get_active_workspace_id(db_path) is not None
 
     def test_use_nonexistent(self, cli):
-        _, err = cli("workspace", "use", "nope", expect_exit=1)
+        _, err = cli("workspace", "use", "nope", expect_exit=3)
         assert "error:" in err
 
 
@@ -381,7 +381,7 @@ class TestTaskCommands:
         assert "no history" in out
 
     def test_show_nonexistent(self, cli):
-        _, err = cli("task", "show", "999", expect_exit=1)
+        _, err = cli("task", "show", "999", expect_exit=3)
         assert "error:" in err
 
     def test_task_num_formats(self, cli):
@@ -400,7 +400,7 @@ class TestTaskCommands:
         assert "Fix login bug" in out
 
     def test_show_by_title_not_found(self, cli):
-        _, err = cli("task", "show", "nonexistent title", "--by-title", expect_exit=1)
+        _, err = cli("task", "show", "nonexistent title", "--by-title", expect_exit=3)
         assert "error:" in err
 
     def test_dep_create_by_title(self, cli):
@@ -508,41 +508,41 @@ class TestDependencyCommands:
 
 class TestErrorHandling:
     def test_no_active_workspace(self, cli):
-        _, err = cli("task", "ls", expect_exit=1)
+        _, err = cli("task", "ls", expect_exit=5)
         assert "no active workspace" in err
 
     def test_not_found(self, cli):
         cli("workspace", "create", "dev")
-        _, err = cli("task", "show", "999", expect_exit=1)
+        _, err = cli("task", "show", "999", expect_exit=3)
         assert "error:" in err
 
     def test_duplicate_workspace_name(self, cli):
         cli("workspace", "create", "dev")
-        _, err = cli("workspace", "create", "dev", expect_exit=1)
+        _, err = cli("workspace", "create", "dev", expect_exit=4)
         assert "error:" in err
 
     def test_invalid_task_num(self, cli):
         cli("workspace", "create", "dev")
-        _, err = cli("task", "show", "abc", expect_exit=1)
+        _, err = cli("task", "show", "abc", expect_exit=3)
         assert "error:" in err
 
     def test_status_not_found(self, cli):
         cli("workspace", "create", "dev")
         cli("status", "create", "todo")
-        _, err = cli("task", "create", "Task", "-S", "nonexistent", expect_exit=1)
+        _, err = cli("task", "create", "Task", "-S", "nonexistent", expect_exit=3)
         assert "not found" in err
 
     def test_project_not_found(self, cli):
         cli("workspace", "create", "dev")
         cli("status", "create", "todo")
-        _, err = cli("task", "create", "Task", "-S", "todo", "-p", "nonexistent", expect_exit=1)
+        _, err = cli("task", "create", "Task", "-S", "todo", "-p", "nonexistent", expect_exit=3)
         assert "not found" in err
 
     def test_archive_status_with_active_tasks_blocked(self, cli):
         cli("workspace", "create", "dev")
         cli("status", "create", "todo")
         cli("task", "create", "Task", "-S", "todo")
-        _, err = cli("status", "archive", "todo", expect_exit=1)
+        _, err = cli("status", "archive", "todo", expect_exit=4)
         assert "active task" in err
 
 
@@ -627,12 +627,12 @@ class TestLsFilters:
 
     def test_invalid_status_name(self, cli):
         self._setup_workspace(cli)
-        _, err = cli("task", "ls", "-S", "nonexistent", expect_exit=1)
+        _, err = cli("task", "ls", "-S", "nonexistent", expect_exit=3)
         assert "not found" in err
 
     def test_invalid_project_name(self, cli):
         self._setup_workspace(cli)
-        _, err = cli("task", "ls", "-p", "nonexistent", expect_exit=1)
+        _, err = cli("task", "ls", "-p", "nonexistent", expect_exit=3)
         assert "not found" in err
 
 
@@ -761,7 +761,7 @@ class TestGroupCLI:
         assert "task-0001" in out
 
     def test_show_group_not_found(self):
-        _, err = self.cli("group", "show", "nope", "--project", "sprint1", expect_exit=1)
+        _, err = self.cli("group", "show", "nope", "--project", "sprint1", expect_exit=3)
         assert "not found" in err
 
     def test_rename_group(self):
@@ -814,7 +814,7 @@ class TestGroupCLI:
         self.cli("project", "create", "sprint2")
         self.cli("group", "create", "Frontend", "--project", "sprint1")
         self.cli("task", "create", "Task", "--project", "sprint2", "-S", "todo")
-        _, err = self.cli("group", "assign", "task-0001", "Frontend", "--project", "sprint1", expect_exit=1)
+        _, err = self.cli("group", "assign", "task-0001", "Frontend", "--project", "sprint1", expect_exit=4)
         assert "project" in err
 
     def test_unassign_task(self):
@@ -845,13 +845,13 @@ class TestGroupCLI:
         self.cli("project", "create", "sprint2")
         self.cli("group", "create", "Shared", "--project", "sprint1")
         self.cli("group", "create", "Shared", "--project", "sprint2")
-        _, err = self.cli("group", "show", "Shared", expect_exit=1)
+        _, err = self.cli("group", "show", "Shared", expect_exit=3)
         assert "ambiguous" in err
 
     def test_cycle_detection(self):
         self.cli("group", "create", "A", "--project", "sprint1")
         self.cli("group", "create", "B", "--project", "sprint1", "--parent", "A")
-        _, err = self.cli("group", "mv", "A", "--parent", "B", "--project", "sprint1", expect_exit=1)
+        _, err = self.cli("group", "mv", "A", "--parent", "B", "--project", "sprint1", expect_exit=4)
         assert "cycle" in err
 
     def test_create_with_description(self):
@@ -923,7 +923,7 @@ class TestTagCommands:
         assert "archived tag 'bug'" in out
 
     def test_tag_archive_not_found(self, cli):
-        _, err = cli("tag", "archive", "nonexistent", "--force", expect_exit=1)
+        _, err = cli("tag", "archive", "nonexistent", "--force", expect_exit=3)
         assert "not found" in err
 
     def test_tag_ls_all_shows_archived(self, cli):
@@ -977,7 +977,7 @@ class TestTagCommands:
 
     def test_edit_untag_not_found(self, cli):
         cli("task", "create", "Task", "-S", "todo")
-        _, err = cli("task", "edit", "1", "--untag", "nonexistent", expect_exit=1)
+        _, err = cli("task", "edit", "1", "--untag", "nonexistent", expect_exit=3)
         assert "not found" in err
 
     def test_edit_nothing_is_noop(self, cli):
@@ -1005,7 +1005,7 @@ class TestTagCommands:
         assert "[bug, urgent]" in out
 
     def test_ls_tag_filter_not_found(self, cli):
-        _, err = cli("task", "ls", "--tag", "nonexistent", expect_exit=1)
+        _, err = cli("task", "ls", "--tag", "nonexistent", expect_exit=3)
         assert "not found" in err
 
     # -- Tags on show --
@@ -1054,11 +1054,11 @@ class TestContext:
         assert "Groups:" not in out
 
     def test_context_no_active_workspace(self, cli):
-        _, err = cli("context", expect_exit=1)
+        _, err = cli("context", expect_exit=5)
         assert "no active workspace" in err
 
     def test_context_no_active_workspace_json(self, cli):
-        _, err = cli("--json", "context", expect_exit=1)
+        _, err = cli("--json", "context", expect_exit=5)
         data = json.loads(err)
         assert data["ok"] is False
         assert data["code"] == "missing_active_workspace"
@@ -1416,7 +1416,7 @@ class TestJsonOutput:
     def test_error_json(self, cli):
         import json
         cli("workspace", "create", "B")
-        _, err = cli("--json", "task", "show", "999", expect_exit=1)
+        _, err = cli("--json", "task", "show", "999", expect_exit=3)
         data = json.loads(err)
         assert data["ok"] is False
         assert "error" in data
@@ -1564,7 +1564,7 @@ class TestBackup:
         cli("workspace", "create", "B")
         dest = tmp_path / "backup.db"
         dest.write_bytes(b"existing")
-        _, err = cli("backup", str(dest), expect_exit=1)
+        _, err = cli("backup", str(dest), expect_exit=4)
         assert "already exists" in err
 
     def test_backup_overwrite_flag(self, cli, tmp_path):
@@ -2094,19 +2094,19 @@ class TestTaskMetaCommands:
         assert "no metadata" in out
 
     def test_meta_del_nonexistent(self):
-        _, err = self.cli("task", "meta", "del", "1", "nope", expect_exit=1)
+        _, err = self.cli("task", "meta", "del", "1", "nope", expect_exit=3)
         assert "not found" in err
 
     def test_meta_get_nonexistent(self):
-        _, err = self.cli("task", "meta", "get", "1", "nope", expect_exit=1)
+        _, err = self.cli("task", "meta", "get", "1", "nope", expect_exit=3)
         assert "not found" in err
 
     def test_meta_get_invalid_key(self):
-        _, err = self.cli("task", "meta", "get", "1", "BAD KEY", expect_exit=1)
+        _, err = self.cli("task", "meta", "get", "1", "BAD KEY", expect_exit=4)
         assert "must match" in err
 
     def test_meta_set_invalid_key(self):
-        _, err = self.cli("task", "meta", "set", "1", "BAD KEY", "v", expect_exit=1)
+        _, err = self.cli("task", "meta", "set", "1", "BAD KEY", "v", expect_exit=4)
         assert "must match" in err
 
     def test_meta_set_json(self):
@@ -2164,7 +2164,7 @@ class TestTaskMetaCommands:
             assert rest.lstrip() != "", f"no separation between key and value: {line!r}"
 
     def test_meta_set_nonexistent_task(self):
-        _, err = self.cli("task", "meta", "set", "999", "branch", "feat/kv", expect_exit=1)
+        _, err = self.cli("task", "meta", "set", "999", "branch", "feat/kv", expect_exit=3)
         assert "not found" in err
 
     def test_meta_key_case_insensitive_roundtrip(self):
@@ -2233,11 +2233,11 @@ class TestWorkspaceMetaCommands:
         assert "no metadata" in out
 
     def test_del_missing(self):
-        _, err = self.cli("workspace", "meta", "del", "nope", expect_exit=1)
+        _, err = self.cli("workspace", "meta", "del", "nope", expect_exit=3)
         assert "not found" in err
 
     def test_get_missing(self):
-        _, err = self.cli("workspace", "meta", "get", "nope", expect_exit=1)
+        _, err = self.cli("workspace", "meta", "get", "nope", expect_exit=3)
         assert "not found" in err
 
     def test_case_insensitive(self):
@@ -2276,15 +2276,15 @@ class TestWorkspaceMetaNoActiveWorkspace:
     class because these tests need to NOT have the 'dev' autouse fixture."""
 
     def test_ls_no_active_workspace(self, cli):
-        _, err = cli("workspace", "meta", "ls", expect_exit=1)
+        _, err = cli("workspace", "meta", "ls", expect_exit=5)
         assert "no active workspace" in err
 
     def test_set_no_active_workspace(self, cli):
-        _, err = cli("workspace", "meta", "set", "env", "prod", expect_exit=1)
+        _, err = cli("workspace", "meta", "set", "env", "prod", expect_exit=5)
         assert "no active workspace" in err
 
     def test_ls_no_active_workspace_json(self, cli):
-        _, err = cli("--json", "workspace", "meta", "ls", expect_exit=1)
+        _, err = cli("--json", "workspace", "meta", "ls", expect_exit=5)
         data = json.loads(err)
         assert data["ok"] is False
         assert data["code"] == "missing_active_workspace"
@@ -2316,11 +2316,11 @@ class TestProjectMetaCommands:
         assert "no metadata" in out
 
     def test_del_missing(self):
-        _, err = self.cli("project", "meta", "del", "backend", "nope", expect_exit=1)
+        _, err = self.cli("project", "meta", "del", "backend", "nope", expect_exit=3)
         assert "not found" in err
 
     def test_unknown_project(self):
-        _, err = self.cli("project", "meta", "set", "ghost", "k", "v", expect_exit=1)
+        _, err = self.cli("project", "meta", "set", "ghost", "k", "v", expect_exit=3)
         assert "not found" in err
 
     def test_case_insensitive(self):
@@ -2363,14 +2363,14 @@ class TestGroupMetaCommands:
     def test_del_missing(self):
         _, err = self.cli(
             "group", "meta", "del", "Sprint 1", "nope", "--project", "backend",
-            expect_exit=1,
+            expect_exit=3,
         )
         assert "not found" in err
 
     def test_unknown_group(self):
         _, err = self.cli(
             "group", "meta", "set", "Ghost", "k", "v", "--project", "backend",
-            expect_exit=1,
+            expect_exit=3,
         )
         assert "not found" in err
 

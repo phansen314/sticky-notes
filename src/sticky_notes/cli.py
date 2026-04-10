@@ -20,6 +20,12 @@ from .models import Workspace
 from .service_models import ArchivePreview
 
 
+EXIT_DB_ERROR = 2
+EXIT_NOT_FOUND = 3
+EXIT_VALIDATION = 4
+EXIT_NO_ACTIVE_WS = 5
+
+
 # ---- Result type ----
 
 
@@ -1363,27 +1369,27 @@ def main(argv: list[str] | None = None) -> None:
             _json_err(f"database error: {exc}", code)
         else:
             _text_err(f"database error: {exc}", code)
-        raise SystemExit(2)
+        raise SystemExit(EXIT_DB_ERROR)
     except NoActiveWorkspaceError as exc:
         code = "missing_active_workspace"
         if args.json:
             _json_err(str(exc), code)
         else:
             _text_err(str(exc), code)
-        raise SystemExit(1)
+        raise SystemExit(EXIT_NO_ACTIVE_WS)
     except LookupError as exc:
         code = "not_found"
         if args.json:
             _json_err(str(exc), code)
         else:
             _text_err(str(exc), code)
-        raise SystemExit(1)
+        raise SystemExit(EXIT_NOT_FOUND)
     except ValueError as exc:
         code = "validation"
         if args.json:
             _json_err(str(exc), code)
         else:
             _text_err(str(exc), code)
-        raise SystemExit(1)
+        raise SystemExit(EXIT_VALIDATION)
     finally:
         conn.close()

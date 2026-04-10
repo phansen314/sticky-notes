@@ -18,16 +18,17 @@ Apply to every command. Place before the subcommand:  `todo [global flags] <comm
 **JSON envelope:**
 - Success → stdout: `{"ok": true, "data": ...}`
 - Error → stderr: `{"ok": false, "error": "...", "code": "..."}`
-- Exit codes: `0` success · `1` lookup/validation/no active workspace · `2` db error · `130` interrupt
 
-**Error codes:**
+**Exit codes:**
 
 | code | meaning |
 |---|---|
-| `not_found` | entity doesn't exist |
-| `validation` | bad argument value (including duplicate names and integrity violations) |
-| `missing_active_workspace` | no active workspace set |
-| `db_error` | SQLite error (exits 2) |
+| `0` | success |
+| `2` | SQLite / database error |
+| `3` | `not_found` — entity doesn't exist |
+| `4` | `validation` — bad argument value, duplicate names, integrity violations |
+| `5` | `missing_active_workspace` — no active workspace set |
+| `130` | interrupted (SIGINT) |
 
 ---
 
