@@ -212,6 +212,39 @@ class TestStatusCommands:
         out, _ = cli("status", "archive", "todo")
         assert "archived status 'todo'" in out
 
+    def test_order_writes_config(self, cli, tmp_path, monkeypatch):
+        cfg_path = tmp_path / "tui.toml"
+        monkeypatch.setattr("sticky_notes.tui.config.DEFAULT_CONFIG_PATH", cfg_path)
+        cli("workspace", "create", "dev")
+        cli("status", "create", "backlog")
+        cli("status", "create", "doing")
+        cli("status", "create", "done")
+        out, _ = cli("status", "order", "dev", "doing", "done", "backlog")
+        assert "set status order for workspace 'dev'" in out
+        content = cfg_path.read_text()
+        assert "[status_order]" in content
+        # All three status ids listed in the right order
+        from sticky_notes.tui.config import load_config
+        config = load_config(cfg_path)
+        assert 1 in config.status_order
+        assert len(config.status_order[1]) == 3
+
+    def test_order_unknown_status(self, cli, tmp_path, monkeypatch):
+        cfg_path = tmp_path / "tui.toml"
+        monkeypatch.setattr("sticky_notes.tui.config.DEFAULT_CONFIG_PATH", cfg_path)
+        cli("workspace", "create", "dev")
+        cli("status", "create", "todo")
+        _, err = cli("status", "order", "dev", "todo", "nonexistent", expect_exit=3)
+        assert "not found" in err
+
+    def test_order_duplicate_status(self, cli, tmp_path, monkeypatch):
+        cfg_path = tmp_path / "tui.toml"
+        monkeypatch.setattr("sticky_notes.tui.config.DEFAULT_CONFIG_PATH", cfg_path)
+        cli("workspace", "create", "dev")
+        cli("status", "create", "todo")
+        _, err = cli("status", "order", "dev", "todo", "todo", expect_exit=4)
+        assert "duplicate" in err
+
 
 # ---- Task shortcuts ----
 

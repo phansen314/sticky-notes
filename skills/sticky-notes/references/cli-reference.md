@@ -318,10 +318,12 @@ todo workspace archive work --force
 | `status create` | `name` | — | Create a status on the active workspace |
 | `status ls` | — | — | List statuses on active workspace |
 | `status rename` | `old new` | — | Rename a status |
+| `status order` | `workspace status1 status2 ...` | — | Set the TUI display order for statuses on a workspace. Writes `~/.config/sticky-notes/tui.toml`. Partial ordering allowed — unlisted statuses fall to the end. |
 | `status archive` | `name` | `--reassign-to STATUS`, `--force` | Archive status; either reassign its tasks to another status, or `--force` to archive all tasks |
 
 ```sh
 todo status create "Blocked"
+todo status order dev backlog "in progress" review done
 todo status archive "Old Status" --reassign-to "Backlog"
 todo status archive "Old Status" --force
 ```

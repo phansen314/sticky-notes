@@ -76,7 +76,7 @@ Use `--by-title` on any task command to resolve `<task>` by title string instead
 | Command | Description |
 |---------|-------------|
 | `todo workspace ...` | `create [--statuses a,b,c]`, `ls`, `use`, `rename`, `archive [--force\|--dry-run]`, `meta ls\|get\|set\|del` |
-| `todo status ...` | `create`, `ls`, `rename`, `archive [--reassign-to STATUS\|--force]` |
+| `todo status ...` | `create`, `ls`, `rename`, `order <workspace> <statuses...>`, `archive [--reassign-to STATUS\|--force]` |
 | `todo project ...` | `create [--desc]`, `ls`, `show`, `edit [--desc]`, `rename`, `archive [--force\|--dry-run]`, `meta ls\|get\|set\|del <name>` |
 | `todo dep ...` | `create`, `archive` |
 | `todo group-dep ...` | `create`, `archive` (group-level dependencies) |

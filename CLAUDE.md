@@ -119,7 +119,7 @@ Entry point: `todo tui` (or `todo tui --db path/to/db`).
 | `[` / `]` | Move task left/right across statuses |
 | `ctrl+q` | Quit |
 
-**Config:** `~/.config/sticky-notes/tui.toml` — theme, show_archived, confirm_archive, default_priority, status_order, auto_refresh_seconds. Loaded via `TuiConfig` dataclass in `tui/config.py`.
+**Config:** `~/.config/sticky-notes/tui.toml` — theme, show_archived, confirm_archive, default_priority, status_order, auto_refresh_seconds. Loaded via `TuiConfig` dataclass in `tui/config.py`. Status order is editable from the CLI via `todo status order <workspace> <status_1> <status_2> ...`.
 
 ## Key Design Conventions
 

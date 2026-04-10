@@ -337,6 +337,28 @@ def cmd_status_rename(conn: sqlite3.Connection, args: argparse.Namespace, db_pat
     return Ok(data=updated, text=f"renamed status '{args.old_name}' -> '{args.new_name}'")
 
 
+def cmd_status_order(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
+    from .tui.config import DEFAULT_CONFIG_PATH, load_config, save_config
+
+    workspace = service.get_workspace_by_name(conn, args.workspace)
+    seen: set[str] = set()
+    status_ids: list[int] = []
+    for name in args.statuses:
+        key = name.lower()
+        if key in seen:
+            raise ValueError(f"duplicate status in order: {name!r}")
+        seen.add(key)
+        status = service.get_status_by_name(conn, workspace.id, name)
+        status_ids.append(status.id)
+    config = load_config()
+    config.status_order[workspace.id] = status_ids
+    save_config(config)
+    return Ok(
+        data={"workspace_id": workspace.id, "workspace": workspace.name, "status_ids": status_ids, "statuses": list(args.statuses)},
+        text=f"set status order for workspace '{workspace.name}': {', '.join(args.statuses)}",
+    )
+
+
 def cmd_status_archive(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
     workspace = _resolve_workspace(conn, args, db_path)
     col = service.get_status_by_name(conn, workspace.id, args.name)
@@ -916,6 +938,7 @@ HANDLERS: dict[str, CommandHandler] = {
     "status_create": cmd_status_create,
     "status_ls": cmd_status_ls,
     "status_rename": cmd_status_rename,
+    "status_order": cmd_status_order,
     "status_archive": cmd_status_archive,
     "project_create": cmd_project_create,
     "project_ls": cmd_project_ls,
@@ -1130,6 +1153,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_cr.set_defaults(command="status_rename")
     p_cr.add_argument("old_name")
     p_cr.add_argument("new_name")
+
+    p_corder = status_sub.add_parser("order", help="set status display order for a workspace (used by TUI)")
+    p_corder.set_defaults(command="status_order")
+    p_corder.add_argument("workspace", help="workspace name")
+    p_corder.add_argument("statuses", nargs="+", help="status names in desired order")
 
     p_carch = status_sub.add_parser("archive", help="archive a status")
     p_carch.set_defaults(command="status_archive")

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **`todo status order <workspace> <status_1> <status_2> ...`** — CLI command to set the per-workspace status display order used by the TUI kanban board. Writes `~/.config/sticky-notes/tui.toml` via the existing `TuiConfig` module. Partial ordering is tolerated: unlisted statuses fall to the end in the TUI rendering.
+
 ### Changed
 
 - **`group mv`** replaces the `--parent ''` magic sentinel with an explicit `--to-top` flag. `--parent TITLE` and `--to-top` are now mutually exclusive and one is required. Breaking.
