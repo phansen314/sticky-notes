@@ -1,6 +1,6 @@
 ---
 name: sticky-notes
-description: Use when the user wants to persist a kanban board, todo list, or multi-step plan across sessions via the local `todo` CLI — creating workspaces, tracking tasks, moving statuses, querying workspace state, workflow tracking, or running `todo context`/`todo export`. Not for ad-hoc in-chat task decomposition.
+description: Use when the user wants to persist a kanban board, todo list, or multi-step plan across sessions via the local `todo` CLI — creating workspaces, tracking tasks, moving statuses, querying workspace state, workflow tracking, or running `todo workspace show`/`todo export`. Not for ad-hoc in-chat task decomposition.
 ---
 
 *If `todo` is not found, ask the user how they'd like to install it.*
@@ -24,8 +24,8 @@ description: Use when the user wants to persist a kanban board, todo list, or mu
 
 4. **Check workspace state** at any point:
    ```sh
-   todo context   # full snapshot: statuses, tasks, projects, tags, groups
-   todo task ls   # task list with filters (--project, --status, --tag, --search)
+   todo workspace show   # full snapshot: statuses, tasks, projects, tags, groups
+   todo task ls          # task list with filters (--project, --status, --tag, --search)
    ```
 
 ### Optional capabilities

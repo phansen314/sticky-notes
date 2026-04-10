@@ -250,16 +250,6 @@ In `todo export --md` the Group Metadata section labels each block `#### <projec
 
 ---
 
-### `todo context`
-
-Single-call workspace snapshot. No arguments. Outputs: statuses with task counts, tasks, projects, tags, groups. Designed as a one-shot startup view for AI sessions.
-
-```sh
-todo context
-todo --json context
-```
-
----
 
 ## `todo task transfer` — Cross-Workspace Move
 
@@ -294,6 +284,7 @@ todo task transfer task-0001 --to ops --status Backlog --dry-run
 |---|---|---|---|
 | `workspace create` | `name` | `--statuses "A,B,C"` | Create workspace; auto-switches active; optionally seed statuses. `--statuses` takes a single comma-separated string (e.g. `--statuses "To Do,In Progress,Done"`). Quote the whole value. |
 | `workspace ls` | — | `--archived {hide,include,only}` (default `hide`) | List workspaces; marks active workspace |
+| `workspace show` | — | — | Single-call workspace snapshot: statuses with task counts, tasks, projects, tags, groups. Designed as a one-shot startup view for AI sessions. Operates on active workspace or `-w` override. |
 | `workspace use` | `name` | — | Switch active workspace |
 | `workspace rename` | `old new` | — | Rename workspace from `old` to `new` |
 | `workspace archive` | `[name]` | `--force`, `--dry-run` | Cascade-archive workspace and all descendants (projects, groups, statuses, tasks). Prompts y/N unless `--force`. Clears active pointer if archiving active workspace. |
@@ -302,6 +293,8 @@ todo task transfer task-0001 --to ops --status Backlog --dry-run
 todo workspace create work --statuses "To Do,In Progress,Done"
 todo workspace use personal
 todo workspace ls
+todo workspace show
+todo --json workspace show
 todo workspace rename "work" "work-q2"
 todo workspace archive work --dry-run
 todo workspace archive work --force
@@ -498,11 +491,11 @@ Every task-referencing command auto-detects whether the argument is an ID or a t
 | `group show` | GroupDetail with `tasks`, `children` arrays, and `metadata` dict |
 | `workspace ls` / `project ls` / `group ls` | entities include their `metadata` dicts |
 | `task log` | array of TaskHistory objects |
-| `context` | `{"view": {"workspace": {...}, "statuses": [...]}, "projects": [...], "tags": [...], "groups": [...]}` |
+| `workspace show` | `{"view": {"workspace": {...}, "statuses": [...]}, "projects": [...], "tags": [...], "groups": [...]}` |
 | `export` | `{"markdown": "..."}` or `{"output_path": "...", "bytes": N}` when `-o FILE` |
 | `backup` | `{"source": "...", "dest": "...", "bytes": N}` |
 | `info` | `{"db": {"path": str, "exists": bool}, "wal": {...}, "shm": {...}, "active_workspace": {...}}` |
 | `task meta ls`, `workspace meta ls`, `project meta ls`, `group meta ls` | `[{"key": "...", "value": "..."}]` (sorted; empty list if no metadata) |
 | `task meta get/set/del`, `workspace meta get/set/del`, `project meta get/set/del`, `group meta get/set/del` | `{"key": "...", "value": "..."}` |
 
-> **`context` vs `ls` shape asymmetry:** `ls` returns `{"workspace": {...}, "statuses": [...]}` directly at the top level. `context` wraps the same workspace+statuses shape inside a `"view"` key — they are **not** interchangeable payloads.
+> **`workspace show` vs `task ls` shape asymmetry:** `task ls` returns `{"workspace": {...}, "statuses": [...]}` directly at the top level. `workspace show` wraps the same workspace+statuses shape inside a `"view"` key — they are **not** interchangeable payloads.

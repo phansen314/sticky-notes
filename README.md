@@ -74,13 +74,12 @@ Task identifiers are auto-detected: numeric forms (`1`, `task-0001`, `#1`) resol
 
 | Command | Description |
 |---------|-------------|
-| `todo workspace ...` | `create [--statuses a,b,c]`, `ls`, `use`, `rename`, `archive [--force\|--dry-run]`, `meta ls\|get\|set\|del` |
+| `todo workspace ...` | `create [--statuses a,b,c]`, `ls`, `show`, `use`, `rename`, `archive [--force\|--dry-run]`, `meta ls\|get\|set\|del` |
 | `todo status ...` | `create`, `ls`, `rename`, `order <workspace> <statuses...>`, `archive [--reassign-to STATUS\|--force]` |
 | `todo project ...` | `create [--desc]`, `ls`, `show`, `edit [--desc]`, `rename`, `archive [--force\|--dry-run]`, `meta ls\|get\|set\|del <name>` |
 | `todo dep ...` | `create`, `archive` |
 | `todo tag ...` | `create`, `ls`, `rename`, `archive [--unassign\|--force\|--dry-run]` |
 | `todo group ...` | `create [--desc]`, `ls [--tree]`, `show`, `rename`, `edit [--desc]`, `archive [--force\|--dry-run]`, `mv`, `assign`, `unassign`, `dep create\|archive`, `meta ls\|get\|set\|del <title> [--project]` |
-| `todo context` | One-call workspace summary: statuses, tasks, projects, tags, groups |
 | `todo export` | Export database as JSON (default) or Markdown (`--md`) |
 | `todo info` | Show sticky-notes file locations |
 | `todo backup <dest>` | Atomic binary DB snapshot (safe pre-migration backup) |

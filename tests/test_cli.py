@@ -1098,14 +1098,14 @@ class TestHelp:
 # ---- Context command ----
 
 
-class TestContext:
-    def test_context_text_output(self, cli):
+class TestWorkspaceShow:
+    def test_workspace_show_text_output(self, cli):
         cli("workspace", "create", "dev")
         cli("status", "create", "todo")
         cli("project", "create", "backend")
         cli("tag", "create", "bug")
         cli("group", "create", "G1", "-p", "backend")
-        out, _ = cli("context")
+        out, _ = cli("workspace", "show")
         assert "== dev ==" in out
         assert "Projects:" in out
         assert "backend" in out
@@ -1114,20 +1114,20 @@ class TestContext:
         assert "Groups:" in out
         assert "G1" in out
 
-    def test_context_empty_workspace_text(self, cli):
+    def test_workspace_show_empty_text(self, cli):
         cli("workspace", "create", "empty")
-        out, _ = cli("context")
+        out, _ = cli("workspace", "show")
         assert "== empty ==" in out
         assert "Projects:" not in out
         assert "Tags:" not in out
         assert "Groups:" not in out
 
-    def test_context_no_active_workspace(self, cli):
-        _, err = cli("context", expect_exit=5)
+    def test_workspace_show_no_active_workspace(self, cli):
+        _, err = cli("workspace", "show", expect_exit=5)
         assert "no active workspace" in err
 
-    def test_context_no_active_workspace_json(self, cli):
-        _, err = cli("--json", "context", expect_exit=5)
+    def test_workspace_show_no_active_workspace_json(self, cli):
+        _, err = cli("--json", "workspace", "show", expect_exit=5)
         data = json.loads(err)
         assert data["ok"] is False
         assert data["code"] == "missing_active_workspace"
@@ -1451,14 +1451,14 @@ class TestJsonOutput:
 
     # -- Context --
 
-    def test_context(self, cli):
+    def test_workspace_show(self, cli):
         cli("workspace", "create", "B")
         cli("status", "create", "Todo")
         cli("project", "create", "P1")
         cli("tag", "create", "bug")
         cli("group", "create", "G1", "-p", "P1")
         cli("task", "create", "T1", "-S", "todo")
-        data = self._json(cli, "context")
+        data = self._json(cli, "workspace", "show")
         assert data["ok"] is True
         payload = data["data"]
         assert payload["view"]["workspace"]["name"] == "B"
@@ -1470,9 +1470,9 @@ class TestJsonOutput:
         assert len(payload["groups"]) == 1
         assert payload["groups"][0]["title"] == "G1"
 
-    def test_context_empty_workspace(self, cli):
+    def test_workspace_show_empty_workspace(self, cli):
         cli("workspace", "create", "Empty")
-        data = self._json(cli, "context")
+        data = self._json(cli, "workspace", "show")
         assert data["ok"] is True
         payload = data["data"]
         assert payload["view"]["workspace"]["name"] == "Empty"
@@ -2114,8 +2114,8 @@ class TestEndToEndSmoke:
         out, _ = self.cli("group", "show", "api", "--project", "backend")
         assert "api" in out
 
-    def test_context(self):
-        out, _ = self.cli("context")
+    def test_workspace_show(self):
+        out, _ = self.cli("workspace", "show")
         assert "todo" in out
         assert "in-progress" in out
         assert "done" in out

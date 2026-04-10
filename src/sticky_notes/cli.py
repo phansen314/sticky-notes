@@ -670,7 +670,7 @@ def cmd_tag_archive(conn: sqlite3.Connection, args: argparse.Namespace, db_path:
 # ---- Context ----
 
 
-def cmd_context(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
+def cmd_workspace_show(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
     workspace = _resolve_workspace(conn, args, db_path)
     ctx = service.get_workspace_context(conn, workspace.id)
     return Ok(data=ctx, text=presenters.format_workspace_context(ctx))
@@ -972,7 +972,7 @@ HANDLERS: dict[str, CommandHandler] = {
     "tag_ls": cmd_tag_ls,
     "tag_rename": cmd_tag_rename,
     "tag_archive": cmd_tag_archive,
-    "context": cmd_context,
+    "workspace_show": cmd_workspace_show,
     "export": cmd_export,
     "backup": cmd_backup,
     "info": cmd_info,
@@ -1101,6 +1101,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_wr.set_defaults(command="workspace_rename")
     p_wr.add_argument("old_name", help="existing workspace name")
     p_wr.add_argument("new_name", help="new workspace name")
+
+    p_wsh = workspace_sub.add_parser("show", help="workspace snapshot: statuses, tasks, projects, tags, groups")
+    p_wsh.set_defaults(command="workspace_show")
 
     p_warc = workspace_sub.add_parser("archive", help="cascade-archive workspace and all descendants")
     p_warc.set_defaults(command="workspace_archive")
@@ -1355,10 +1358,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_tr.add_argument("--force", action="store_true", help="skip confirmation prompt")
     p_tr.add_argument("--dry-run", action="store_true", help="preview without executing")
 
-    # ---- Context ----
-
-    p_ctx = sub.add_parser("context", help="workspace summary: statuses, tasks, projects, tags, groups")
-    p_ctx.set_defaults(command="context")
 
     # ---- Export ----
 
