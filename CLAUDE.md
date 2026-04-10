@@ -91,7 +91,7 @@ Entry point: `todo = "sticky_notes.__main__:main"`.
 - Workspace metadata: `todo workspace meta ls|get|set|del` (operates on active workspace or `-w` override)
 - Project metadata: `todo project meta ls|get|set|del <project>`
 - Group metadata: `todo group meta ls|get|set|del <title> [--project]`
-- Project subcommands: `todo project create|ls|show|edit|archive`
+- Project subcommands: `todo project create|ls|show|edit|rename|archive`
 - Group subcommands: `todo group create|ls|show|rename|edit|archive|mv|assign|unassign`
 - Other subcommand groups: `workspace`, `status`, `dep`, `group-dep`, `tag`
 - Standalone commands: `context`, `export`, `info`, `backup`

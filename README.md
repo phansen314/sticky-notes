@@ -66,8 +66,8 @@ Use `--by-title` on any task command to resolve `<task>` by title string instead
 | `--archived` | Show only archived tasks |
 | `--status` / `-S` | Filter by status name |
 | `--project` / `-p` | Filter by project name |
-| `--priority` / `-P` | Filter by priority (1-5) |
-| `--search` / `-s` | Search by title substring |
+| `--priority` | Filter by priority (1-5) |
+| `--search` | Search by title substring |
 | `--group` / `-g` | Filter by group title |
 | `--tag` / `-t` | Filter by tag name |
 
@@ -77,10 +77,10 @@ Use `--by-title` on any task command to resolve `<task>` by title string instead
 |---------|-------------|
 | `todo workspace ...` | `create [--statuses a,b,c]`, `ls`, `use`, `rename`, `archive [--force\|--dry-run]`, `meta ls\|get\|set\|del` |
 | `todo status ...` | `create`, `ls`, `rename`, `archive [--reassign-to STATUS\|--force]` |
-| `todo project ...` | `create [--desc]`, `ls`, `show`, `edit [--desc\|--name]`, `archive [--force\|--dry-run]`, `meta ls\|get\|set\|del <name>` |
+| `todo project ...` | `create [--desc]`, `ls`, `show`, `edit [--desc]`, `rename`, `archive [--force\|--dry-run]`, `meta ls\|get\|set\|del <name>` |
 | `todo dep ...` | `create`, `archive` |
 | `todo group-dep ...` | `create`, `archive` (group-level dependencies) |
-| `todo tag ...` | `create`, `ls`, `archive [--unassign\|--force\|--dry-run]` |
+| `todo tag ...` | `create`, `ls`, `rename`, `archive [--unassign\|--force\|--dry-run]` |
 | `todo group ...` | `create [--desc]`, `ls [--tree]`, `show`, `rename`, `edit [--desc]`, `archive [--force\|--dry-run]`, `mv`, `assign`, `unassign`, `meta ls\|get\|set\|del <title> [--project]` |
 | `todo context` | One-call workspace summary: statuses, tasks, projects, tags, groups |
 | `todo export` | Export database as JSON (default) or Markdown (`--md`) |
@@ -93,13 +93,13 @@ Tasks can be transferred between workspaces. The transfer creates a copy on the 
 
 ```sh
 # Transfer task to another workspace
-todo task transfer task-0001 --workspace ops --status Backlog
+todo task transfer task-0001 --to ops --status Backlog
 
 # Transfer with project assignment on the target workspace
-todo task transfer task-0001 --workspace ops --status Backlog --project infra
+todo task transfer task-0001 --to ops --status Backlog --project infra
 
 # Preview before transferring (checks for blocking dependencies)
-todo task transfer task-0001 --workspace ops --status Backlog --dry-run
+todo task transfer task-0001 --to ops --status Backlog --dry-run
 ```
 
 ## TUI
