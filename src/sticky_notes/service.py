@@ -1534,6 +1534,15 @@ def list_tags(
     return repo.list_tags(conn, workspace_id, include_archived=include_archived)
 
 
+def update_tag(
+    conn: sqlite3.Connection,
+    tag_id: int,
+    changes: dict[str, Any],
+) -> Tag:
+    with transaction(conn), _friendly_errors():
+        return repo.update_tag(conn, tag_id, changes)
+
+
 def archive_tag(conn: sqlite3.Connection, tag_id: int, *, unassign: bool = False) -> Tag:
     with transaction(conn), _friendly_errors():
         if unassign:

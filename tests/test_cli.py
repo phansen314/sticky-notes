@@ -459,10 +459,12 @@ class TestProjectCommands:
         out, _ = cli("project", "show", "backend")
         assert "API services" in out
 
-    def test_edit_rename(self, cli):
+    def test_rename(self, cli):
         cli("project", "create", "backend")
-        out, _ = cli("project", "edit", "backend", "--name", "api")
-        assert "updated project 'api'" in out
+        out, _ = cli("project", "rename", "backend", "api")
+        assert "renamed project 'backend' -> 'api'" in out
+        out2, _ = cli("project", "show", "api")
+        assert "api" in out2
 
     def test_edit_no_changes(self, cli):
         cli("project", "create", "backend")
@@ -925,6 +927,14 @@ class TestTagCommands:
     def test_tag_ls_empty(self, cli):
         out, _ = cli("tag", "ls")
         assert "no tags" in out
+
+    def test_tag_rename(self, cli):
+        cli("tag", "create", "bug")
+        out, _ = cli("tag", "rename", "bug", "defect")
+        assert "renamed tag 'bug' -> 'defect'" in out
+        out2, _ = cli("tag", "ls")
+        assert "defect" in out2
+        assert "bug" not in out2
 
     def test_tag_archive(self, cli):
         cli("tag", "create", "bug")

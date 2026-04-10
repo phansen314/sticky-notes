@@ -391,12 +391,17 @@ def cmd_project_edit(conn: sqlite3.Connection, args: argparse.Namespace, db_path
     changes: dict[str, Any] = {}
     if args.desc is not None:
         changes["description"] = args.desc.strip() or None
-    if args.new_name is not None:
-        changes["name"] = args.new_name
     if not changes:
         return Ok(data=proj, text="nothing to update")
     updated = service.update_project(conn, proj.id, changes)
     return Ok(data=updated, text=f"updated project '{updated.name}'")
+
+
+def cmd_project_rename(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
+    workspace = _resolve_workspace(conn, args, db_path)
+    proj = service.get_project_by_name(conn, workspace.id, args.old_name)
+    updated = service.update_project(conn, proj.id, {"name": args.new_name})
+    return Ok(data=updated, text=f"renamed project '{args.old_name}' -> '{args.new_name}'")
 
 
 def cmd_project_archive(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
@@ -599,6 +604,13 @@ def cmd_tag_create(conn: sqlite3.Connection, args: argparse.Namespace, db_path: 
     workspace = _resolve_workspace(conn, args, db_path)
     tag = service.create_tag(conn, workspace.id, args.name)
     return Ok(data=tag, text=f"created tag '{tag.name}'")
+
+
+def cmd_tag_rename(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
+    workspace = _resolve_workspace(conn, args, db_path)
+    tag = service.get_tag_by_name(conn, workspace.id, args.old_name)
+    updated = service.update_tag(conn, tag.id, {"name": args.new_name})
+    return Ok(data=updated, text=f"renamed tag '{args.old_name}' -> '{args.new_name}'")
 
 
 def cmd_tag_ls(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
@@ -905,6 +917,7 @@ HANDLERS: dict[str, CommandHandler] = {
     "project_ls": cmd_project_ls,
     "project_show": cmd_project_show,
     "project_edit": cmd_project_edit,
+    "project_rename": cmd_project_rename,
     "project_archive": cmd_project_archive,
     "project_meta_ls": cmd_project_meta_ls,
     "project_meta_get": cmd_project_meta_get,
@@ -929,6 +942,7 @@ HANDLERS: dict[str, CommandHandler] = {
     "group_meta_del": cmd_group_meta_del,
     "tag_create": cmd_tag_create,
     "tag_ls": cmd_tag_ls,
+    "tag_rename": cmd_tag_rename,
     "tag_archive": cmd_tag_archive,
     "context": cmd_context,
     "export": cmd_export,
@@ -1141,7 +1155,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_pe.set_defaults(command="project_edit")
     p_pe.add_argument("name")
     p_pe.add_argument("--desc", "-d", default=None, help="project description")
-    p_pe.add_argument("--name", "-n", dest="new_name", default=None, help="new project name")
+
+    p_pren = proj_sub.add_parser("rename", help="rename a project")
+    p_pren.set_defaults(command="project_rename")
+    p_pren.add_argument("old_name")
+    p_pren.add_argument("new_name")
 
     p_parc = proj_sub.add_parser("archive", help="cascade-archive project and all groups/tasks")
     p_parc.set_defaults(command="project_archive")
@@ -1305,6 +1323,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_tl = tag_sub.add_parser("ls", help="list tags")
     p_tl.set_defaults(command="tag_ls")
     p_tl.add_argument("--all", "-a", action="store_true", help="include archived")
+
+    p_tren = tag_sub.add_parser("rename", help="rename a tag")
+    p_tren.set_defaults(command="tag_rename")
+    p_tren.add_argument("old_name")
+    p_tren.add_argument("new_name")
 
     p_tr = tag_sub.add_parser("archive", help="archive a tag")
     p_tr.set_defaults(command="tag_archive")

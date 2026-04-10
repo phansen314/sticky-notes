@@ -335,7 +335,8 @@ todo status archive "Old Status" --force
 | `project create` | `name` | `--desc` / `-d` | Create project |
 | `project ls` | — | — | List projects |
 | `project show` | `name` | — | Show project detail |
-| `project edit` | `name` | `--desc` / `-d`, `--name` / `-n` | Edit project description or rename |
+| `project edit` | `name` | `--desc` / `-d` | Edit project description |
+| `project rename` | `old new` | — | Rename project from `old` to `new` |
 | `project archive` | `name` | `--force`, `--dry-run` | Cascade-archive project and all groups/tasks. Prompts y/N unless `--force`. |
 
 ---
@@ -380,9 +381,8 @@ Tags are workspace-scoped. Many-to-many with tasks. `todo task create`/`todo tas
 |---|---|---|---|
 | `tag create` | `name` | — | Create a tag (workspace-scoped) |
 | `tag ls` | — | `--all` / `-a` | List tags (include archived with `-a`) |
+| `tag rename` | `old new` | — | Rename tag from `old` to `new` |
 | `tag archive` | `name` | `--unassign`, `--force`, `--dry-run` | Archive tag; `--unassign` strips it from all tasks first. Prompts y/N unless `--force`. |
-
-> **No `tag rename`.** To rename: create new tag, reassign via `todo task edit --tag new --untag old`, archive old.
 
 ```sh
 todo tag create backend
