@@ -205,6 +205,9 @@ def cmd_task_edit(conn: sqlite3.Connection, args: argparse.Namespace, db_path: P
         changes["project_id"] = service.get_project_by_name(conn, workspace.id, args.project).id
     add_tags = tuple(args.tag or ())
     remove_tags = tuple(args.untag or ())
+    if not changes and not add_tags and not remove_tags:
+        detail = service.get_task_detail(conn, task_id)
+        return Ok(data=detail, text="nothing to update")
     if args.dry_run:
         preview = service.preview_update_task(
             conn, task_id, changes, add_tags=add_tags, remove_tags=remove_tags,

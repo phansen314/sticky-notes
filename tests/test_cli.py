@@ -435,7 +435,7 @@ class TestTaskCommands:
     def test_edit_nothing(self, cli):
         cli("task", "create", "Task", "-S", "todo")
         out, _ = cli("task", "edit", "1")  # no-op: returns task unchanged, exit 0
-        assert "updated task-0001" in out
+        assert "nothing to update" in out
 
     def test_mv(self, cli):
         cli("task", "create", "Task A", "-S", "todo")
@@ -1107,7 +1107,7 @@ class TestTagCommands:
     def test_edit_nothing_is_noop(self, cli):
         cli("task", "create", "Task", "-S", "todo")
         out, _ = cli("task", "edit", "1")  # no-op: returns unchanged task, exit 0
-        assert "updated task-0001" in out
+        assert "nothing to update" in out
 
     # -- Tags on ls --
 
