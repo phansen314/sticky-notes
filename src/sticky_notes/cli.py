@@ -818,13 +818,6 @@ def _meta_records(metadata: dict[str, str]) -> list[dict[str, str]]:
     return [{"key": k, "value": v} for k, v in sorted(metadata.items())]
 
 
-def _format_meta_records(records: list[dict[str, str]]) -> str:
-    if not records:
-        return "no metadata"
-    width = max(len(r["key"]) for r in records)
-    return "\n".join(f"  {r['key']:<{width}}  {r['value']}" for r in records)
-
-
 # ---- Task metadata ----
 
 
@@ -833,7 +826,8 @@ def cmd_task_meta_ls(conn: sqlite3.Connection, args: argparse.Namespace, db_path
     task_id = _resolve_task(conn, workspace, args.task)
     task = service.get_task(conn, task_id)
     records = _meta_records(task.metadata)
-    return Ok(data=records, text=_format_meta_records(records))
+    text = presenters.format_metadata_block(task.metadata, indent=2) or "no metadata"
+    return Ok(data=records, text=text)
 
 
 def cmd_task_meta_get(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
@@ -866,7 +860,8 @@ def cmd_task_meta_del(conn: sqlite3.Connection, args: argparse.Namespace, db_pat
 def cmd_workspace_meta_ls(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
     workspace = _resolve_workspace(conn, args, db_path)
     records = _meta_records(workspace.metadata)
-    return Ok(data=records, text=_format_meta_records(records))
+    text = presenters.format_metadata_block(workspace.metadata, indent=2) or "no metadata"
+    return Ok(data=records, text=text)
 
 
 def cmd_workspace_meta_get(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
@@ -897,7 +892,8 @@ def cmd_project_meta_ls(conn: sqlite3.Connection, args: argparse.Namespace, db_p
     workspace = _resolve_workspace(conn, args, db_path)
     project = service.get_project_by_name(conn, workspace.id, args.name)
     records = _meta_records(project.metadata)
-    return Ok(data=records, text=_format_meta_records(records))
+    text = presenters.format_metadata_block(project.metadata, indent=2) or "no metadata"
+    return Ok(data=records, text=text)
 
 
 def cmd_project_meta_get(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
@@ -931,7 +927,8 @@ def cmd_group_meta_ls(conn: sqlite3.Connection, args: argparse.Namespace, db_pat
     workspace = _resolve_workspace(conn, args, db_path)
     grp = service.resolve_group(conn, workspace.id, args.title, project_name=args.project)
     records = _meta_records(grp.metadata)
-    return Ok(data=records, text=_format_meta_records(records))
+    text = presenters.format_metadata_block(grp.metadata, indent=2) or "no metadata"
+    return Ok(data=records, text=text)
 
 
 def cmd_group_meta_get(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:

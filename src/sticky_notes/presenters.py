@@ -24,6 +24,18 @@ def _empty(entity: str) -> str:
     return f"no {entity}s"
 
 
+def format_metadata_block(metadata: dict[str, str], indent: int = 2) -> str:
+    """Render a metadata dict as indented 'key: value' lines.
+
+    Returns an empty string when the dict is empty (callers can skip the
+    'Metadata:' header entirely in that case).
+    """
+    if not metadata:
+        return ""
+    pad = " " * indent
+    return "\n".join(f"{pad}{k}: {v}" for k, v in sorted(metadata.items()))
+
+
 def format_history_entry(h: TaskHistory) -> str:
     old_str = h.old_value if h.old_value is not None else "(none)"
     new_str = h.new_value if h.new_value is not None else "(none)"
@@ -74,8 +86,7 @@ def format_project_detail(detail: ProjectDetail) -> str:
         lines.append(f"  {detail.description}")
     if detail.metadata:
         lines.append("  Metadata:")
-        for k, v in sorted(detail.metadata.items()):
-            lines.append(f"    {k}: {v}")
+        lines.append(format_metadata_block(detail.metadata, indent=4))
     lines.append(f"  Tasks: {len(detail.tasks)}")
     for t in detail.tasks:
         lines.append(f"    {format_task_num(t.id)}  {t.title}")
@@ -104,8 +115,7 @@ def format_task_detail(detail: TaskDetail) -> str:
         lines.append(f"  Tags:        {tag_str}")
     if detail.metadata:
         lines.append("  Metadata:")
-        for k, v in sorted(detail.metadata.items()):
-            lines.append(f"    {k}: {v}")
+        lines.append(format_metadata_block(detail.metadata, indent=4))
     lines.append(f"  Priority:    {detail.priority}")
     if detail.due_date:
         lines.append(f"  Due:         {format_timestamp(detail.due_date)}")
@@ -148,8 +158,7 @@ def format_workspace_context(ctx: WorkspaceContext) -> str:
     lines: list[str] = [f"== {ctx.view.workspace.name} =="]
     if ctx.view.workspace.metadata:
         lines.append("Metadata:")
-        for k, v in sorted(ctx.view.workspace.metadata.items()):
-            lines.append(f"  {k}: {v}")
+        lines.append(format_metadata_block(ctx.view.workspace.metadata, indent=2))
     view_str = format_workspace_list_view(ctx.view)
     if view_str:
         lines.append(view_str)
@@ -199,8 +208,7 @@ def format_group_detail(
     lines.append(f"  Tasks:       {len(detail.tasks)}")
     if detail.metadata:
         lines.append("  Metadata:")
-        for k, v in sorted(detail.metadata.items()):
-            lines.append(f"    {k}: {v}")
+        lines.append(format_metadata_block(detail.metadata, indent=4))
     if detail.children:
         child_names = ", ".join(c.title for c in detail.children)
         lines.append(f"  Sub-groups: {child_names}")
