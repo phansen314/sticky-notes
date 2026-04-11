@@ -354,7 +354,6 @@ todo dep archive --task task-0003 --blocked-by task-0001
 
 ---
 
-
 ## `todo tag` Subcommands
 
 Tags are workspace-scoped. Many-to-many with tasks. `todo task create`/`todo task edit` auto-create tags that don't exist yet.
