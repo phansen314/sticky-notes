@@ -2,7 +2,7 @@
 
 A local todo/kanban app with two interfaces:
 
-- **CLI** (argparse) — task management from the terminal, with `--json` for structured output
+- **CLI** (argparse) — task management from the terminal; auto-emits JSON when piped, text at a terminal
 - **TUI** (Textual) — interactive kanban board with keyboard navigation
 
 All interfaces share the same database and service layer, backed by **SQLite**.
@@ -39,7 +39,7 @@ Entry point: `todo`
 
 **Active workspace:** The CLI tracks the active workspace in `~/.local/share/sticky-notes/active-workspace`. Override per-command with `--workspace`/`-w`.
 
-**JSON output:** Add `--json` before any command for structured JSON output.
+**Output format:** Text at a terminal, JSON when piped (`todo task ls | jq`). Override with `--json` (force JSON) or `--text` (force text). See [`skills/sticky-notes/references/json-schema.md`](skills/sticky-notes/references/json-schema.md) for per-command shapes.
 
 ### Task Commands
 

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A local todo/kanban app (`todo` CLI) with two interfaces: CLI (argparse) and TUI (Textual), backed by SQLite storage. All layers are fully implemented. Use `--json` flag for structured CLI output. See `skills/sticky-notes/references/cli-reference.md` for the full CLI reference.
+A local todo/kanban app (`todo` CLI) with two interfaces: CLI (argparse) and TUI (Textual), backed by SQLite storage. All layers are fully implemented. CLI auto-emits JSON when piped and text at a terminal (`--json`/`--text` override). See `skills/sticky-notes/references/cli-reference.md` for the full CLI reference and `skills/sticky-notes/references/json-schema.md` for JSON shapes.
 
 ## Architecture
 

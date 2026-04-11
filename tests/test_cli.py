@@ -24,7 +24,11 @@ from sticky_notes.formatting import (
 
 
 @pytest.fixture
-def cli(db_path: Path, capsys: pytest.CaptureFixture[str]):
+def cli(db_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch):
+    # Default to TTY so existing text-mode assertions keep working.
+    # Individual tests override sticky_notes.cli._stdout_is_tty via their own monkeypatch.
+    monkeypatch.setattr("sticky_notes.cli._stdout_is_tty", lambda: True)
+
     def run(*args: str, expect_exit: int = 0) -> tuple[str, str]:
         argv = ["--db", str(db_path), *args]
         try:
@@ -1239,7 +1243,7 @@ class TestJsonOutput:
         cli("workspace", "create", "B")
         cli("status", "create", "Todo")
         cli("task", "create", "T1", "-S", "todo")
-        data = self._json(cli, "task", "archive", "1")
+        data = self._json(cli, "task", "archive", "1", "--force")
         assert data["ok"] is True
         assert data["data"]["id"] == 1
         assert data["data"]["archived"] is True
@@ -2001,7 +2005,7 @@ class TestArchiveConfirmation:
     @pytest.fixture(autouse=True)
     def _setup(self, cli, monkeypatch):
         self.cli = cli
-        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+        monkeypatch.setattr("sticky_notes.cli._stdin_is_tty", lambda: True)
         cli("workspace", "create", "dev")
         cli("status", "create", "todo")
 
@@ -2026,9 +2030,9 @@ class TestArchiveConfirmation:
         out, _ = self.cli("task", "archive", "1")
         assert "aborted" in out
 
-    def test_json_auto_confirms(self):
+    def test_json_with_force_archives(self):
         self.cli("task", "create", "t1", "-S", "todo")
-        out, _ = self.cli("--json", "task", "archive", "1")
+        out, _ = self.cli("--json", "task", "archive", "1", "--force")
         data = json.loads(out)
         assert data["ok"] is True
         assert data["data"]["archived"] is True
@@ -2064,41 +2068,36 @@ class TestStatusArchiveConfirmation:
     @pytest.fixture(autouse=True)
     def _setup(self, cli, monkeypatch):
         self.cli = cli
-        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+        monkeypatch.setattr("sticky_notes.cli._stdin_is_tty", lambda: True)
         cli("workspace", "create", "dev")
         cli("status", "create", "todo")
         cli("status", "create", "done")
         cli("task", "create", "t1", "-S", "todo")
 
-    def test_force_confirms_and_archives_tasks(self, monkeypatch):
-        monkeypatch.setattr("builtins.input", lambda _: "y")
+    def test_force_archives_tasks(self):
+        # --force skips prompt entirely (no input() call)
         out, _ = self.cli("status", "archive", "todo", "--force")
         assert "archived status 'todo'" in out
 
-    def test_force_aborted(self, monkeypatch):
-        monkeypatch.setattr("builtins.input", lambda _: "n")
-        out, _ = self.cli("status", "archive", "todo", "--force")
-        assert "aborted" in out
-
-    def test_reassign_confirms(self, monkeypatch):
-        monkeypatch.setattr("builtins.input", lambda _: "y")
+    def test_reassign_archives(self):
+        # --reassign-to moves tasks and archives without prompting
         out, _ = self.cli("status", "archive", "todo", "--reassign-to", "done")
         assert "archived status 'todo'" in out
 
-    def test_reassign_does_not_prompt(self, monkeypatch):
-        # --reassign-to is implicit confirmation; input() should never be called
-        monkeypatch.setattr("builtins.input", lambda _: (_ for _ in ()).throw(AssertionError("input() called")))
-        out, _ = self.cli("status", "archive", "todo", "--reassign-to", "done")
-        assert "archived status 'todo'" in out
-
-    def test_json_auto_confirms_force(self):
+    def test_json_with_force_archives(self):
         out, _ = self.cli("--json", "status", "archive", "todo", "--force")
         data = json.loads(out)
         assert data["ok"] is True
         assert data["data"]["archived"] is True
 
+    def test_force_non_tty_succeeds(self, monkeypatch):
+        # regression: pipe stdin + --force used to raise ValueError telling user to pass --force
+        monkeypatch.setattr("sticky_notes.cli._stdin_is_tty", lambda: False)
+        out, _ = self.cli("status", "archive", "todo", "--force")
+        assert "archived status 'todo'" in out
+
     def test_reassign_to_non_tty_succeeds_without_force(self, monkeypatch):
-        monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+        monkeypatch.setattr("sticky_notes.cli._stdin_is_tty", lambda: False)
         out, _ = self.cli("status", "archive", "todo", "--reassign-to", "done")
         assert "archived status 'todo'" in out
 
@@ -2107,7 +2106,7 @@ class TestTagArchiveConfirmation:
     @pytest.fixture(autouse=True)
     def _setup(self, cli, monkeypatch):
         self.cli = cli
-        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+        monkeypatch.setattr("sticky_notes.cli._stdin_is_tty", lambda: True)
         cli("workspace", "create", "dev")
         cli("status", "create", "todo")
         cli("tag", "create", "bug")
@@ -2128,8 +2127,8 @@ class TestTagArchiveConfirmation:
         out, _ = self.cli("tag", "archive", "bug", "--force")
         assert "archived tag 'bug'" in out
 
-    def test_json_auto_confirms(self):
-        out, _ = self.cli("--json", "tag", "archive", "bug")
+    def test_json_with_force_archives(self):
+        out, _ = self.cli("--json", "tag", "archive", "bug", "--force")
         data = json.loads(out)
         assert data["ok"] is True
         assert data["data"]["archived"] is True
@@ -2786,7 +2785,7 @@ class TestArchivePreviewPrefixSeparation:
         assert out.startswith("dry-run:")
 
     def test_confirm_prompt_no_dry_run_prefix(self):
-        self.monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+        self.monkeypatch.setattr("sticky_notes.cli._stdin_is_tty", lambda: True)
         # Capture stderr where preview is printed
         seen = []
         original_print = __builtins__["print"] if isinstance(__builtins__, dict) else print
@@ -2825,3 +2824,64 @@ class TestTaskEditDescStrip:
         out, _ = self.cli("--json", "task", "edit", "1", "-d", "new desc")
         data = json.loads(out)
         assert data["data"]["description"] == "new desc"
+
+
+# ---- task-0082: TTY-aware output format ----
+
+
+class TestTtyAwareOutput:
+    """Auto-detect: pipe → JSON, TTY → text; --json/--text override."""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, cli, monkeypatch):
+        self.cli = cli
+        self.monkeypatch = monkeypatch
+        cli("workspace", "create", "dev")
+        cli("status", "create", "todo")
+        cli("task", "create", "t1", "-S", "todo")
+
+    def test_tty_stdout_defaults_to_text(self):
+        # cli fixture already sets sys.stdout.isatty → True
+        out, _ = self.cli("task", "ls")
+        assert out.strip()
+        # not valid JSON
+        try:
+            json.loads(out)
+            assert False, "expected text output, got JSON"
+        except json.JSONDecodeError:
+            pass
+
+    def test_piped_stdout_defaults_to_json(self, monkeypatch):
+        monkeypatch.setattr("sticky_notes.cli._stdout_is_tty", lambda: False)
+        out, _ = self.cli("task", "ls")
+        data = json.loads(out)
+        assert data["ok"] is True
+
+    def test_json_flag_overrides_tty(self):
+        # TTY stdout (from fixture) + explicit --json → JSON
+        out, _ = self.cli("--json", "task", "ls")
+        data = json.loads(out)
+        assert data["ok"] is True
+
+    def test_text_flag_overrides_pipe(self, monkeypatch):
+        monkeypatch.setattr("sticky_notes.cli._stdout_is_tty", lambda: False)
+        out, _ = self.cli("--text", "task", "ls")
+        try:
+            json.loads(out)
+            assert False, "expected text output, got JSON"
+        except json.JSONDecodeError:
+            pass
+
+    def test_json_text_mutex(self):
+        self.cli("--json", "--text", "task", "ls", expect_exit=2)
+
+    def test_confirm_archive_non_tty_stdin_raises(self, monkeypatch):
+        monkeypatch.setattr("sticky_notes.cli._stdin_is_tty", lambda: False)
+        _, err = self.cli("task", "archive", "1", expect_exit=4)
+        assert "non-interactive" in err
+        assert "--force" in err
+
+    def test_confirm_archive_non_tty_with_force(self, monkeypatch):
+        monkeypatch.setattr("sticky_notes.cli._stdin_is_tty", lambda: False)
+        out, _ = self.cli("task", "archive", "1", "--force")
+        assert "archived task-0001" in out

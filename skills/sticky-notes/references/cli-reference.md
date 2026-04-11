@@ -12,14 +12,19 @@ Apply to every command. Place before the subcommand:  `todo [global flags] <comm
 |---|---|---|---|
 | `--db PATH` | — | `~/.local/share/sticky-notes/sticky-notes.db` | Path to SQLite DB |
 | `--workspace NAME` | `-w` | active-workspace file | Workspace name override (bypasses `~/.local/share/sticky-notes/active-workspace`) |
-| `--json` | — | off | Emit JSON envelope instead of text |
+| `--json` | — | off | Force JSON output (also auto-enabled when stdout is a pipe) |
+| `--text` | — | off | Force text output even when piped |
 | `--quiet` | `-q` | off | Suppress success output (text mode only) |
 
-`--quiet` suppresses success text output only. It has **no effect when `--json` is passed** — JSON output is always emitted to stdout on success. Pipe to `/dev/null` if you want total silence.
+**Output format auto-detection:** When stdout is a terminal, text is emitted. When stdout is piped or redirected, JSON is emitted automatically — no flag needed. `--json` and `--text` override the auto-detection and are mutually exclusive.
+
+`--quiet` suppresses success text output only. It has **no effect in JSON mode** — JSON output is always emitted to stdout on success.
 
 **JSON envelope:**
 - Success → stdout: `{"ok": true, "data": ...}`
 - Error → stderr: `{"ok": false, "error": "...", "code": "..."}`
+
+See [`json-schema.md`](json-schema.md) for per-command `data` shapes.
 
 **Exit codes:**
 
@@ -150,7 +155,7 @@ todo task mv task-0001 -S Done --dry-run
 
 ### `todo task archive <task> [--force] [--dry-run]`
 
-Archives the task (`archived=true`). Prompts for y/N confirmation unless `--force` is passed. `--dry-run` previews without executing. JSON mode (`--json`) auto-confirms. Non-interactive stdin (pipes, CI) requires `--force` or `--dry-run` — the command fails fast rather than hang on `input()`. Archived tasks remain queryable via `task ls --archived include` or `--archived only`.
+Archives the task (`archived=true`). Prompts for y/N confirmation unless `--force` is passed. `--dry-run` previews without executing. Non-interactive stdin (pipes, CI) requires `--force` or `--dry-run` — the command fails fast with an error rather than hang on `input()`. Archived tasks remain queryable via `task ls --archived include` or `--archived only`.
 
 ---
 
@@ -325,7 +330,7 @@ todo workspace archive work --force
 | `status ls` | — | `--archived hide\|include\|only` | List statuses on active workspace; default hides archived |
 | `status rename` | `old new` | — | Rename a status |
 | `status order` | `status1 status2 ...` | — | Set the TUI display order for statuses on the active workspace (or `-w`). Writes `~/.config/sticky-notes/tui.toml`. Partial ordering allowed — unlisted statuses fall to the end. |
-| `status archive` | `name` | `--reassign-to STATUS`, `--force`, `--dry-run` | Archive status. `--dry-run` previews without executing. `--reassign-to` moves tasks to another status and acts as implicit confirmation (no `--force` needed). `--force` archives all tasks instead. In non-TTY, `--reassign-to` is sufficient; `--force` alone still requires interactive confirmation unless TTY. **Note:** unlike other archive commands, no confirmation prompt appears when neither `--force` nor `--reassign-to` is given — without either flag the command blocks on active tasks and exits with an error, so there are no side-effects to confirm. |
+| `status archive` | `name` | `--reassign-to STATUS`, `--force`, `--dry-run` | Archive status. `--dry-run` previews without executing. `--reassign-to` moves tasks to another status before archiving. `--force` archives all tasks in the status instead. Neither flag triggers a confirmation prompt — `--reassign-to` and `--force` both proceed immediately (works from pipes and CI without `--force` being special-cased). Without either flag the service layer blocks on active tasks and exits with an error. |
 
 ```sh
 todo status create "Blocked"

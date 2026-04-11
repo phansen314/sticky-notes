@@ -9,17 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **TTY-aware output format.** CLI auto-detects whether stdout is a terminal: emits pretty text at a terminal, JSON when piped or redirected. Add `--json` to force JSON, `--text` to force text. Both flags are mutually exclusive. Archive commands now key off `sys.stdin.isatty()` for prompt gating — agents piping without `--force` receive an explicit error rather than silently auto-confirming.
+- **`--text` global flag** — forces text output even when stdout is piped. Complements the existing `--json`.
+- **`json-schema.md`** — new reference doc at `skills/sticky-notes/references/json-schema.md` documenting the `{ok, data}` envelope and per-command `data` shapes.
 - **`task transfer --dry-run` JSON now includes `target_project_id`** (`null` when `--project` not passed). Previously omitted even when `--project` was supplied.
 - **`workspace show [name]`** accepts an optional workspace name positional, matching `workspace archive`. Defaults to active workspace / `-w`.
 
 ### Changed
 
-- **`task ls --json` now returns a flat array of TaskListItem objects** instead of the `{workspace, statuses}` grouped shape. Text output is unchanged. Use `workspace show` for the grouped kanban view. Breaking.
+- **`task ls --json`** returns `[{"status": {...}, "tasks": [...]}]` — a flat array of per-status buckets, each containing a full Status object and a `tasks` array of TaskListItem objects. Text output is unchanged. Use `workspace show` for the richer kanban context view (projects, tags, groups). Breaking from the prior `{workspace, statuses}` nested shape.
 - **`group assign` and `group unassign` `--json` now return full TaskDetail** instead of `{task, group_id}` wrapper. Hydrated `group` object includes `title`. Breaking.
 - **`dep create/archive` `--json` field names renamed** to match flag framing: `task_id` → `blocked_task_id`, `depends_on_id` → `blocking_task_id`. Group-dep analogously: `group_id` → `blocked_group_id`, `depends_on_id` → `blocking_group_id`. Breaking.
-- **`task edit`, `task mv`, `task archive`, `task transfer` `--json` now return full TaskDetail** (same shape as `task show`) instead of a bare Task. Breaking for JSON consumers reading `status_id` directly — it is now `status.id`. Agents no longer need a follow-up `task show` call after mutations.
+- **`task edit`, `task mv`, `task archive` `--json` now return full TaskDetail** (same shape as `task show`) instead of a bare Task. Breaking for JSON consumers reading `status_id` directly — it is now `status.id`. Agents no longer need a follow-up `task show` call after mutations. (`task transfer` returns `{"task": TaskDetail, "source_task_id": N}` — see transfer entry above.)
 - **`status order` no longer takes a workspace positional.** Uses active workspace / `-w` flag like every other workspace-scoped command. Breaking: `todo status order dev backlog done` → `todo status order backlog done`.
 - **`status ls` and `project ls` accept `--archived hide|include|only`** (default `hide`). Mirrors the filter already on `workspace ls`, `tag ls`, and `group ls`.
+- **`status archive --force`** no longer enters the confirmation prompt. `--force` and `--reassign-to` both proceed without prompting — matching the behavior of every other archive command. Previously `--force` triggered the prompt loop, which raised an error on non-TTY stdin despite `--force` already being passed.
 
 ## [0.7.0] — 2026-04-10
 

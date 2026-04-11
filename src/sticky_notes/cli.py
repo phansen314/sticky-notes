@@ -102,6 +102,14 @@ def _resolve_task(
 # ---- JSON/text output ----
 
 
+def _stdout_is_tty() -> bool:
+    return sys.stdout.isatty()
+
+
+def _stdin_is_tty() -> bool:
+    return sys.stdin.isatty()
+
+
 def _emit_json(result: Ok) -> None:
     print(json.dumps({"ok": True, "data": to_dict(result.data)}))
 
@@ -114,10 +122,10 @@ def _text_err(message: str, code: str) -> None:
     print(f"[{code}] error: {message}", file=sys.stderr)
 
 
-def _confirm_archive(preview: ArchivePreview, *, json_mode: bool, auto_confirm: bool = False) -> bool:
-    if json_mode or auto_confirm:
+def _confirm_archive(preview: ArchivePreview, *, auto_confirm: bool = False) -> bool:
+    if auto_confirm:
         return True
-    if not sys.stdin.isatty():
+    if not _stdin_is_tty():
         raise ValueError(
             "non-interactive stdin — pass --force to skip confirmation or --dry-run to preview"
         )
@@ -289,7 +297,7 @@ def cmd_task_archive(conn: sqlite3.Connection, args: argparse.Namespace, db_path
         return Ok(data=preview, text="dry-run: " + presenters.format_archive_preview(preview))
     if not args.force:
         preview = service.preview_archive_task(conn, task_id)
-        if not _confirm_archive(preview, json_mode=args.json):
+        if not _confirm_archive(preview):
             return Ok(data=None, text="aborted")
     service.archive_task(conn, task_id, source="cli")
     detail = service.get_task_detail(conn, task_id)
@@ -348,7 +356,7 @@ def cmd_workspace_archive(conn: sqlite3.Connection, args: argparse.Namespace, db
         return Ok(data=preview, text="dry-run: " + presenters.format_archive_preview(preview))
     if not args.force:
         preview = service.preview_archive_workspace(conn, workspace.id)
-        if not _confirm_archive(preview, json_mode=args.json):
+        if not _confirm_archive(preview):
             return Ok(data=None, text="aborted")
     archived = service.cascade_archive_workspace(conn, workspace.id, source="cli")
     was_active = get_active_workspace_id(db_path) == workspace.id
@@ -418,13 +426,9 @@ def cmd_status_archive(conn: sqlite3.Connection, args: argparse.Namespace, db_pa
     if args.dry_run:
         preview = service.preview_archive_status(conn, col.id)
         return Ok(data=preview, text="dry-run: " + presenters.format_archive_preview(preview))
-    # Confirm when --force or --reassign-to will cause side-effects on tasks.
-    # Without either flag, the service layer blocks on active tasks, so no
-    # confirmation is needed (the operation would fail anyway).
-    if args.force or args.reassign_to:
-        preview = service.preview_archive_status(conn, col.id)
-        if not _confirm_archive(preview, json_mode=args.json, auto_confirm=bool(args.reassign_to)):
-            return Ok(data=None, text="aborted")
+    # No confirmation prompt: --force means "archive tasks, just do it";
+    # --reassign-to means "move tasks, no data loss". Without either flag the
+    # service layer blocks on active tasks, so no side-effects to confirm.
     reassign_to_id = None
     if args.reassign_to:
         reassign_col = service.get_status_by_name(conn, workspace.id, args.reassign_to)
@@ -494,7 +498,7 @@ def cmd_project_archive(conn: sqlite3.Connection, args: argparse.Namespace, db_p
         return Ok(data=preview, text="dry-run: " + presenters.format_archive_preview(preview))
     if not args.force:
         preview = service.preview_archive_project(conn, proj.id)
-        if not _confirm_archive(preview, json_mode=args.json):
+        if not _confirm_archive(preview):
             return Ok(data=None, text="aborted")
     archived = service.cascade_archive_project(conn, proj.id, source="cli")
     return Ok(data=archived, text=f"archived project '{proj.name}' and all descendants")
@@ -660,7 +664,7 @@ def cmd_group_archive(conn: sqlite3.Connection, args: argparse.Namespace, db_pat
         return Ok(data=preview, text="dry-run: " + presenters.format_archive_preview(preview))
     if not args.force:
         preview = service.preview_archive_group(conn, grp.id)
-        if not _confirm_archive(preview, json_mode=args.json):
+        if not _confirm_archive(preview):
             return Ok(data=None, text="aborted")
     archived = service.cascade_archive_group(conn, grp.id, source="cli")
     return Ok(data=archived, text=f"archived group '{grp.title}' and all descendants")
@@ -744,7 +748,7 @@ def cmd_tag_archive(conn: sqlite3.Connection, args: argparse.Namespace, db_path:
         return Ok(data=preview, text="dry-run: " + presenters.format_archive_preview(preview))
     if not args.force:
         preview = service.preview_archive_tag(conn, tag.id)
-        if not _confirm_archive(preview, json_mode=args.json):
+        if not _confirm_archive(preview):
             return Ok(data=None, text="aborted")
     archived = service.archive_tag(conn, tag.id, unassign=args.unassign)
     return Ok(data=archived, text=f"archived tag '{tag.name}'")
@@ -1067,7 +1071,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="todo", description="Sticky Notes — local kanban CLI")
     parser.add_argument("--db", type=Path, help="path to SQLite database file")
     parser.add_argument("--workspace", "-w", help="workspace name (overrides active workspace)")
-    parser.add_argument("--json", action="store_true", help="output JSON instead of text")
+    fmt_group = parser.add_mutually_exclusive_group()
+    fmt_group.add_argument("--json", action="store_true", help="output JSON (default when piped)")
+    fmt_group.add_argument("--text", action="store_true", help="force text output even when piped")
     parser.add_argument("--quiet", "-q", action="store_true", help="suppress output on success")
     parser.set_defaults(command=None)
 
@@ -1487,11 +1493,12 @@ def main(argv: list[str] | None = None) -> None:
         parser.print_help()
         raise SystemExit(0)
     db_path = args.db or DEFAULT_DB_PATH
+    json_mode = args.json or (not args.text and not _stdout_is_tty())
     conn = get_connection(db_path)
     try:
         init_db(conn)
         result = HANDLERS[args.command](conn, args, db_path)
-        if args.json:
+        if json_mode:
             _emit_json(result)
         elif result.text and not args.quiet:
             sys.stdout.write(result.text)
@@ -1501,28 +1508,28 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(130)
     except sqlite3.OperationalError as exc:
         code = "db_error"
-        if args.json:
+        if json_mode:
             _json_err(f"database error: {exc}", code)
         else:
             _text_err(f"database error: {exc}", code)
         raise SystemExit(EXIT_DB_ERROR)
     except NoActiveWorkspaceError as exc:
         code = "missing_active_workspace"
-        if args.json:
+        if json_mode:
             _json_err(str(exc), code)
         else:
             _text_err(str(exc), code)
         raise SystemExit(EXIT_NO_ACTIVE_WS)
     except LookupError as exc:
         code = "not_found"
-        if args.json:
+        if json_mode:
             _json_err(str(exc), code)
         else:
             _text_err(str(exc), code)
         raise SystemExit(EXIT_NOT_FOUND)
     except ValueError as exc:
         code = "validation"
-        if args.json:
+        if json_mode:
             _json_err(str(exc), code)
         else:
             _text_err(str(exc), code)
