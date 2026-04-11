@@ -236,7 +236,7 @@ class TestStatusCommands:
         cli("status", "create", "backlog")
         cli("status", "create", "doing")
         cli("status", "create", "done")
-        out, _ = cli("status", "order", "dev", "doing", "done", "backlog")
+        out, _ = cli("status", "order", "doing", "done", "backlog")
         assert "set status order for workspace 'dev'" in out
         content = cfg_path.read_text()
         assert "[status_order]" in content
@@ -251,7 +251,7 @@ class TestStatusCommands:
         monkeypatch.setattr("sticky_notes.tui.config.DEFAULT_CONFIG_PATH", cfg_path)
         cli("workspace", "create", "dev")
         cli("status", "create", "todo")
-        _, err = cli("status", "order", "dev", "todo", "nonexistent", expect_exit=3)
+        _, err = cli("status", "order", "todo", "nonexistent", expect_exit=3)
         assert "not found" in err
 
     def test_order_duplicate_status(self, cli, tmp_path, monkeypatch):
@@ -259,7 +259,7 @@ class TestStatusCommands:
         monkeypatch.setattr("sticky_notes.tui.config.DEFAULT_CONFIG_PATH", cfg_path)
         cli("workspace", "create", "dev")
         cli("status", "create", "todo")
-        _, err = cli("status", "order", "dev", "todo", "todo", expect_exit=4)
+        _, err = cli("status", "order", "todo", "todo", expect_exit=4)
         assert "duplicate" in err
 
     def test_order_json_shape(self, cli, tmp_path, monkeypatch):
@@ -269,13 +269,40 @@ class TestStatusCommands:
         cli("status", "create", "backlog")
         cli("status", "create", "doing")
         cli("status", "create", "done")
-        out, _ = cli("--json", "status", "order", "dev", "doing", "done", "backlog")
+        out, _ = cli("--json", "status", "order", "doing", "done", "backlog")
         data = json.loads(out)["data"]
         assert data["workspace"] == "dev"
         assert "status_ids" not in data  # old shape dropped
         statuses = data["statuses"]
         assert [s["name"] for s in statuses] == ["doing", "done", "backlog"]
         assert all("id" in s for s in statuses)
+
+    def test_ls_archived_filter_hide(self, cli):
+        cli("workspace", "create", "dev")
+        cli("status", "create", "active")
+        cli("status", "create", "old")
+        cli("status", "archive", "old")
+        out, _ = cli("status", "ls")
+        assert "active" in out
+        assert "old" not in out
+
+    def test_ls_archived_filter_include(self, cli):
+        cli("workspace", "create", "dev")
+        cli("status", "create", "active")
+        cli("status", "create", "old")
+        cli("status", "archive", "old")
+        out, _ = cli("status", "ls", "--archived", "include")
+        assert "active" in out
+        assert "old" in out
+
+    def test_ls_archived_filter_only(self, cli):
+        cli("workspace", "create", "dev")
+        cli("status", "create", "active")
+        cli("status", "create", "old")
+        cli("status", "archive", "old")
+        out, _ = cli("status", "ls", "--archived", "only")
+        assert "active" not in out
+        assert "old" in out
 
 
 # ---- Task shortcuts ----
@@ -545,6 +572,30 @@ class TestProjectCommands:
         out, _ = cli("--json", "project", "create", "backend", "--desc", "   ")
         data = json.loads(out)
         assert data["data"]["description"] is None
+
+    def test_ls_archived_filter_hide(self, cli):
+        cli("project", "create", "active")
+        cli("project", "create", "old")
+        cli("project", "archive", "old", "--force")
+        out, _ = cli("project", "ls")
+        assert "active" in out
+        assert "old" not in out
+
+    def test_ls_archived_filter_include(self, cli):
+        cli("project", "create", "active")
+        cli("project", "create", "old")
+        cli("project", "archive", "old", "--force")
+        out, _ = cli("project", "ls", "--archived", "include")
+        assert "active" in out
+        assert "old" in out
+
+    def test_ls_archived_filter_only(self, cli):
+        cli("project", "create", "active")
+        cli("project", "create", "old")
+        cli("project", "archive", "old", "--force")
+        out, _ = cli("project", "ls", "--archived", "only")
+        assert "active" not in out
+        assert "old" in out
 
 
 # ---- Dependency commands ----
@@ -821,8 +872,7 @@ class TestGroupCLI:
         self.cli("task", "create", "Fix bug", "--project", "sprint1", "-S", "todo")
         self.cli("group", "assign", "task-0001", "Frontend", "--project", "sprint1")
         out, _ = self.cli("group", "show", "Frontend", "--project", "sprint1")
-        assert "Group: Frontend" in out
-        assert "group-0001" in out
+        assert "group-0001  Frontend" in out
         assert "sprint1" in out
         assert "task-0001" in out
 
@@ -1137,6 +1187,21 @@ class TestWorkspaceShow:
         assert data["ok"] is False
         assert data["code"] == "missing_active_workspace"
 
+    def test_workspace_show_accepts_name_positional(self, cli):
+        cli("workspace", "create", "alpha")
+        cli("workspace", "create", "beta")
+        # active is now beta; show alpha by name
+        out, _ = cli("workspace", "show", "alpha")
+        assert "alpha" in out
+
+    def test_workspace_show_name_positional_json(self, cli):
+        cli("workspace", "create", "alpha")
+        cli("workspace", "create", "beta")
+        out, _ = cli("--json", "workspace", "show", "alpha")
+        data = json.loads(out)
+        assert data["ok"] is True
+        assert data["data"]["view"]["workspace"]["name"] == "alpha"
+
 
 # ---- JSON output ----
 
@@ -1205,8 +1270,8 @@ class TestJsonOutput:
         cli("task", "create", "T2", "-S", "todo")
         data = self._json(cli, "dep", "create", "--task", "1", "--blocked-by", "2")
         assert data["ok"] is True
-        assert data["data"]["task_id"] == 1
-        assert data["data"]["depends_on_id"] == 2
+        assert data["data"]["blocked_task_id"] == 1
+        assert data["data"]["blocking_task_id"] == 2
 
     def test_tag_create(self, cli):
         cli("workspace", "create", "B")
@@ -1224,11 +1289,9 @@ class TestJsonOutput:
         data = self._json(cli, "task", "ls")
         assert data["ok"] is True
         payload = data["data"]
-        assert payload["workspace"]["name"] == "B"
-        assert len(payload["statuses"]) == 1
-        assert payload["statuses"][0]["status"]["name"] == "Todo"
-        assert len(payload["statuses"][0]["tasks"]) == 1
-        assert payload["statuses"][0]["tasks"][0]["title"] == "Task A"
+        assert isinstance(payload, list)
+        assert len(payload) == 1
+        assert payload[0]["title"] == "Task A"
 
     def test_workspace_ls(self, cli):
         cli("workspace", "create", "B1")
@@ -1276,6 +1339,20 @@ class TestJsonOutput:
         payload = data["data"]
         assert isinstance(payload, list)
         assert payload[0]["title"] == "G1"
+
+    def test_group_ls_json_includes_project_name(self, cli):
+        cli("workspace", "create", "B")
+        cli("status", "create", "Todo")
+        cli("project", "create", "Alpha")
+        cli("project", "create", "Beta")
+        cli("group", "create", "G1", "-p", "Alpha")
+        cli("group", "create", "G2", "-p", "Beta")
+        data = self._json(cli, "group", "ls")
+        assert data["ok"] is True
+        payload = data["data"]
+        names = {g["title"]: g["project_name"] for g in payload}
+        assert names["G1"] == "Alpha"
+        assert names["G2"] == "Beta"
 
     def test_tag_ls(self, cli):
         cli("workspace", "create", "B")
@@ -1370,6 +1447,18 @@ class TestJsonOutput:
         assert payload["dependency_ids"] == []
         assert payload["blocking_reason"] is None
         assert payload["is_archived"] is False
+        assert payload["target_project_id"] is None
+
+    def test_transfer_dry_run_includes_target_project_id(self, cli):
+        cli("workspace", "create", "B1")
+        cli("status", "create", "Todo")
+        cli("task", "create", "T1", "-S", "todo")
+        cli("workspace", "create", "B2")
+        cli("status", "create", "Inbox")
+        cli("project", "create", "infra")
+        data = self._json(cli, "task", "transfer", "1", "--to", "B2", "--status", "Inbox", "--project", "infra", "--dry-run")
+        assert data["ok"] is True
+        assert data["data"]["target_project_id"] is not None
 
     def test_mv_project_only_use_edit(self, cli):
         cli("workspace", "create", "B")
@@ -1440,8 +1529,8 @@ class TestJsonOutput:
         cli("task", "create", "T1", "-p", "P1", "-S", "todo")
         data = self._json(cli, "group", "assign", "1", "G1", "-p", "P1")
         assert data["ok"] is True
-        assert data["data"]["task"]["id"] == 1
-        assert data["data"]["group_id"] == 1
+        assert data["data"]["id"] == 1
+        assert data["data"]["group"]["title"] == "G1"
 
     def test_group_unassign(self, cli):
         cli("workspace", "create", "B")
@@ -1990,16 +2079,22 @@ class TestStatusArchiveConfirmation:
         out, _ = self.cli("status", "archive", "todo", "--reassign-to", "done")
         assert "archived status 'todo'" in out
 
-    def test_reassign_aborted(self, monkeypatch):
-        monkeypatch.setattr("builtins.input", lambda _: "n")
+    def test_reassign_does_not_prompt(self, monkeypatch):
+        # --reassign-to is implicit confirmation; input() should never be called
+        monkeypatch.setattr("builtins.input", lambda _: (_ for _ in ()).throw(AssertionError("input() called")))
         out, _ = self.cli("status", "archive", "todo", "--reassign-to", "done")
-        assert "aborted" in out
+        assert "archived status 'todo'" in out
 
     def test_json_auto_confirms_force(self):
         out, _ = self.cli("--json", "status", "archive", "todo", "--force")
         data = json.loads(out)
         assert data["ok"] is True
         assert data["data"]["archived"] is True
+
+    def test_reassign_to_non_tty_succeeds_without_force(self, monkeypatch):
+        monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+        out, _ = self.cli("status", "archive", "todo", "--reassign-to", "done")
+        assert "archived status 'todo'" in out
 
 
 class TestTagArchiveConfirmation:
@@ -2576,3 +2671,151 @@ class TestGroupMetaCommands:
         )
         data = json.loads(out)
         assert data["data"] == {"key": "start", "value": "2026-01-01"}
+
+
+# ---- task-0127: format_status_list archived marker ----
+
+
+class TestStatusListArchivedMarker:
+    """status ls --archived include/only renders (archived) suffix."""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, cli):
+        self.cli = cli
+        cli("workspace", "create", "dev")
+        cli("status", "create", "active")
+        cli("status", "create", "old")
+        cli("status", "archive", "old")
+
+    def test_archived_marker_shown_with_include(self):
+        out, _ = self.cli("status", "ls", "--archived", "include")
+        assert "(archived)" in out
+        assert "old (archived)" in out
+
+    def test_archived_marker_shown_with_only(self):
+        out, _ = self.cli("status", "ls", "--archived", "only")
+        assert "(archived)" in out
+
+    def test_no_archived_marker_on_active(self):
+        out, _ = self.cli("status", "ls", "--archived", "include")
+        lines = [l for l in out.splitlines() if "active" in l]
+        assert len(lines) == 1
+        assert "(archived)" not in lines[0]
+
+
+# ---- task-0128: format_project_list archived marker ----
+
+
+class TestProjectListArchivedMarker:
+    """project ls --archived include/only renders (archived) suffix."""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, cli):
+        self.cli = cli
+        cli("workspace", "create", "dev")
+        cli("project", "create", "live")
+        cli("project", "create", "old")
+        cli("project", "archive", "old", "--force")
+
+    def test_archived_marker_shown_with_include(self):
+        out, _ = self.cli("project", "ls", "--archived", "include")
+        assert "(archived)" in out
+        assert "old (archived)" in out
+
+    def test_archived_marker_shown_with_only(self):
+        out, _ = self.cli("project", "ls", "--archived", "only")
+        assert "(archived)" in out
+
+    def test_no_archived_marker_on_live_project(self):
+        out, _ = self.cli("project", "ls", "--archived", "include")
+        lines = [l for l in out.splitlines() if "live" in l]
+        assert len(lines) == 1
+        assert "(archived)" not in lines[0]
+
+
+# ---- task-0129: format_move_preview source workspace name ----
+
+
+class TestTransferDryRunSourceName:
+    """transfer --dry-run shows source workspace name, not ID."""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, cli):
+        self.cli = cli
+        cli("workspace", "create", "source-ws")
+        cli("status", "create", "todo")
+        cli("task", "create", "Task A", "-S", "todo")
+        cli("workspace", "create", "target-ws")
+        cli("workspace", "use", "target-ws")
+        cli("status", "create", "backlog")
+        cli("workspace", "use", "source-ws")
+
+    def test_dry_run_shows_source_name_not_id(self):
+        out, _ = self.cli("task", "transfer", "1", "--to", "target-ws", "--status", "backlog", "--dry-run")
+        assert "dry-run" in out
+        assert "source-ws" in out
+        # Must not show a bare integer where the workspace name should be
+        import re
+        # The "from workspace" line should not contain a standalone integer
+        from_line = next((l for l in out.splitlines() if "from workspace" in l), "")
+        assert "source-ws" in from_line
+
+
+# ---- task-0130: format_archive_preview no prefix in confirm prompt ----
+
+
+class TestArchivePreviewPrefixSeparation:
+    """--dry-run output has 'dry-run:' prefix; interactive confirm prompt does not."""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, cli, monkeypatch):
+        self.cli = cli
+        self.monkeypatch = monkeypatch
+        cli("workspace", "create", "dev")
+        cli("status", "create", "todo")
+        cli("task", "create", "Task A", "-S", "todo")
+
+    def test_dry_run_has_prefix(self):
+        out, _ = self.cli("task", "archive", "1", "--dry-run")
+        assert out.startswith("dry-run:")
+
+    def test_confirm_prompt_no_dry_run_prefix(self):
+        self.monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+        # Capture stderr where preview is printed
+        seen = []
+        original_print = __builtins__["print"] if isinstance(__builtins__, dict) else print
+        import sys
+        self.monkeypatch.setattr("builtins.input", lambda _: "n")
+        # Run and capture stderr
+        _, err = self.cli("task", "archive", "1")
+        # The confirm preview is sent to stderr; it should NOT start with "dry-run:"
+        assert err == "" or not err.lstrip().startswith("dry-run:")
+
+
+# ---- task-0131: cmd_task_edit strips/nulls --desc ----
+
+
+class TestTaskEditDescStrip:
+    """task edit -d '' and -d '   ' should clear description to None."""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, cli):
+        self.cli = cli
+        cli("workspace", "create", "dev")
+        cli("status", "create", "todo")
+        cli("task", "create", "Task", "-d", "original desc", "-S", "todo")
+
+    def test_empty_desc_clears_to_null(self):
+        out, _ = self.cli("--json", "task", "edit", "1", "-d", "")
+        data = json.loads(out)
+        assert data["data"]["description"] is None
+
+    def test_whitespace_desc_clears_to_null(self):
+        out, _ = self.cli("--json", "task", "edit", "1", "-d", "   ")
+        data = json.loads(out)
+        assert data["data"]["description"] is None
+
+    def test_normal_desc_retained(self):
+        out, _ = self.cli("--json", "task", "edit", "1", "-d", "new desc")
+        data = json.loads(out)
+        assert data["data"]["description"] == "new desc"

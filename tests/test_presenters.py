@@ -147,8 +147,25 @@ class TestFormatStatusList:
         assert "Todo" in out
         assert "Done" in out
 
+    def test_archived_marker(self):
+        statuses = (_status(1, "active"), _status(2, "old", archived=True))
+        out = presenters.format_status_list(statuses)
+        assert "  active" in out
+        assert "old (archived)" in out
+
+    def test_no_archived_marker_on_active(self):
+        statuses = (_status(1, "active"),)
+        out = presenters.format_status_list(statuses)
+        assert "(archived)" not in out
+
 
 # ---- format_project_list ----
+
+
+def _archived_project(id: int, name: str, description: str | None = None) -> Project:
+    return Project(
+        id=id, workspace_id=1, name=name, description=description, archived=True, created_at=0, metadata={},
+    )
 
 
 class TestFormatProjectList:
@@ -164,6 +181,17 @@ class TestFormatProjectList:
         out = presenters.format_project_list(projs)
         assert "P" in out
         assert "a desc" in out
+
+    def test_archived_marker(self):
+        projs = (_project(1, "live"), _archived_project(2, "old"))
+        out = presenters.format_project_list(projs)
+        assert "  live" in out
+        assert "old (archived)" in out
+
+    def test_no_archived_marker_on_live(self):
+        projs = (_project(1, "live"),)
+        out = presenters.format_project_list(projs)
+        assert "(archived)" not in out
 
 
 # ---- format_project_detail ----
@@ -397,7 +425,7 @@ class TestFormatGroupDetail:
             tasks=(), children=(), parent=None, metadata={},
         )
         out = presenters.format_group_detail(d, project_name="P", ancestry_titles=("G",))
-        assert "Group: G (group-0001)" in out
+        assert "group-0001  G" in out
         assert "Project:     P" in out
         assert "Path:        G" in out
         assert "Tasks:       0" in out
@@ -409,6 +437,7 @@ class TestFormatGroupDetail:
             tasks=(), children=(), parent=None, metadata={},
         )
         out = presenters.format_group_detail(d, project_name="P", ancestry_titles=("G",))
+        assert "group-0001  G" in out
         assert "Description: Important group" in out
 
     def test_no_description_omitted(self):
@@ -419,7 +448,7 @@ class TestFormatGroupDetail:
         )
         out = presenters.format_group_detail(d, project_name="P", ancestry_titles=("G",))
         lines = out.splitlines()
-        assert lines[0].startswith("Group: G")
+        assert lines[0].startswith("group-0001  G")
         assert lines[1].startswith("  Project:")
 
     def test_with_children_and_tasks(self):
@@ -431,6 +460,7 @@ class TestFormatGroupDetail:
             children=(child,), parent=None, metadata={},
         )
         out = presenters.format_group_detail(d, project_name="P", ancestry_titles=("Root",))
+        assert "group-0001  Root" in out
         assert "Sub-groups: ChildA" in out
         assert "task-0010" in out
         assert "[P3]" in out
@@ -445,28 +475,29 @@ class TestFormatMovePreview:
     def _preview(self, **overrides) -> MoveToWorkspacePreview:
         base = dict(
             task_id=5, task_title="T", source_workspace_id=1, target_workspace_id=2,
-            target_status_id=3, can_move=True, blocking_reason=None,
+            target_status_id=3, target_project_id=None, can_move=True, blocking_reason=None,
             dependency_ids=(), is_archived=False,
         )
         base.update(overrides)
         return MoveToWorkspacePreview(**base)
 
     def test_can_move(self):
-        out = presenters.format_move_preview(self._preview(), "other", "Backlog")
+        out = presenters.format_move_preview(self._preview(), "other", "Backlog", source_workspace_name="dev")
         assert "dry-run" in out
         assert "task-0005" in out
         assert "workspace 'other' / status 'Backlog'" in out
+        assert "workspace 'dev'" in out
         assert "transfer OK" in out
 
     def test_blocked_by_dependencies(self):
         p = self._preview(can_move=False, dependency_ids=(10, 11))
-        out = presenters.format_move_preview(p, "other", "Backlog")
+        out = presenters.format_move_preview(p, "other", "Backlog", source_workspace_name="dev")
         assert "has dependencies: task-0010, task-0011" in out
         assert "move would FAIL" in out
 
     def test_blocked_other_reason(self):
         p = self._preview(can_move=False, blocking_reason="task is archived")
-        out = presenters.format_move_preview(p, "other", "Backlog")
+        out = presenters.format_move_preview(p, "other", "Backlog", source_workspace_name="dev")
         assert "task is archived" in out
         assert "move would FAIL" in out
 
@@ -485,7 +516,7 @@ class TestFormatArchivePreview:
             task_count=0, group_count=0, project_count=0, status_count=0,
         )
         out = presenters.format_archive_preview(p)
-        assert "dry-run" in out
+        assert "would archive" in out
         assert "tasks:" not in out
 
     def test_with_descendants(self):

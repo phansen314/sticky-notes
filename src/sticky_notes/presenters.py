@@ -50,7 +50,11 @@ def format_workspace_list(workspaces: tuple[Workspace, ...], active_id: int | No
 def format_status_list(statuses: tuple[Status, ...]) -> str:
     if not statuses:
         return "no statuses"
-    return "\n".join(f"  {s.name}" for s in statuses)
+    lines: list[str] = []
+    for s in statuses:
+        archived = " (archived)" if s.archived else ""
+        lines.append(f"  {s.name}{archived}")
+    return "\n".join(lines)
 
 
 def format_project_list(projects: tuple[Project, ...]) -> str:
@@ -58,8 +62,9 @@ def format_project_list(projects: tuple[Project, ...]) -> str:
         return _empty("project")
     lines: list[str] = []
     for p in projects:
+        archived = " (archived)" if p.archived else ""
         desc = f"  {p.description}" if p.description else ""
-        lines.append(f"  {p.name}{desc}")
+        lines.append(f"  {p.name}{archived}{desc}")
     return "\n".join(lines)
 
 
@@ -186,7 +191,7 @@ def format_group_detail(
     project_name: str,
     ancestry_titles: tuple[str, ...],
 ) -> str:
-    lines = [f"Group: {detail.title} ({format_group_num(detail.id)})"]
+    lines = [f"{format_group_num(detail.id)}  {detail.title}"]
     if detail.description:
         lines.append(f"  Description: {detail.description}")
     lines.append(f"  Project:     {project_name}")
@@ -213,12 +218,15 @@ def format_move_preview(
     preview: MoveToWorkspacePreview,
     target_workspace_name: str,
     target_status_name: str,
+    *,
+    source_workspace_name: str,
+    target_project_name: str | None = None,
 ) -> str:
     lines = [f"dry-run: would transfer {format_task_num(preview.task_id)} ({preview.task_title})"]
-    lines.append(
-        f"  from workspace {preview.source_workspace_id} -> "
-        f"workspace '{target_workspace_name}' / status '{target_status_name}'"
-    )
+    dest = f"workspace '{target_workspace_name}' / status '{target_status_name}'"
+    if target_project_name:
+        dest += f" / project '{target_project_name}'"
+    lines.append(f"  from workspace '{source_workspace_name}' -> {dest}")
     if not preview.can_move:
         if preview.dependency_ids:
             dep_list = ", ".join(format_task_num(d) for d in preview.dependency_ids)
@@ -236,7 +244,7 @@ def format_archive_preview(preview: ArchivePreview) -> str:
     if preview.already_archived:
         return f"{preview.entity_type} '{preview.entity_name}' is already archived; nothing to do"
     total = preview.task_count + preview.group_count + preview.project_count + preview.status_count
-    lines = [f"dry-run: would archive {preview.entity_type} '{preview.entity_name}'"]
+    lines = [f"would archive {preview.entity_type} '{preview.entity_name}'"]
     if total == 0:
         return lines[0]
     if preview.project_count:
