@@ -87,8 +87,8 @@ def to_dict(obj: object) -> object:
 
 
 def _resolve_workspace(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> Workspace:
-    """Resolve the active workspace. Depends on CLI state (tui.toml active_workspace), so it
-    stays in the CLI layer rather than the service layer."""
+    """Resolve the active workspace from --workspace flag or tui.toml (with legacy file fallback).
+    Stays in the CLI layer rather than the service layer."""
     if args.workspace:
         return service.get_workspace_by_name(conn, args.workspace)
     workspace_id = get_active_workspace_id(ctx.db_path)
