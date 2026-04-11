@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-04-11
+
 ### Added
 
 - **`todo config` command group.** `ls`, `get`, `set`, `unset` subcommands for managing TUI config. Editable fields: `auto_refresh_seconds` (positive integer) and `active_workspace` (workspace id or name). `todo config set active_workspace <name>` is equivalent to `todo workspace use <name>`. All fields are readable via `ls`/`get`; read is not restricted to the editable allowlist.
@@ -26,6 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - **TUI: up-arrow from the top card no longer wraps to the bottom card** — it focuses the containing status column. Down-arrow from the bottom card is now a no-op (previously wrapped to top).
+
+### Fixed
+
+- **TUI: focus blip when moving a task across statuses** (`shift+left/right` on a focused task card). Focus briefly jumped to the containing `KanbanColumn` before snapping back to the card in its new column, causing a visible highlight flash. `_sync_cards` now pre-clears focus before removing the focused card so Textual has nothing to auto-relocate to.
+- **TUI: workspace switch reverted kanban columns to alphabetical order.** `on_workspace_tree_workspace_changed` called `tree.load()` after switching, which re-posted a `WorkspaceChanged` for the first workspace in insertion order; the re-entrant handler clobbered the kanban with the wrong workspace's model (no `status_order` applied). The redundant `tree.load()` is gone — the user's own tree navigation already leaves the tree in the correct state.
 
 - **`task ls --json`** returns `[{"status": {...}, "tasks": [...]}]` — a flat array of per-status buckets, each containing a full Status object and a `tasks` array of TaskListItem objects. Text output is unchanged. Use `workspace show` for the richer kanban context view (projects, tags, groups). Breaking from the prior `{workspace, statuses}` nested shape.
 - **`group assign` and `group unassign` `--json` now return full TaskDetail** instead of `{task, group_id}` wrapper. Hydrated `group` object includes `title`. Breaking.
@@ -66,7 +73,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **`project edit --name/-n`** removed; use the new `project rename` instead. `project edit` now only handles description changes.
 - **Dropped `-P` / `-s` short flags** from `task create` / `task ls` / `task edit`. They case-collided with `-p` (project) and `-S` (status), making shift-key typos silently do the wrong thing. Long forms `--priority` and `--search` remain. Breaking for any script relying on the shorts.
 
-[Unreleased]: https://github.com/phansen314/sticky-notes/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/phansen314/sticky-notes/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/phansen314/sticky-notes/releases/tag/v0.8.0
 [0.7.0]: https://github.com/phansen314/sticky-notes/releases/tag/v0.7.0
 
 ## [0.6.0] — 2026-04-10
