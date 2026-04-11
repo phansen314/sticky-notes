@@ -612,11 +612,11 @@ class TestErrorHandling:
         _, err = cli("status", "archive", "todo", expect_exit=4)
         assert "active task" in err
 
-    def test_archive_without_tty_requires_force(self, cli, monkeypatch):
+    def test_archive_without_tty_requires_force(self, cli):
         cli("workspace", "create", "dev")
         cli("status", "create", "todo")
         cli("task", "create", "Task", "-S", "todo")
-        monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+        # pytest stdin is already non-TTY; no monkeypatch needed
         _, err = cli("task", "archive", "1", expect_exit=4)
         assert "non-interactive" in err
         assert "--force" in err
