@@ -1972,6 +1972,146 @@ class TestGetWorkspaceContext:
             service.get_workspace_context(conn, 9999)
 
 
+# ---- Update preview helpers ----
+
+
+class TestPreviewHelpers:
+    def _setup(self, conn: sqlite3.Connection) -> tuple[int, int, int, int]:
+        """Returns (workspace_id, status_id_todo, status_id_done, project_id)."""
+        bid = insert_workspace(conn)
+        cid_todo = insert_status(conn, bid, "todo")
+        cid_done = insert_status(conn, bid, "done")
+        pid = insert_project(conn, bid, "alpha")
+        return bid, cid_todo, cid_done, pid
+
+    # ---- preview_update_task ----
+
+    def test_task_before_reflects_current_values(self, conn: sqlite3.Connection) -> None:
+        bid, cid, _, _ = self._setup(conn)
+        task = service.create_task(conn, bid, "orig", cid, priority=2)
+        preview = service.preview_update_task(
+            conn, task.id, {"title": "renamed", "priority": 4},
+        )
+        assert preview.before["title"] == "orig"
+        assert preview.before["priority"] == 2
+        assert preview.after["title"] == "renamed"
+        assert preview.after["priority"] == 4
+
+    def test_task_omits_unchanged_fields(self, conn: sqlite3.Connection) -> None:
+        bid, cid, _, _ = self._setup(conn)
+        task = service.create_task(conn, bid, "orig", cid, priority=2)
+        preview = service.preview_update_task(
+            conn, task.id, {"title": "orig", "priority": 4},
+        )
+        assert "title" not in preview.before
+        assert "title" not in preview.after
+        assert preview.after["priority"] == 4
+
+    def test_task_tag_already_present_not_added(self, conn: sqlite3.Connection) -> None:
+        bid, cid, _, _ = self._setup(conn)
+        task = service.create_task(conn, bid, "t", cid, tags=("bug",))
+        preview = service.preview_update_task(
+            conn, task.id, {}, add_tags=("bug",),
+        )
+        assert preview.tags_added == ()
+
+    def test_task_tag_remove_raises_on_untagged(self, conn: sqlite3.Connection) -> None:
+        bid, cid, _, _ = self._setup(conn)
+        task = service.create_task(conn, bid, "t", cid)
+        with pytest.raises(LookupError):
+            service.preview_update_task(conn, task.id, {}, remove_tags=("nope",))
+
+    # ---- preview_move_task ----
+
+    def test_move_happy_path(self, conn: sqlite3.Connection) -> None:
+        bid, cid_todo, cid_done, _ = self._setup(conn)
+        task = service.create_task(conn, bid, "t", cid_todo)
+        preview = service.preview_move_task(conn, task.id, cid_done, position=0)
+        assert preview.from_status == "todo"
+        assert preview.to_status == "done"
+        assert preview.project_changed is False
+
+    def test_move_no_project_change(self, conn: sqlite3.Connection) -> None:
+        bid, cid_todo, cid_done, pid = self._setup(conn)
+        task = service.create_task(conn, bid, "t", cid_todo, project_id=pid)
+        preview = service.preview_move_task(conn, task.id, cid_done, position=0)
+        assert preview.project_changed is False
+        assert preview.from_project == preview.to_project == "alpha"
+
+    def test_move_project_change_to_none(self, conn: sqlite3.Connection) -> None:
+        bid, cid_todo, cid_done, pid = self._setup(conn)
+        task = service.create_task(conn, bid, "t", cid_todo, project_id=pid)
+        preview = service.preview_move_task(
+            conn, task.id, cid_done, position=0,
+            project_id=None, change_project=True,
+        )
+        assert preview.project_changed is True
+        assert preview.to_project is None
+
+    def test_move_project_change_same_value_no_op(self, conn: sqlite3.Connection) -> None:
+        bid, cid_todo, cid_done, pid = self._setup(conn)
+        task = service.create_task(conn, bid, "t", cid_todo, project_id=pid)
+        preview = service.preview_move_task(
+            conn, task.id, cid_done, position=0,
+            project_id=pid, change_project=True,
+        )
+        assert preview.project_changed is False
+
+    # ---- preview_update_project ----
+
+    def test_project_description_diff(self, conn: sqlite3.Connection) -> None:
+        bid = insert_workspace(conn)
+        proj = service.create_project(conn, bid, "alpha", description="old")
+        preview = service.preview_update_project(conn, proj.id, {"description": "new"})
+        assert preview.before["description"] == "old"
+        assert preview.after["description"] == "new"
+
+    def test_project_description_unchanged_omitted(self, conn: sqlite3.Connection) -> None:
+        bid = insert_workspace(conn)
+        proj = service.create_project(conn, bid, "alpha", description="same")
+        preview = service.preview_update_project(conn, proj.id, {"description": "same"})
+        assert "description" not in preview.before
+        assert "description" not in preview.after
+
+    # ---- preview_update_group ----
+
+    def test_group_rename_diff(self, conn: sqlite3.Connection) -> None:
+        bid = insert_workspace(conn)
+        pid = insert_project(conn, bid, "p")
+        grp = service.create_group(conn, pid, "old-title")
+        preview = service.preview_update_group(conn, grp.id, {"title": "new-title"})
+        assert preview.before["title"] == "old-title"
+        assert preview.after["title"] == "new-title"
+
+    def test_group_reparent_diff_resolves_titles(self, conn: sqlite3.Connection) -> None:
+        bid = insert_workspace(conn)
+        pid = insert_project(conn, bid, "p")
+        p1 = service.create_group(conn, pid, "parent-1")
+        p2 = service.create_group(conn, pid, "parent-2")
+        child = service.create_group(conn, pid, "child", parent_id=p1.id)
+        preview = service.preview_update_group(conn, child.id, {"parent_id": p2.id})
+        # Resolver maps raw parent_id ints to title strings
+        assert preview.before["parent_id"] == "parent-1"
+        assert preview.after["parent_id"] == "parent-2"
+
+    def test_group_promote_to_top_diff(self, conn: sqlite3.Connection) -> None:
+        bid = insert_workspace(conn)
+        pid = insert_project(conn, bid, "p")
+        parent = service.create_group(conn, pid, "parent")
+        child = service.create_group(conn, pid, "child", parent_id=parent.id)
+        preview = service.preview_update_group(conn, child.id, {"parent_id": None})
+        assert preview.before["parent_id"] == "parent"
+        assert preview.after["parent_id"] is None
+
+    def test_group_cycle_detection(self, conn: sqlite3.Connection) -> None:
+        bid = insert_workspace(conn)
+        pid = insert_project(conn, bid, "p")
+        g1 = service.create_group(conn, pid, "g1")
+        g2 = service.create_group(conn, pid, "g2", parent_id=g1.id)
+        with pytest.raises(ValueError, match="cycle"):
+            service.preview_update_group(conn, g1.id, {"parent_id": g2.id})
+
+
 # ---- Archive preview + cascade ----
 
 
