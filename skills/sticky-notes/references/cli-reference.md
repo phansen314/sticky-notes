@@ -489,7 +489,7 @@ Every task-referencing command auto-detects whether the argument is an ID or a t
 | `workspace create/rename` | full Workspace object |
 | `workspace archive` | `{"workspace": {...Workspace}, "active_cleared": bool}` — `active_cleared` is `true` when the archived workspace was the active workspace and the active-workspace pointer was cleared as a side-effect |
 | `status create/rename/archive` | full Status object |
-| `status order` | `{"workspace_id": N, "workspace": str, "statuses": [{"id": N, "name": str}, ...]}` |
+| `status order` | `{"workspace_id": N, "statuses": [{"id": N, "name": str}, ...]}` |
 | `project create/archive` | full Project object |
 | `tag create/archive` | full Tag object |
 | `dep create/archive` | `{"blocked_task_id": N, "blocked_task_title": str, "blocking_task_id": N, "blocking_task_title": str}` |

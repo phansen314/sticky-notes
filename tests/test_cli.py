@@ -271,7 +271,8 @@ class TestStatusCommands:
         cli("status", "create", "done")
         out, _ = cli("--json", "status", "order", "doing", "done", "backlog")
         data = json.loads(out)["data"]
-        assert data["workspace"] == "dev"
+        assert "workspace" not in data  # redundant name field removed
+        assert "workspace_id" in data
         assert "status_ids" not in data  # old shape dropped
         statuses = data["statuses"]
         assert [s["name"] for s in statuses] == ["doing", "done", "backlog"]

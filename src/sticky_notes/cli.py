@@ -404,7 +404,6 @@ def cmd_status_order(conn: sqlite3.Connection, args: argparse.Namespace, db_path
     return Ok(
         data={
             "workspace_id": workspace.id,
-            "workspace": workspace.name,
             "statuses": statuses,
         },
         text=f"set status order for workspace '{workspace.name}': {', '.join(args.statuses)}",
