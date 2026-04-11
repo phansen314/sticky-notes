@@ -117,7 +117,7 @@ class StickyNotesApp(App):
         # Use active-workspace file as initial-focus hint
         hint_id = get_active_workspace_id(self.config_path, self.db_path)
         if hint_id not in self._models:
-            hint_id = workspaces[0].id
+            hint_id = next(iter(self._models))
         self._active_workspace_id = hint_id
         tree.load(self._models, expand_workspace_id=hint_id)
         await kanban.load(self._models[hint_id])
@@ -285,9 +285,7 @@ class StickyNotesApp(App):
             return
         model = replace(model, statuses=self._order_statuses(model.statuses, ws_id))
         self._models[ws_id] = model
-        tree = self.query_one(WorkspaceTree)
         kanban = self.query_one(KanbanBoard)
-        tree.load(self._models, expand_workspace_id=ws_id)
         await kanban.load(model)
         self._kanban_last_focused = None
 

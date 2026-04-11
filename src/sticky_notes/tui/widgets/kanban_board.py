@@ -134,6 +134,8 @@ class KanbanBoard(Horizontal):
         # Remove cards no longer in this column
         for task_id, card in current_cards.items():
             if task_id not in expected_ids:
+                if card.has_focus:
+                    self.screen.set_focus(None)  # prevent auto-focus-to-parent blip
                 await card.remove()
 
         # Add new cards or update existing card data

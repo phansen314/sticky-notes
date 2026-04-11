@@ -1003,6 +1003,35 @@ class TestColumnFocus:
             all_status_ids = set(sids.values())
             assert set(saved_order) == all_status_ids, "Full order must be saved"
 
+    async def test_column_order_persists_across_restart(self, seeded_tui_db, tmp_path):
+        """Reorder columns in session 1, then verify session 2 loads the saved order."""
+        from sticky_notes.tui.config import load_config
+        db_path, ids = seeded_tui_db
+        toml_path = tmp_path / "tui.toml"
+        ws_id = ids["workspace_id"]
+
+        # Session 1: reorder columns
+        app1 = StickyNotesApp(db_path=db_path, config=TuiConfig(), config_path=toml_path)
+        async with app1.run_test() as pilot:
+            await pilot.pause()
+            first_col = app1.query(KanbanColumn).first()
+            app1.set_focus(first_col)
+            await pilot.pause()
+            await pilot.press("shift+right")
+            await pilot.pause()
+            await pilot.pause()
+            order_session1 = [s.id for s in app1._active_model.statuses]
+
+        # Session 2: load config from file (production code path)
+        app2 = StickyNotesApp(db_path=db_path, config_path=toml_path)
+        async with app2.run_test() as pilot:
+            await pilot.pause()
+            order_session2 = [s.id for s in app2._active_model.statuses]
+
+        assert order_session2 == order_session1, (
+            f"Column order should persist: session1={order_session1}, session2={order_session2}"
+        )
+
     async def test_column_focus_survives_refresh(self, app):
         app, ids = app
         async with app.run_test() as pilot:
