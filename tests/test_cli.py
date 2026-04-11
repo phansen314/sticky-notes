@@ -1793,9 +1793,9 @@ class TestEditDryRun:
         out, _ = self.cli("group", "rename", "top", "top-renamed", "-p", "alpha", "--dry-run")
         assert "dry-run" in out
         assert "title" in out
-        # Still exists under old name
+        # Still exists under old name — new name must not have been written
         show, _ = self.cli("group", "show", "top", "-p", "alpha")
-        assert "top" in show
+        assert "top-renamed" not in show
 
     def test_group_mv_dry_run_to_top(self):
         out, _ = self.cli("group", "mv", "child", "--to-top", "-p", "alpha", "--dry-run")
