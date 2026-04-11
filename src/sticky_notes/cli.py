@@ -37,17 +37,15 @@ class Ok:
 
 
 type CmdResult = Ok
-type CommandHandler = Callable[[sqlite3.Connection, argparse.Namespace, CliContext], CmdResult]
 
 
 @dataclass(frozen=True)
-class CliContext:
-    """Per-invocation context threaded through every CLI handler.
-
-    Frozen so handlers cannot mutate shared state. Currently holds only db_path;
-    Task B (task-0167) will add config_path.
-    """
+class RunContext:
+    """Per-invocation CLI context threaded through every handler."""
     db_path: Path
+
+
+type CommandHandler = Callable[[sqlite3.Connection, argparse.Namespace, RunContext], CmdResult]
 
 
 # ---- Error types ----
@@ -88,7 +86,7 @@ def to_dict(obj: object) -> object:
 # ---- Helpers: resolution ----
 
 
-def _resolve_workspace(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> Workspace:
+def _resolve_workspace(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> Workspace:
     """Resolve the active workspace. Depends on CLI state (tui.toml active_workspace), so it
     stays in the CLI layer rather than the service layer."""
     if args.workspace:
@@ -147,7 +145,7 @@ def _confirm_archive(preview: ArchivePreview, *, auto_confirm: bool = False) -> 
 # ---- Command handlers ----
 
 
-def cmd_task_create(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_task_create(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     col = service.get_status_by_name(conn, workspace.id, args.status)
     project_id = service.get_project_by_name(conn, workspace.id, args.project).id if args.project else None
@@ -174,7 +172,7 @@ def cmd_task_create(conn: sqlite3.Connection, args: argparse.Namespace, ctx: Cli
     return Ok(data=detail, text=f"created {format_task_num(task.id)}: {task.title}")
 
 
-def cmd_task_ls(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_task_ls(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     status_id = service.get_status_by_name(conn, workspace.id, args.status).id if args.status else None
     project_id = service.get_project_by_name(conn, workspace.id, args.project).id if args.project else None
@@ -203,14 +201,14 @@ def cmd_task_ls(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliCont
     return Ok(data=data, text=presenters.format_workspace_list_view(view))
 
 
-def cmd_task_show(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_task_show(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     task_id = _resolve_task(conn, workspace, args.task)
     detail = service.get_task_detail(conn, task_id)
     return Ok(data=detail, text=presenters.format_task_detail(detail))
 
 
-def cmd_task_edit(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_task_edit(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     task_id = _resolve_task(conn, workspace, args.task)
     changes: dict = {}
@@ -242,7 +240,7 @@ def cmd_task_edit(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliCo
     return Ok(data=detail, text=f"updated {format_task_num(task_id)}")
 
 
-def cmd_task_mv(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_task_mv(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     task_id = _resolve_task(conn, workspace, args.task)
     col = service.get_status_by_name(conn, workspace.id, args.status)
@@ -268,7 +266,7 @@ def cmd_task_mv(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliCont
     return Ok(data=detail, text=f"moved {format_task_num(task_id)}: {from_status} -> {col.name}")
 
 
-def cmd_task_transfer(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_task_transfer(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     task_id = _resolve_task(conn, workspace, args.task)
     target_workspace = service.get_workspace_by_name(conn, args.to_workspace)
@@ -299,7 +297,7 @@ def cmd_task_transfer(conn: sqlite3.Connection, args: argparse.Namespace, ctx: C
     )
 
 
-def cmd_task_archive(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_task_archive(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     task_id = _resolve_task(conn, workspace, args.task)
     if args.dry_run:
@@ -314,7 +312,7 @@ def cmd_task_archive(conn: sqlite3.Connection, args: argparse.Namespace, ctx: Cl
     return Ok(data=detail, text=f"archived {format_task_num(task_id)}")
 
 
-def cmd_task_log(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_task_log(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     task_id = _resolve_task(conn, workspace, args.task)
     history = service.list_task_history(conn, task_id)
@@ -324,7 +322,7 @@ def cmd_task_log(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliCon
 # ---- Workspace subcommands ----
 
 
-def cmd_workspace_create(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_workspace_create(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = service.create_workspace(conn, args.name)
     set_active_workspace_id(ctx.db_path, workspace.id)
     if args.statuses:
@@ -333,7 +331,7 @@ def cmd_workspace_create(conn: sqlite3.Connection, args: argparse.Namespace, ctx
     return Ok(data=workspace, text=f"created workspace '{workspace.name}' (active)")
 
 
-def cmd_workspace_ls(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_workspace_ls(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     include_archived = args.archived in ("include", "only")
     only_archived = args.archived == "only"
     workspaces = service.list_workspaces(
@@ -344,19 +342,19 @@ def cmd_workspace_ls(conn: sqlite3.Connection, args: argparse.Namespace, ctx: Cl
     return Ok(data=payload, text=presenters.format_workspace_list(workspaces, active_id))
 
 
-def cmd_workspace_use(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_workspace_use(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = service.get_workspace_by_name(conn, args.name)
     set_active_workspace_id(ctx.db_path, workspace.id)
     return Ok(data=workspace, text=f"switched to workspace '{workspace.name}'")
 
 
-def cmd_workspace_rename(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_workspace_rename(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = service.get_workspace_by_name(conn, args.old_name)
     updated = service.update_workspace(conn, workspace.id, {"name": args.new_name})
     return Ok(data=updated, text=f"renamed workspace '{args.old_name}' -> '{args.new_name}'")
 
 
-def cmd_workspace_archive(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_workspace_archive(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     if args.name:
         workspace = service.get_workspace_by_name(conn, args.name)
     else:
@@ -382,13 +380,13 @@ def cmd_workspace_archive(conn: sqlite3.Connection, args: argparse.Namespace, ct
 # ---- Status subcommands ----
 
 
-def cmd_status_create(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_status_create(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     col = service.create_status(conn, workspace.id, args.name)
     return Ok(data=col, text=f"created status '{col.name}'")
 
 
-def cmd_status_ls(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_status_ls(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     include_archived = args.archived in ("include", "only")
     only_archived = args.archived == "only"
@@ -398,14 +396,14 @@ def cmd_status_ls(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliCo
     return Ok(data=statuses, text=presenters.format_status_list(statuses))
 
 
-def cmd_status_rename(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_status_rename(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     col = service.get_status_by_name(conn, workspace.id, args.old_name)
     updated = service.update_status(conn, col.id, {"name": args.new_name})
     return Ok(data=updated, text=f"renamed status '{args.old_name}' -> '{args.new_name}'")
 
 
-def cmd_status_order(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_status_order(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     from .tui.config import DEFAULT_CONFIG_PATH, load_config, save_config
 
     workspace = _resolve_workspace(conn, args, ctx)
@@ -430,7 +428,7 @@ def cmd_status_order(conn: sqlite3.Connection, args: argparse.Namespace, ctx: Cl
     )
 
 
-def cmd_status_archive(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_status_archive(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     col = service.get_status_by_name(conn, workspace.id, args.name)
     if args.dry_run:
@@ -454,14 +452,14 @@ def cmd_status_archive(conn: sqlite3.Connection, args: argparse.Namespace, ctx: 
 # ---- Project subcommands ----
 
 
-def cmd_project_create(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_project_create(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     description = (args.desc or "").strip() or None
     proj = service.create_project(conn, workspace.id, args.name, description=description)
     return Ok(data=proj, text=f"created project '{proj.name}'")
 
 
-def cmd_project_ls(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_project_ls(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     include_archived = args.archived in ("include", "only")
     only_archived = args.archived == "only"
@@ -471,14 +469,14 @@ def cmd_project_ls(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliC
     return Ok(data=projects, text=presenters.format_project_list(projects))
 
 
-def cmd_project_show(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_project_show(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     proj = service.get_project_by_name(conn, workspace.id, args.name)
     detail = service.get_project_detail(conn, proj.id)
     return Ok(data=detail, text=presenters.format_project_detail(detail))
 
 
-def cmd_project_edit(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_project_edit(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     proj = service.get_project_by_name(conn, workspace.id, args.name)
     changes: dict[str, Any] = {}
@@ -493,14 +491,14 @@ def cmd_project_edit(conn: sqlite3.Connection, args: argparse.Namespace, ctx: Cl
     return Ok(data=updated, text=f"updated project '{updated.name}'")
 
 
-def cmd_project_rename(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_project_rename(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     proj = service.get_project_by_name(conn, workspace.id, args.old_name)
     updated = service.update_project(conn, proj.id, {"name": args.new_name})
     return Ok(data=updated, text=f"renamed project '{args.old_name}' -> '{args.new_name}'")
 
 
-def cmd_project_archive(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_project_archive(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     proj = service.get_project_by_name(conn, workspace.id, args.name)
     if args.dry_run:
@@ -517,7 +515,7 @@ def cmd_project_archive(conn: sqlite3.Connection, args: argparse.Namespace, ctx:
 # ---- Dependency subcommands ----
 
 
-def cmd_dep_create(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_dep_create(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     task_id = _resolve_task(conn, workspace, args.task)
     depends_on_id = _resolve_task(conn, workspace, args.blocked_by)
@@ -535,7 +533,7 @@ def cmd_dep_create(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliC
     )
 
 
-def cmd_dep_archive(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_dep_archive(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     task_id = _resolve_task(conn, workspace, args.task)
     depends_on_id = _resolve_task(conn, workspace, args.blocked_by)
@@ -556,7 +554,7 @@ def cmd_dep_archive(conn: sqlite3.Connection, args: argparse.Namespace, ctx: Cli
 # ---- Group dependency subcommands ----
 
 
-def cmd_group_dep_create(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_group_dep_create(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     grp = service.resolve_group(conn, workspace.id, args.group, project_name=args.project)
     dep = service.resolve_group(conn, workspace.id, args.blocked_by, project_name=args.project)
@@ -572,7 +570,7 @@ def cmd_group_dep_create(conn: sqlite3.Connection, args: argparse.Namespace, ctx
     )
 
 
-def cmd_group_dep_archive(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_group_dep_archive(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     grp = service.resolve_group(conn, workspace.id, args.group, project_name=args.project)
     dep = service.resolve_group(conn, workspace.id, args.blocked_by, project_name=args.project)
@@ -591,7 +589,7 @@ def cmd_group_dep_archive(conn: sqlite3.Connection, args: argparse.Namespace, ct
 # ---- Group subcommands ----
 
 
-def cmd_group_create(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_group_create(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     proj = service.get_project_by_name(conn, workspace.id, args.project)
     parent_id = None
@@ -603,7 +601,7 @@ def cmd_group_create(conn: sqlite3.Connection, args: argparse.Namespace, ctx: Cl
     return Ok(data=grp, text=f"created group '{grp.title}' ({format_group_num(grp.id)})")
 
 
-def cmd_group_ls(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_group_ls(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     project_name = args.project
     if project_name:
@@ -629,7 +627,7 @@ def cmd_group_ls(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliCon
     return Ok(data=payload, text=presenters.format_group_list(refs_sections))
 
 
-def cmd_group_show(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_group_show(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     grp = service.resolve_group(conn, workspace.id, args.title, project_name=args.project)
     detail = service.get_group_detail(conn, grp.id)
@@ -640,7 +638,7 @@ def cmd_group_show(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliC
     return Ok(data=detail, text=text)
 
 
-def cmd_group_rename(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_group_rename(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     grp = service.resolve_group(conn, workspace.id, args.old_title, project_name=args.project)
     changes = {"title": args.new_title}
@@ -651,7 +649,7 @@ def cmd_group_rename(conn: sqlite3.Connection, args: argparse.Namespace, ctx: Cl
     return Ok(data=updated, text=f"renamed group '{args.old_title}' -> '{args.new_title}'")
 
 
-def cmd_group_edit(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_group_edit(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     grp = service.resolve_group(conn, workspace.id, args.title, project_name=args.project)
     changes: dict[str, Any] = {}
@@ -666,7 +664,7 @@ def cmd_group_edit(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliC
     return Ok(data=updated, text=f"updated group '{updated.title}'")
 
 
-def cmd_group_archive(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_group_archive(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     grp = service.resolve_group(conn, workspace.id, args.title, project_name=args.project)
     if args.dry_run:
@@ -680,7 +678,7 @@ def cmd_group_archive(conn: sqlite3.Connection, args: argparse.Namespace, ctx: C
     return Ok(data=archived, text=f"archived group '{grp.title}' and all descendants")
 
 
-def cmd_group_mv(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_group_mv(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     grp = service.resolve_group(conn, workspace.id, args.title, project_name=args.project)
     if args.to_top:
@@ -700,7 +698,7 @@ def cmd_group_mv(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliCon
     return Ok(data=updated, text=f"moved group '{grp.title}' under '{parent_title}'")
 
 
-def cmd_group_assign(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_group_assign(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     task_id = _resolve_task(conn, workspace, args.task)
     grp = service.resolve_group(conn, workspace.id, args.title, project_name=args.project)
@@ -712,7 +710,7 @@ def cmd_group_assign(conn: sqlite3.Connection, args: argparse.Namespace, ctx: Cl
     )
 
 
-def cmd_group_unassign(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_group_unassign(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     task_id = _resolve_task(conn, workspace, args.task)
     # Get the group title before unassigning for the output message
@@ -727,20 +725,20 @@ def cmd_group_unassign(conn: sqlite3.Connection, args: argparse.Namespace, ctx: 
 # ---- Tag ----
 
 
-def cmd_tag_create(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_tag_create(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     tag = service.create_tag(conn, workspace.id, args.name)
     return Ok(data=tag, text=f"created tag '{tag.name}'")
 
 
-def cmd_tag_rename(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_tag_rename(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     tag = service.get_tag_by_name(conn, workspace.id, args.old_name)
     updated = service.update_tag(conn, tag.id, {"name": args.new_name})
     return Ok(data=updated, text=f"renamed tag '{args.old_name}' -> '{args.new_name}'")
 
 
-def cmd_tag_ls(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_tag_ls(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     include_archived = args.archived in ("include", "only")
     only_archived = args.archived == "only"
@@ -750,7 +748,7 @@ def cmd_tag_ls(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliConte
     return Ok(data=tags, text=presenters.format_tag_list(tags))
 
 
-def cmd_tag_archive(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_tag_archive(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     tag = service.get_tag_by_name(conn, workspace.id, args.name)
     if args.dry_run:
@@ -767,7 +765,7 @@ def cmd_tag_archive(conn: sqlite3.Connection, args: argparse.Namespace, ctx: Cli
 # ---- Context ----
 
 
-def cmd_workspace_show(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_workspace_show(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     if args.name:
         workspace = service.get_workspace_by_name(conn, args.name)
     else:
@@ -779,7 +777,7 @@ def cmd_workspace_show(conn: sqlite3.Connection, args: argparse.Namespace, ctx: 
 # ---- Export ----
 
 
-def cmd_export(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_export(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     if args.md:
         content = export_markdown(conn)
         if args.output:
@@ -813,7 +811,7 @@ def _prepare_export_output(output_path: Path, overwrite: bool) -> Path:
 # ---- Backup ----
 
 
-def cmd_backup(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_backup(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     dest = Path(args.dest)
     if dest.exists() and not args.overwrite:
         raise ValueError(f"destination already exists: {dest} (use --overwrite to overwrite)")
@@ -834,7 +832,7 @@ def cmd_backup(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliConte
 # ---- Info ----
 
 
-def cmd_info(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_info(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     ab_path = active_workspace_path(ctx.db_path)
     wal = ctx.db_path.with_name(ctx.db_path.name + "-wal")
     shm = ctx.db_path.with_name(ctx.db_path.name + "-shm")
@@ -866,7 +864,7 @@ def _meta_records(metadata: dict[str, str]) -> list[dict[str, str]]:
 # ---- Task metadata ----
 
 
-def cmd_task_meta_ls(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_task_meta_ls(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     task_id = _resolve_task(conn, workspace, args.task)
     task = service.get_task(conn, task_id)
@@ -875,7 +873,7 @@ def cmd_task_meta_ls(conn: sqlite3.Connection, args: argparse.Namespace, ctx: Cl
     return Ok(data=records, text=text)
 
 
-def cmd_task_meta_get(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_task_meta_get(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     task_id = _resolve_task(conn, workspace, args.task)
     value = service.get_task_meta(conn, task_id, args.key)
@@ -883,7 +881,7 @@ def cmd_task_meta_get(conn: sqlite3.Connection, args: argparse.Namespace, ctx: C
     return Ok(data={"key": key, "value": value}, text=value)
 
 
-def cmd_task_meta_set(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_task_meta_set(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     task_id = _resolve_task(conn, workspace, args.task)
     service.set_task_meta(conn, task_id, args.key, args.value)
@@ -891,7 +889,7 @@ def cmd_task_meta_set(conn: sqlite3.Connection, args: argparse.Namespace, ctx: C
     return Ok(data={"key": key, "value": args.value}, text=f"set {key}={args.value} on task {format_task_num(task_id)}")
 
 
-def cmd_task_meta_del(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_task_meta_del(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     task_id = _resolve_task(conn, workspace, args.task)
     removed = service.remove_task_meta(conn, task_id, args.key)
@@ -902,28 +900,28 @@ def cmd_task_meta_del(conn: sqlite3.Connection, args: argparse.Namespace, ctx: C
 # ---- Workspace metadata ----
 
 
-def cmd_workspace_meta_ls(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_workspace_meta_ls(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     records = _meta_records(workspace.metadata)
     text = presenters.format_metadata_block(workspace.metadata, indent=2) or "no metadata"
     return Ok(data=records, text=text)
 
 
-def cmd_workspace_meta_get(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_workspace_meta_get(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     value = service.get_workspace_meta(conn, workspace.id, args.key)
     key = args.key.lower()
     return Ok(data={"key": key, "value": value}, text=value)
 
 
-def cmd_workspace_meta_set(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_workspace_meta_set(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     service.set_workspace_meta(conn, workspace.id, args.key, args.value)
     key = args.key.lower()
     return Ok(data={"key": key, "value": args.value}, text=f"set {key}={args.value} on workspace '{workspace.name}'")
 
 
-def cmd_workspace_meta_del(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_workspace_meta_del(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     removed = service.remove_workspace_meta(conn, workspace.id, args.key)
     key = args.key.lower()
@@ -933,7 +931,7 @@ def cmd_workspace_meta_del(conn: sqlite3.Connection, args: argparse.Namespace, c
 # ---- Project metadata ----
 
 
-def cmd_project_meta_ls(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_project_meta_ls(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     project = service.get_project_by_name(conn, workspace.id, args.name)
     records = _meta_records(project.metadata)
@@ -941,7 +939,7 @@ def cmd_project_meta_ls(conn: sqlite3.Connection, args: argparse.Namespace, ctx:
     return Ok(data=records, text=text)
 
 
-def cmd_project_meta_get(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_project_meta_get(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     project = service.get_project_by_name(conn, workspace.id, args.name)
     value = service.get_project_meta(conn, project.id, args.key)
@@ -949,7 +947,7 @@ def cmd_project_meta_get(conn: sqlite3.Connection, args: argparse.Namespace, ctx
     return Ok(data={"key": key, "value": value}, text=value)
 
 
-def cmd_project_meta_set(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_project_meta_set(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     project = service.get_project_by_name(conn, workspace.id, args.name)
     service.set_project_meta(conn, project.id, args.key, args.value)
@@ -957,7 +955,7 @@ def cmd_project_meta_set(conn: sqlite3.Connection, args: argparse.Namespace, ctx
     return Ok(data={"key": key, "value": args.value}, text=f"set {key}={args.value} on project '{project.name}'")
 
 
-def cmd_project_meta_del(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_project_meta_del(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     project = service.get_project_by_name(conn, workspace.id, args.name)
     removed = service.remove_project_meta(conn, project.id, args.key)
@@ -968,7 +966,7 @@ def cmd_project_meta_del(conn: sqlite3.Connection, args: argparse.Namespace, ctx
 # ---- Group metadata ----
 
 
-def cmd_group_meta_ls(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_group_meta_ls(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     grp = service.resolve_group(conn, workspace.id, args.title, project_name=args.project)
     records = _meta_records(grp.metadata)
@@ -976,7 +974,7 @@ def cmd_group_meta_ls(conn: sqlite3.Connection, args: argparse.Namespace, ctx: C
     return Ok(data=records, text=text)
 
 
-def cmd_group_meta_get(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_group_meta_get(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     grp = service.resolve_group(conn, workspace.id, args.title, project_name=args.project)
     value = service.get_group_meta(conn, grp.id, args.key)
@@ -984,7 +982,7 @@ def cmd_group_meta_get(conn: sqlite3.Connection, args: argparse.Namespace, ctx: 
     return Ok(data={"key": key, "value": value}, text=value)
 
 
-def cmd_group_meta_set(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_group_meta_set(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     grp = service.resolve_group(conn, workspace.id, args.title, project_name=args.project)
     service.set_group_meta(conn, grp.id, args.key, args.value)
@@ -992,7 +990,7 @@ def cmd_group_meta_set(conn: sqlite3.Connection, args: argparse.Namespace, ctx: 
     return Ok(data={"key": key, "value": args.value}, text=f"set {key}={args.value} on group '{grp.title}'")
 
 
-def cmd_group_meta_del(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_group_meta_del(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     grp = service.resolve_group(conn, workspace.id, args.title, project_name=args.project)
     removed = service.remove_group_meta(conn, grp.id, args.key)
@@ -1000,7 +998,7 @@ def cmd_group_meta_del(conn: sqlite3.Connection, args: argparse.Namespace, ctx: 
     return Ok(data={"key": key, "value": removed}, text=f"removed {key} from group '{grp.title}'")
 
 
-def cmd_tui(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_tui(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     conn.close()
     from sticky_notes.tui import main as tui_main
     tui_argv = ["--db", str(ctx.db_path)] if ctx.db_path != DEFAULT_DB_PATH else []
@@ -1040,13 +1038,13 @@ _CONFIG_VALIDATORS: dict[str, Callable[[sqlite3.Connection, str], Any]] = {
 }
 
 
-def cmd_config_ls(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_config_ls(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     from .tui.config import load_config
     config = load_config()
     return Ok(data=to_dict(config), text=presenters.format_config(config))
 
 
-def cmd_config_get(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_config_get(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     from dataclasses import fields
     from .tui.config import TuiConfig, load_config
     all_keys = {f.name for f in fields(TuiConfig)}
@@ -1057,7 +1055,7 @@ def cmd_config_get(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliC
     return Ok(data={"key": args.key, "value": value}, text=str(value))
 
 
-def cmd_config_set(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_config_set(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     from .tui.config import load_config, save_config
     if args.key not in _CONFIG_EDITABLE:
         raise ValueError(f"config key {args.key!r} is not editable via CLI (editable: {', '.join(sorted(_CONFIG_EDITABLE))})")
@@ -1068,7 +1066,7 @@ def cmd_config_set(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliC
     return Ok(data={"key": args.key, "value": new_value}, text=f"set {args.key} = {new_value}")
 
 
-def cmd_config_unset(conn: sqlite3.Connection, args: argparse.Namespace, ctx: CliContext) -> CmdResult:
+def cmd_config_unset(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     from dataclasses import fields
     from .tui.config import TuiConfig, load_config, save_config
     if args.key not in _CONFIG_EDITABLE:
@@ -1601,10 +1599,9 @@ def main(argv: list[str] | None = None) -> None:
     if args.command is None:
         parser.print_help()
         raise SystemExit(0)
-    db_path = args.db or DEFAULT_DB_PATH
-    ctx = CliContext(db_path=db_path)
+    ctx = RunContext(db_path=args.db or DEFAULT_DB_PATH)
     json_mode = args.json or (not args.text and not _stdout_is_tty())
-    conn = get_connection(db_path)
+    conn = get_connection(ctx.db_path)
     try:
         init_db(conn)
         result = HANDLERS[args.command](conn, args, ctx)
