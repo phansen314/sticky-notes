@@ -1271,7 +1271,9 @@ class TestJsonOutput:
         data = self._json(cli, "dep", "create", "--task", "1", "--blocked-by", "2")
         assert data["ok"] is True
         assert data["data"]["blocked_task_id"] == 1
+        assert data["data"]["blocked_task_title"] == "T1"
         assert data["data"]["blocking_task_id"] == 2
+        assert data["data"]["blocking_task_title"] == "T2"
 
     def test_tag_create(self, cli):
         cli("workspace", "create", "B")

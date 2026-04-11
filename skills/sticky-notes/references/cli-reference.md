@@ -492,8 +492,8 @@ Every task-referencing command auto-detects whether the argument is an ID or a t
 | `status order` | `{"workspace_id": N, "workspace": str, "statuses": [{"id": N, "name": str}, ...]}` |
 | `project create/archive` | full Project object |
 | `tag create/archive` | full Tag object |
-| `dep create/archive` | `{"blocked_task_id": N, "blocking_task_id": N}` |
-| `group-dep create/archive` | `{"blocked_group_id": N, "blocking_group_id": N}` |
+| `dep create/archive` | `{"blocked_task_id": N, "blocked_task_title": str, "blocking_task_id": N, "blocking_task_title": str}` |
+| `group-dep create/archive` | `{"blocked_group_id": N, "blocked_group_title": str, "blocking_group_id": N, "blocking_group_title": str}` |
 | `group assign` | full TaskDetail — hydrated `group` object includes `title` |
 | `group unassign` | full TaskDetail |
 | `task transfer` (live) | `{"task": {...TaskDetail}, "source_task_id": N}` |

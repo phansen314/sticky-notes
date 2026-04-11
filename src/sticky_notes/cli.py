@@ -507,8 +507,15 @@ def cmd_dep_create(conn: sqlite3.Connection, args: argparse.Namespace, db_path: 
     task_id = _resolve_task(conn, workspace, args.task)
     depends_on_id = _resolve_task(conn, workspace, args.blocked_by)
     service.add_dependency(conn, task_id, depends_on_id)
+    blocked = service.get_task(conn, task_id)
+    blocking = service.get_task(conn, depends_on_id)
     return Ok(
-        data={"blocked_task_id": task_id, "blocking_task_id": depends_on_id},
+        data={
+            "blocked_task_id": task_id,
+            "blocked_task_title": blocked.title,
+            "blocking_task_id": depends_on_id,
+            "blocking_task_title": blocking.title,
+        },
         text=f"{format_task_num(task_id)} now blocked by {format_task_num(depends_on_id)}",
     )
 
@@ -518,8 +525,15 @@ def cmd_dep_archive(conn: sqlite3.Connection, args: argparse.Namespace, db_path:
     task_id = _resolve_task(conn, workspace, args.task)
     depends_on_id = _resolve_task(conn, workspace, args.blocked_by)
     service.archive_dependency(conn, task_id, depends_on_id)
+    blocked = service.get_task(conn, task_id)
+    blocking = service.get_task(conn, depends_on_id)
     return Ok(
-        data={"blocked_task_id": task_id, "blocking_task_id": depends_on_id},
+        data={
+            "blocked_task_id": task_id,
+            "blocked_task_title": blocked.title,
+            "blocking_task_id": depends_on_id,
+            "blocking_task_title": blocking.title,
+        },
         text=f"archived dependency {format_task_num(task_id)} -> {format_task_num(depends_on_id)}",
     )
 
@@ -533,7 +547,12 @@ def cmd_group_dep_create(conn: sqlite3.Connection, args: argparse.Namespace, db_
     dep = service.resolve_group(conn, workspace.id, args.blocked_by, project_name=args.project)
     service.add_group_dependency(conn, grp.id, dep.id)
     return Ok(
-        data={"blocked_group_id": grp.id, "blocking_group_id": dep.id},
+        data={
+            "blocked_group_id": grp.id,
+            "blocked_group_title": grp.title,
+            "blocking_group_id": dep.id,
+            "blocking_group_title": dep.title,
+        },
         text=f"group '{grp.title}' now blocked by '{dep.title}'",
     )
 
@@ -544,7 +563,12 @@ def cmd_group_dep_archive(conn: sqlite3.Connection, args: argparse.Namespace, db
     dep = service.resolve_group(conn, workspace.id, args.blocked_by, project_name=args.project)
     service.archive_group_dependency(conn, grp.id, dep.id)
     return Ok(
-        data={"blocked_group_id": grp.id, "blocking_group_id": dep.id},
+        data={
+            "blocked_group_id": grp.id,
+            "blocked_group_title": grp.title,
+            "blocking_group_id": dep.id,
+            "blocking_group_title": dep.title,
+        },
         text=f"archived dependency '{grp.title}' -> '{dep.title}'",
     )
 
