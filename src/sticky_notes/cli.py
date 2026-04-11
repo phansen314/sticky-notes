@@ -1385,13 +1385,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_gda = gdep_sub.add_parser("create", help="add a group dependency")
     p_gda.set_defaults(command="group_dep_create")
-    p_gda.add_argument("--group", required=True, help="group title that will be blocked")
+    p_gda.add_argument("-g", "--group", required=True, help="group title that will be blocked")
     p_gda.add_argument("--blocked-by", dest="blocked_by", required=True, help="group title that blocks --group")
     p_gda.add_argument("--project", "-p", default=None, help="disambiguate by project name")
 
     p_gdr = gdep_sub.add_parser("archive", help="archive a group dependency")
     p_gdr.set_defaults(command="group_dep_archive")
-    p_gdr.add_argument("--group", required=True, help="group title that was blocked")
+    p_gdr.add_argument("-g", "--group", required=True, help="group title that was blocked")
     p_gdr.add_argument("--blocked-by", dest="blocked_by", required=True, help="group title that was blocking --group")
     p_gdr.add_argument("--project", "-p", default=None, help="disambiguate by project name")
 
