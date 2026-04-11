@@ -325,7 +325,7 @@ todo workspace archive work --force
 | `status ls` | — | `--archived hide\|include\|only` | List statuses on active workspace; default hides archived |
 | `status rename` | `old new` | — | Rename a status |
 | `status order` | `status1 status2 ...` | — | Set the TUI display order for statuses on the active workspace (or `-w`). Writes `~/.config/sticky-notes/tui.toml`. Partial ordering allowed — unlisted statuses fall to the end. |
-| `status archive` | `name` | `--reassign-to STATUS`, `--force`, `--dry-run` | Archive status. `--dry-run` previews without executing. `--reassign-to` moves tasks to another status and acts as implicit confirmation (no `--force` needed). `--force` archives all tasks instead. In non-TTY, `--reassign-to` is sufficient; `--force` alone still requires interactive confirmation unless TTY. |
+| `status archive` | `name` | `--reassign-to STATUS`, `--force`, `--dry-run` | Archive status. `--dry-run` previews without executing. `--reassign-to` moves tasks to another status and acts as implicit confirmation (no `--force` needed). `--force` archives all tasks instead. In non-TTY, `--reassign-to` is sufficient; `--force` alone still requires interactive confirmation unless TTY. **Note:** unlike other archive commands, no confirmation prompt appears when neither `--force` nor `--reassign-to` is given — without either flag the command blocks on active tasks and exits with an error, so there are no side-effects to confirm. |
 
 ```sh
 todo status create "Blocked"
