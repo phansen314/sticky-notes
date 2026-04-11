@@ -370,19 +370,23 @@ def cmd_status_order(conn: sqlite3.Connection, args: argparse.Namespace, db_path
 
     workspace = service.get_workspace_by_name(conn, args.workspace)
     seen: set[str] = set()
-    status_ids: list[int] = []
+    statuses: list[dict[str, Any]] = []
     for name in args.statuses:
         key = name.lower()
         if key in seen:
             raise ValueError(f"duplicate status in order: {name!r}")
         seen.add(key)
         status = service.get_status_by_name(conn, workspace.id, name)
-        status_ids.append(status.id)
+        statuses.append({"id": status.id, "name": name})
     config = load_config()
-    config.status_order[workspace.id] = status_ids
+    config.status_order[workspace.id] = [s["id"] for s in statuses]
     save_config(config)
     return Ok(
-        data={"workspace_id": workspace.id, "workspace": workspace.name, "status_ids": status_ids, "statuses": list(args.statuses)},
+        data={
+            "workspace_id": workspace.id,
+            "workspace": workspace.name,
+            "statuses": statuses,
+        },
         text=f"set status order for workspace '{workspace.name}': {', '.join(args.statuses)}",
     )
 

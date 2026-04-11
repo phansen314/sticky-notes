@@ -262,6 +262,21 @@ class TestStatusCommands:
         _, err = cli("status", "order", "dev", "todo", "todo", expect_exit=4)
         assert "duplicate" in err
 
+    def test_order_json_shape(self, cli, tmp_path, monkeypatch):
+        cfg_path = tmp_path / "tui.toml"
+        monkeypatch.setattr("sticky_notes.tui.config.DEFAULT_CONFIG_PATH", cfg_path)
+        cli("workspace", "create", "dev")
+        cli("status", "create", "backlog")
+        cli("status", "create", "doing")
+        cli("status", "create", "done")
+        out, _ = cli("--json", "status", "order", "dev", "doing", "done", "backlog")
+        data = json.loads(out)["data"]
+        assert data["workspace"] == "dev"
+        assert "status_ids" not in data  # old shape dropped
+        statuses = data["statuses"]
+        assert [s["name"] for s in statuses] == ["doing", "done", "backlog"]
+        assert all("id" in s for s in statuses)
+
 
 # ---- Task shortcuts ----
 
