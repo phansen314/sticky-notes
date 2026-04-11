@@ -391,8 +391,8 @@ Groups are project-scoped hierarchical collections of tasks. All group commands 
 | `group mv` | `title` | `--parent TITLE` **or** `--to-top` (required), `--project/-p`, `--dry-run` | Reparent under another group, or `--to-top` to promote to top-level; `--dry-run` previews the diff |
 | `group assign` | `task group_title` | `--project/-p` | Assign task to group |
 | `group unassign` | `task` | — | Unassign task from its group |
-| `group dep create` | `group_title depends_on_title` | `--project/-p` | Add group dependency (group blocked by depends-on) |
-| `group dep archive` | `group_title depends_on_title` | `--project/-p` | Archive group dependency (soft-delete) |
+| `group dep create` | — | `--group TITLE --blocked-by TITLE` (both required), `--project/-p` | Add group dependency (group blocked by depends-on) |
+| `group dep archive` | — | `--group TITLE --blocked-by TITLE` (both required), `--project/-p` | Archive group dependency (soft-delete) |
 
 ```sh
 todo group create "Backend" --project "API rewrite" --desc "Core API services"
@@ -401,7 +401,7 @@ todo group assign task-0005 "Auth" --project "API rewrite"
 todo group ls --project "API rewrite"
 todo group mv "Auth" --parent "Frontend" --project "API rewrite"
 todo group mv "Backend" --to-top --project "API rewrite"  # promote to top-level
-todo group dep create "Sprint 2" "Sprint 1"   # Sprint 2 blocked by Sprint 1
+todo group dep create --group "Sprint 2" --blocked-by "Sprint 1"   # Sprint 2 blocked by Sprint 1
 ```
 
 ---

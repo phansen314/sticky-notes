@@ -501,8 +501,8 @@ def cmd_dep_archive(conn: sqlite3.Connection, args: argparse.Namespace, db_path:
 
 def cmd_group_dep_create(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
     workspace = _resolve_workspace(conn, args, db_path)
-    grp = service.resolve_group(conn, workspace.id, args.group_title, project_name=args.project)
-    dep = service.resolve_group(conn, workspace.id, args.depends_on_title, project_name=args.project)
+    grp = service.resolve_group(conn, workspace.id, args.group, project_name=args.project)
+    dep = service.resolve_group(conn, workspace.id, args.blocked_by, project_name=args.project)
     service.add_group_dependency(conn, grp.id, dep.id)
     return Ok(
         data={"group_id": grp.id, "depends_on_id": dep.id},
@@ -512,8 +512,8 @@ def cmd_group_dep_create(conn: sqlite3.Connection, args: argparse.Namespace, db_
 
 def cmd_group_dep_archive(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
     workspace = _resolve_workspace(conn, args, db_path)
-    grp = service.resolve_group(conn, workspace.id, args.group_title, project_name=args.project)
-    dep = service.resolve_group(conn, workspace.id, args.depends_on_title, project_name=args.project)
+    grp = service.resolve_group(conn, workspace.id, args.group, project_name=args.project)
+    dep = service.resolve_group(conn, workspace.id, args.blocked_by, project_name=args.project)
     service.archive_group_dependency(conn, grp.id, dep.id)
     return Ok(
         data={"group_id": grp.id, "depends_on_id": dep.id},
@@ -1356,14 +1356,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_gda = gdep_sub.add_parser("create", help="add a group dependency")
     p_gda.set_defaults(command="group_dep_create")
-    p_gda.add_argument("group_title")
-    p_gda.add_argument("depends_on_title")
+    p_gda.add_argument("--group", required=True, help="group title that will be blocked")
+    p_gda.add_argument("--blocked-by", dest="blocked_by", required=True, help="group title that blocks --group")
     p_gda.add_argument("--project", "-p", default=None, help="disambiguate by project name")
 
     p_gdr = gdep_sub.add_parser("archive", help="archive a group dependency")
     p_gdr.set_defaults(command="group_dep_archive")
-    p_gdr.add_argument("group_title")
-    p_gdr.add_argument("depends_on_title")
+    p_gdr.add_argument("--group", required=True, help="group title that was blocked")
+    p_gdr.add_argument("--blocked-by", dest="blocked_by", required=True, help="group title that was blocking --group")
     p_gdr.add_argument("--project", "-p", default=None, help="disambiguate by project name")
 
     # ---- Tag subcommands ----

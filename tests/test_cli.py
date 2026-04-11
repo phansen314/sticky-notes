@@ -2127,7 +2127,7 @@ class TestEndToEndSmoke:
         cli("dep", "create", "--task", "2", "--blocked-by", "1")
         cli("dep", "create", "--task", "3", "--blocked-by", "1")
         # Group dependencies
-        cli("group", "dep", "create", "endpoints", "db", "--project", "backend")
+        cli("group", "dep", "create", "--group", "endpoints", "--blocked-by", "db", "--project", "backend")
 
     def test_listing_commands(self):
         out, _ = self.cli("task", "ls")
