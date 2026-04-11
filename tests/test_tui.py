@@ -1028,3 +1028,82 @@ class TestColumnFocus:
             await pilot.press("b")
             await pilot.pause()
             assert isinstance(app.focused, TaskCard)
+
+
+class TestActiveWorkspaceInvariant:
+    """TUI tree-switch must be an in-memory focus change only — no disk writes."""
+
+    async def test_tui_tree_switch_does_not_write_active_workspace(
+        self, multi_workspace_tui_db, monkeypatch
+    ):
+        """Navigating to a different workspace in the tree must not update tui.toml."""
+        from unittest.mock import MagicMock
+        from sticky_notes.tui.config import load_config, save_config, DEFAULT_CONFIG_PATH
+
+        db_path, ids = multi_workspace_tui_db
+        ws1_id = ids["ws1"]["workspace_id"]
+        ws2_id = ids["ws2"]["workspace_id"]
+
+        # Isolate config path to a tmp file seeded with ws1 as active
+        cfg_path = db_path.parent / "tui.toml"
+        monkeypatch.setattr("sticky_notes.tui.config.DEFAULT_CONFIG_PATH", cfg_path)
+
+        initial_cfg = load_config(cfg_path)
+        initial_cfg.active_workspace = ws1_id
+        from sticky_notes.tui.config import save_config as _save_cfg
+        _save_cfg(initial_cfg, cfg_path)
+        assert load_config(cfg_path).active_workspace == ws1_id
+
+        # Monkeypatch set_active_workspace_id to detect unwanted calls
+        spy = MagicMock()
+        monkeypatch.setattr("sticky_notes.tui.app.get_active_workspace_id", lambda db: ws1_id)
+
+        app = StickyNotesApp(db_path=db_path, config=initial_cfg)
+        async with app.run_test() as pilot:
+            assert app._active_workspace_id == ws1_id
+            # Navigate tree to workspace 2
+            tree = app.query_one("#workspaces-tree")
+            ws_nodes = list(tree.root.children)
+            tree.select_node(ws_nodes[1])
+            await pilot.pause()
+            await pilot.pause()
+            # In-memory state updated
+            assert app._active_workspace_id == ws2_id
+
+        # Disk must still show ws1
+        assert load_config(cfg_path).active_workspace == ws1_id
+
+    async def test_tui_save_config_not_called_on_workspace_switch(
+        self, multi_workspace_tui_db, monkeypatch
+    ):
+        """save_config must not be called during workspace tree navigation."""
+        from unittest.mock import MagicMock
+
+        db_path, ids = multi_workspace_tui_db
+        ws1_id = ids["ws1"]["workspace_id"]
+
+        cfg_path = db_path.parent / "tui.toml"
+        monkeypatch.setattr("sticky_notes.tui.config.DEFAULT_CONFIG_PATH", cfg_path)
+
+        save_config_mock = MagicMock()
+        monkeypatch.setattr("sticky_notes.tui.app.save_config", save_config_mock)
+        monkeypatch.setattr("sticky_notes.tui.app.get_active_workspace_id", lambda db: ws1_id)
+
+        app = StickyNotesApp(db_path=db_path, config=TuiConfig())
+        async with app.run_test() as pilot:
+            # Drive a workspace tree switch
+            tree = app.query_one("#workspaces-tree")
+            ws_nodes = list(tree.root.children)
+            tree.select_node(ws_nodes[1])
+            await pilot.pause()
+            await pilot.pause()
+            assert save_config_mock.call_count == 0, (
+                "save_config must not be called on workspace tree navigation"
+            )
+            # Positive control: _reorder_column SHOULD call save_config
+            cols = list(app.query(KanbanColumn))
+            if len(cols) >= 2:
+                await app._reorder_column(cols[0], 1)
+                assert save_config_mock.call_count > 0, (
+                    "positive control: save_config should be called by _reorder_column"
+                )

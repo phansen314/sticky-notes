@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **`todo config` command group.** `ls`, `get`, `set`, `unset` subcommands for managing TUI config. Editable fields: `auto_refresh_seconds` (positive integer) and `active_workspace` (workspace id or name). `todo config set active_workspace <name>` is equivalent to `todo workspace use <name>`. All fields are readable via `ls`/`get`; read is not restricted to the editable allowlist.
+
+- **Active workspace migrated into `tui.toml`.** `active_workspace` is now stored as a field in `~/.config/sticky-notes/tui.toml` instead of a separate `~/.local/share/sticky-notes/active-workspace` file. The legacy file is still read as a fallback for one release; writes no longer go there. The follow-up TUI config editor modal is tracked as task-0166.
+
 - **TUI: kanban status columns are now focusable widgets.** Click a column or press up-arrow from the topmost task card to focus the column. Left/right arrows cycle focus between columns (wrapping); shift+left/right reorder the focused column (no wrap at edges). Column focus is indicated by a round green border, consistent with task card focus. Column order persists to `~/.config/sticky-notes/tui.toml` `status_order`.
 
 - **TTY-aware output format.** CLI auto-detects whether stdout is a terminal: emits pretty text at a terminal, JSON when piped or redirected. Add `--json` to force JSON, `--text` to force text. Both flags are mutually exclusive. Archive commands now key off `sys.stdin.isatty()` for prompt gating — agents piping without `--force` receive an explicit error rather than silently auto-confirming.

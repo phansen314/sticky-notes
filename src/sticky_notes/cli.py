@@ -998,6 +998,80 @@ def cmd_tui(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -
     raise SystemExit(0)
 
 
+# ---- Config subcommands ----
+
+_CONFIG_EDITABLE: frozenset[str] = frozenset({"auto_refresh_seconds", "active_workspace"})
+
+
+def _parse_positive_int(conn: sqlite3.Connection, raw: str) -> int:
+    try:
+        value = int(raw)
+    except ValueError:
+        raise ValueError(f"expected a positive integer, got {raw!r}")
+    if value <= 0:
+        raise ValueError(f"value must be a positive integer, got {value}")
+    return value
+
+
+def _parse_workspace_ref(conn: sqlite3.Connection, raw: str) -> int:
+    try:
+        ws_id = int(raw)
+        workspace = service.get_workspace(conn, ws_id)
+        return workspace.id
+    except (ValueError, LookupError):
+        pass
+    workspace = service.get_workspace_by_name(conn, raw)
+    return workspace.id
+
+
+_CONFIG_VALIDATORS: dict[str, Callable[[sqlite3.Connection, str], Any]] = {
+    "auto_refresh_seconds": _parse_positive_int,
+    "active_workspace": _parse_workspace_ref,
+}
+
+
+def cmd_config_ls(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
+    from .tui.config import load_config
+    config = load_config()
+    return Ok(data=to_dict(config), text=presenters.format_config(config))
+
+
+def cmd_config_get(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
+    from dataclasses import fields
+    from .tui.config import TuiConfig, load_config
+    all_keys = {f.name for f in fields(TuiConfig)}
+    if args.key not in all_keys:
+        raise LookupError(f"unknown config key: {args.key!r}")
+    config = load_config()
+    value = getattr(config, args.key)
+    return Ok(data={"key": args.key, "value": value}, text=str(value))
+
+
+def cmd_config_set(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
+    from .tui.config import load_config, save_config
+    if args.key not in _CONFIG_EDITABLE:
+        raise ValueError(f"config key {args.key!r} is not editable via CLI (editable: {', '.join(sorted(_CONFIG_EDITABLE))})")
+    new_value = _CONFIG_VALIDATORS[args.key](conn, args.value)
+    config = load_config()
+    setattr(config, args.key, new_value)
+    save_config(config)
+    return Ok(data={"key": args.key, "value": new_value}, text=f"set {args.key} = {new_value}")
+
+
+def cmd_config_unset(conn: sqlite3.Connection, args: argparse.Namespace, db_path: Path) -> CmdResult:
+    from dataclasses import fields
+    from .tui.config import TuiConfig, load_config, save_config
+    if args.key not in _CONFIG_EDITABLE:
+        raise ValueError(f"config key {args.key!r} is not editable via CLI (editable: {', '.join(sorted(_CONFIG_EDITABLE))})")
+    default_value = next(
+        f.default for f in fields(TuiConfig) if f.name == args.key
+    )
+    config = load_config()
+    setattr(config, args.key, default_value)
+    save_config(config)
+    return Ok(data={"key": args.key, "value": default_value}, text=f"unset {args.key} (reset to {default_value!r})")
+
+
 # ---- Parser ----
 
 
@@ -1060,6 +1134,10 @@ HANDLERS: dict[str, CommandHandler] = {
     "tag_rename": cmd_tag_rename,
     "tag_archive": cmd_tag_archive,
     "workspace_show": cmd_workspace_show,
+    "config_ls": cmd_config_ls,
+    "config_get": cmd_config_get,
+    "config_set": cmd_config_set,
+    "config_unset": cmd_config_unset,
     "export": cmd_export,
     "backup": cmd_backup,
     "info": cmd_info,
@@ -1454,6 +1532,27 @@ def build_parser() -> argparse.ArgumentParser:
     p_tr.add_argument("--force", action="store_true", help="skip confirmation prompt")
     p_tr.add_argument("--dry-run", action="store_true", help="preview without executing")
 
+
+    # ---- Config subcommands ----
+
+    p_config = sub.add_parser("config", help="TUI config management (tui.toml)")
+    config_sub = p_config.add_subparsers()
+
+    p_cfg_ls = config_sub.add_parser("ls", help="show all config values")
+    p_cfg_ls.set_defaults(command="config_ls")
+
+    p_cfg_get = config_sub.add_parser("get", help="get a config value")
+    p_cfg_get.set_defaults(command="config_get")
+    p_cfg_get.add_argument("key", help="config key name")
+
+    p_cfg_set = config_sub.add_parser("set", help="set a config value (auto_refresh_seconds, active_workspace)")
+    p_cfg_set.set_defaults(command="config_set")
+    p_cfg_set.add_argument("key", help="config key name")
+    p_cfg_set.add_argument("value", help="new value")
+
+    p_cfg_unset = config_sub.add_parser("unset", help="reset a config value to its default")
+    p_cfg_unset.set_defaults(command="config_unset")
+    p_cfg_unset.add_argument("key", help="config key name")
 
     # ---- Export ----
 

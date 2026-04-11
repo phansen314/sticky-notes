@@ -4,14 +4,28 @@ from pathlib import Path
 
 
 def active_workspace_path(db_path: Path) -> Path:
+    """Return the legacy active-workspace pointer file path.
+
+    Deprecated: active workspace is now stored in tui.toml. This function is
+    retained for `todo info` output and the one-release legacy read fallback.
+    """
     return db_path.parent / "active-workspace"
 
 
 def get_active_workspace_id(db_path: Path) -> int | None:
     """Return the active workspace ID, or None if none is set.
 
-    Raises ValueError if the pointer file exists but contains invalid data.
+    Reads from tui.toml first. Falls back to the legacy pointer file (deprecated,
+    read-only) if tui.toml has no active_workspace set.
+
+    Raises ValueError if the legacy file exists but contains invalid data.
     """
+    from sticky_notes.tui.config import load_config  # lazy — avoids circular import
+
+    config_value = load_config().active_workspace
+    if config_value is not None:
+        return config_value
+    # Legacy fallback — deprecated, no writes go here any more
     p = active_workspace_path(db_path)
     try:
         text = p.read_text().strip()
@@ -27,9 +41,16 @@ def get_active_workspace_id(db_path: Path) -> int | None:
 
 
 def set_active_workspace_id(db_path: Path, workspace_id: int) -> None:
-    p = active_workspace_path(db_path)
-    p.write_text(str(workspace_id))
+    from sticky_notes.tui.config import load_config, save_config  # lazy — avoids circular import
+
+    cfg = load_config()
+    cfg.active_workspace = workspace_id
+    save_config(cfg)
 
 
 def clear_active_workspace_id(db_path: Path) -> None:
-    active_workspace_path(db_path).unlink(missing_ok=True)
+    from sticky_notes.tui.config import load_config, save_config  # lazy — avoids circular import
+
+    cfg = load_config()
+    cfg.active_workspace = None
+    save_config(cfg)

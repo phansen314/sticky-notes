@@ -2885,3 +2885,126 @@ class TestTtyAwareOutput:
         monkeypatch.setattr("sticky_notes.cli._stdin_is_tty", lambda: False)
         out, _ = self.cli("task", "archive", "1", "--force")
         assert "archived task-0001" in out
+
+
+class TestConfigCommands:
+    """Tests for `todo config ls/get/set/unset` and active_workspace storage migration."""
+
+    @pytest.fixture(autouse=True)
+    def setup(self, cli, tmp_path, monkeypatch):
+        self.cli = cli
+        self.cfg_path = tmp_path / "tui.toml"
+        monkeypatch.setattr("sticky_notes.tui.config.DEFAULT_CONFIG_PATH", self.cfg_path)
+        self.cli("workspace", "create", "dev")
+
+    def test_config_ls_returns_defaults_on_fresh_db(self):
+        out, _ = self.cli("config", "ls")
+        assert "auto_refresh_seconds" in out
+        assert "active_workspace" in out
+
+    def test_config_ls_json_shape(self):
+        out, _ = self.cli("--json", "config", "ls")
+        data = json.loads(out)["data"]
+        assert "auto_refresh_seconds" in data
+        assert "active_workspace" in data
+        assert data["auto_refresh_seconds"] == 30
+        assert "active_workspace" in data  # value set by workspace create in autouse fixture
+
+    def test_config_get_auto_refresh_seconds(self):
+        out, _ = self.cli("config", "get", "auto_refresh_seconds")
+        assert "30" in out
+
+    def test_config_get_unknown_key_errors(self):
+        _, err = self.cli("config", "get", "bogus_key", expect_exit=3)
+        assert "unknown config key" in err
+
+    def test_config_set_auto_refresh_seconds(self):
+        out, _ = self.cli("config", "set", "auto_refresh_seconds", "5")
+        assert "5" in out
+        from sticky_notes.tui.config import load_config
+        assert load_config(self.cfg_path).auto_refresh_seconds == 5
+
+    def test_config_set_auto_refresh_seconds_rejects_zero(self):
+        _, err = self.cli("config", "set", "auto_refresh_seconds", "0", expect_exit=4)
+        assert "positive integer" in err
+        # file should not exist / value unchanged
+        from sticky_notes.tui.config import load_config
+        assert load_config(self.cfg_path).auto_refresh_seconds == 30
+
+    def test_config_set_auto_refresh_seconds_rejects_negative(self):
+        _, err = self.cli("config", "set", "auto_refresh_seconds", "-5", expect_exit=4)
+        assert "positive integer" in err
+
+    def test_config_set_auto_refresh_seconds_rejects_non_integer(self):
+        _, err = self.cli("config", "set", "auto_refresh_seconds", "abc", expect_exit=4)
+        assert "positive integer" in err
+
+    def test_config_set_active_workspace_by_id(self):
+        out, _ = self.cli("--json", "workspace", "ls")
+        ws_id = json.loads(out)["data"][0]["id"]
+        self.cli("config", "set", "active_workspace", str(ws_id))
+        from sticky_notes.tui.config import load_config
+        assert load_config(self.cfg_path).active_workspace == ws_id
+
+    def test_config_set_active_workspace_by_name(self):
+        self.cli("config", "set", "active_workspace", "dev")
+        from sticky_notes.tui.config import load_config
+        assert load_config(self.cfg_path).active_workspace is not None
+
+    def test_config_set_active_workspace_rejects_unknown(self):
+        _, err = self.cli("config", "set", "active_workspace", "nonexistent", expect_exit=3)
+        assert "not found" in err
+
+    def test_config_set_rejects_non_editable_key(self):
+        _, err = self.cli("config", "set", "theme", "dark", expect_exit=4)
+        assert "not editable" in err
+
+    def test_config_unset_resets_auto_refresh_to_default(self):
+        self.cli("config", "set", "auto_refresh_seconds", "10")
+        self.cli("config", "unset", "auto_refresh_seconds")
+        from sticky_notes.tui.config import load_config
+        assert load_config(self.cfg_path).auto_refresh_seconds == 30
+
+    def test_config_unset_rejects_non_editable_key(self):
+        _, err = self.cli("config", "unset", "theme", expect_exit=4)
+        assert "not editable" in err
+
+    def test_config_set_active_workspace_via_workspace_use_matches(self):
+        """todo workspace use and todo config set active_workspace produce same tui.toml value."""
+        self.cli("workspace", "use", "dev")
+        from sticky_notes.tui.config import load_config
+        via_use = load_config(self.cfg_path).active_workspace
+        # reset
+        self.cfg_path.unlink(missing_ok=True)
+        self.cli("config", "set", "active_workspace", "dev")
+        via_config = load_config(self.cfg_path).active_workspace
+        assert via_use == via_config
+
+    def test_active_workspace_legacy_file_fallback(self, db_path):
+        """get_active_workspace_id falls back to legacy file when tui.toml has no value."""
+        from sticky_notes.active_workspace import get_active_workspace_id
+        legacy_file = db_path.parent / "active-workspace"
+        legacy_file.write_text("999")
+        # tui.toml exists but has no active_workspace
+        self.cfg_path.write_text("auto_refresh_seconds = 30\n")
+        result = get_active_workspace_id(db_path)
+        assert result == 999
+
+    def test_active_workspace_tui_toml_wins_over_legacy_file(self, db_path):
+        """tui.toml active_workspace takes priority over legacy file."""
+        from sticky_notes.active_workspace import get_active_workspace_id
+        legacy_file = db_path.parent / "active-workspace"
+        legacy_file.write_text("999")
+        self.cfg_path.write_text("active_workspace = 42\n")
+        result = get_active_workspace_id(db_path)
+        assert result == 42
+
+    def test_workspace_use_writes_tui_toml_not_legacy_file(self, db_path):
+        """todo workspace use writes to tui.toml; legacy file is NOT created."""
+        legacy_file = db_path.parent / "active-workspace"
+        if legacy_file.exists():
+            legacy_file.unlink()
+        self.cli("workspace", "use", "dev")
+        assert not legacy_file.exists(), "legacy active-workspace file must not be written"
+        from sticky_notes.tui.config import load_config
+        assert load_config(self.cfg_path).active_workspace is not None

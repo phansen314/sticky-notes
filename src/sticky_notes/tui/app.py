@@ -263,6 +263,7 @@ class StickyNotesApp(App):
                 self.set_focus(cards.first())
 
     async def on_workspace_tree_workspace_changed(self, event: WorkspaceTree.WorkspaceChanged) -> None:
+        # in-memory focus only — do not persist; terminal owns active workspace
         ws_id = event.workspace_id
         if ws_id == self._active_workspace_id:
             return
