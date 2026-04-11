@@ -1769,14 +1769,17 @@ class TestEditDryRun:
         out, _ = self.cli("task", "mv", "1", "-S", "done", "--dry-run")
         assert "dry-run" in out
         assert "'todo'" in out and "'done'" in out
-        # Still in todo
-        ls, _ = self.cli("task", "ls")
-        assert "T1" in ls
+        # Verify status wasn't actually moved
+        show, _ = self.cli("task", "show", "1")
+        assert "Status:      todo" in show
 
     def test_task_mv_dry_run_project_change(self):
         out, _ = self.cli("task", "mv", "1", "-S", "done", "-p", "beta", "--dry-run")
         assert "project" in out
         assert "'alpha'" in out and "'beta'" in out
+        # Verify project wasn't actually changed
+        show, _ = self.cli("task", "show", "1")
+        assert "Project:     alpha" in show
 
     def test_project_edit_dry_run(self):
         out, _ = self.cli("project", "edit", "alpha", "--desc", "new description", "--dry-run")
