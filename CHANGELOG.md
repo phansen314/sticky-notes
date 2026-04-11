@@ -7,10 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-04-10
+
 ### Added
 
 - **`--dry-run` on edit commands.** `task edit`, `task mv`, `project edit`, `group edit`, `group rename`, and `group mv` now accept `--dry-run` to preview the diff (or the from/to snapshot for `task mv`) without writing to the database. Preview output includes before/after values for changed fields; tag adds/removes surface under `+tag`/`-tag` lines for `task edit`. New service helpers: `preview_update_task`, `preview_move_task`, `preview_update_project`, `preview_update_group`. JSON shapes: `EntityUpdatePreview` and `TaskMovePreview`. For `group mv` / `group rename` dry-runs, the `parent_id` diff renders parent group titles via a per-key resolver rather than exposing raw ids — key in `before` / `after` stays `parent_id`, values are title strings.
 - **`todo status order <workspace> <status_1> <status_2> ...`** — CLI command to set the per-workspace status display order used by the TUI kanban board. Writes `~/.config/sticky-notes/tui.toml` via the existing `TuiConfig` module. Partial ordering is tolerated: unlisted statuses fall to the end in the TUI rendering. JSON payload: `{workspace_id, workspace, statuses: [{id, name}, ...]}`.
+- **`tag rename <old> <new>`** and **`project rename <old> <new>`** subcommands. The rename pattern is now uniform across workspace / status / project / group / tag — all take two positionals. Backs a new `service.update_tag` wrapper.
+- **Distinct exit codes** for CLI errors. Previously all user-facing errors collapsed to exit `1`; they now split into `3` (`not_found`), `4` (`validation`), and `5` (`missing_active_workspace`). `2` (db error) is unchanged. Scripts can now distinguish error classes without parsing `--json`.
+- **Non-TTY confirmation guard** on archive commands. Piped or CI invocations of `task archive` / `group archive` / etc. without `--force` or `--dry-run` now fail fast with a clear validation error instead of hanging on `input()` or crashing on EOF.
 
 ### Changed
 
@@ -27,17 +32,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **`todo workspace archive --json` payload reshaped** to `{"workspace": {...}, "active_cleared": bool}`. Surfaces the active-pointer side-effect so JSON consumers don't have to re-query. Text output gains a trailing `(active pointer cleared)` suffix when applicable. Breaking for JSON consumers that read the flat Workspace object.
 - **`todo info --json` payload reshaped.** Each file entry is now `{"path": str, "exists": bool}` instead of four flat strings plus an `existing` array subset. Text output is unchanged. Breaking for JSON consumers.
 - **Priority is now an unconstrained integer.** Migration 012 drops the `CHECK (priority BETWEEN 1 AND 5)` constraint on `tasks.priority`; service-layer range validation is gone. Interpretation (direction, labels) is the user's concern — use entity metadata if a fixed scheme is needed. Default stays at `1`. Behaviour relaxation rather than a breaking change: inputs that used to error now succeed.
-
-## [0.7.0] — 2026-04-10
-
-### Added
-
-- **`tag rename <old> <new>`** and **`project rename <old> <new>`** subcommands. The rename pattern is now uniform across workspace / status / project / group / tag — all take two positionals. Backs a new `service.update_tag` wrapper.
-- **Distinct exit codes** for CLI errors. Previously all user-facing errors collapsed to exit `1`; they now split into `3` (`not_found`), `4` (`validation`), and `5` (`missing_active_workspace`). `2` (db error) is unchanged. Scripts can now distinguish error classes without parsing `--json`.
-- **Non-TTY confirmation guard** on archive commands. Piped or CI invocations of `task archive` / `group archive` / etc. without `--force` or `--dry-run` now fail fast with a clear validation error instead of hanging on `input()` or crashing on EOF.
-
-### Changed
-
 - **`task create --json`** now returns a full `TaskDetail` (same shape as `task show`) instead of a bare `Task`. Tags attached via `--tag` are finally visible in the response — previously the raw `Task` object had no `tags` field and the footnote in the reference documented the gap.
 - **`task transfer --workspace`** renamed to **`task transfer --to`**. The old name collided with the global `-w/--workspace` flag (which selects the *source* workspace). `--to` is unambiguous. Breaking.
 - **`workspace rename`** now requires both `old` and `new` positional arguments. The previous 1-arg mode ("rename active workspace") silently renamed the active workspace when the user usually meant to rename a named one. Breaking.
