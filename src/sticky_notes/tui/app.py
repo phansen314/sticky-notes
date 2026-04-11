@@ -294,7 +294,7 @@ class StickyNotesApp(App):
                     self._edit_group(node.data)
                 elif isinstance(node.data, Workspace):
                     self._edit_workspace(node.data)
-        elif self._kanban_last_focused is not None:
+        elif isinstance(self._kanban_last_focused, TaskCard):
             self._edit_task(self._kanban_last_focused.task_data)
 
     def _dismiss_callback(self, result: dict | None, save: Callable[[], None]) -> None:
@@ -334,7 +334,7 @@ class StickyNotesApp(App):
                 self._open_project_metadata(data)
             elif isinstance(data, Group):
                 self._open_group_metadata(data)
-        elif self._kanban_last_focused is not None:
+        elif isinstance(self._kanban_last_focused, TaskCard):
             self._open_task_metadata(self._kanban_last_focused.task_data)
 
     def _open_task_metadata(self, task: Task) -> None:
