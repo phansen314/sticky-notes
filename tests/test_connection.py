@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-import pytest
 
-from helpers import insert_workspace, insert_status, insert_task
+import pytest
+from helpers import insert_status, insert_task, insert_workspace
+
 from sticky_notes.connection import (
     SCHEMA_VERSION,
     _run_migrations,

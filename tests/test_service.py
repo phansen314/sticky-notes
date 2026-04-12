@@ -4,29 +4,50 @@ import sqlite3
 
 import pytest
 
-from sticky_notes.models import Workspace, Status, Group, Project, Tag, Task, TaskFilter, TaskHistory
+from sticky_notes import service
+from sticky_notes.models import (
+    Group,
+    Project,
+    Status,
+    Tag,
+    Task,
+    TaskFilter,
+    TaskHistory,
+    Workspace,
+)
 from sticky_notes.service_models import (
-    WorkspaceContext,
-    WorkspaceListView,
     GroupDetail,
     GroupRef,
     ProjectDetail,
     TaskDetail,
     TaskListItem,
+    WorkspaceContext,
+    WorkspaceListView,
+)
+from tests.helpers import (
+    insert_group as _raw_insert_group,
+)
+from tests.helpers import (
+    insert_project as _raw_insert_project,
+)
+from tests.helpers import (
+    insert_status as _raw_insert_status,
+)
+from tests.helpers import (
+    insert_tag as _raw_insert_tag,
+)
+from tests.helpers import (
+    insert_task as _raw_insert_task,
+)
+from tests.helpers import (
+    insert_task_dependency as _raw_insert_task_dependency,
+)
+from tests.helpers import (
+    insert_task_tag as _raw_insert_task_tag,
 )
 from tests.helpers import (
     insert_workspace as _raw_insert_workspace,
-    insert_status as _raw_insert_status,
-    insert_group as _raw_insert_group,
-    insert_project as _raw_insert_project,
-    insert_task as _raw_insert_task,
-    insert_tag as _raw_insert_tag,
-    insert_task_dependency as _raw_insert_task_dependency,
-    insert_task_tag as _raw_insert_task_tag,
 )
-
-from sticky_notes import service
-
 
 # Raw helpers leave an implicit transaction open.  Wrap them so each
 # call commits immediately, keeping the connection free for service-layer

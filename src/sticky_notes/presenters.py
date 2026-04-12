@@ -7,7 +7,7 @@ from __future__ import annotations
 from dataclasses import fields
 
 from .formatting import format_group_num, format_priority, format_task_num, format_timestamp
-from .models import Project, Status, Tag, Task, TaskHistory, Workspace
+from .models import Project, Status, Tag, TaskHistory, Workspace
 from .service_models import (
     ArchivePreview,
     EntityUpdatePreview,

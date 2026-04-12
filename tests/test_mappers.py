@@ -5,45 +5,50 @@ import sqlite3
 from typing import NamedTuple
 
 import pytest
-
 from helpers import (
-    insert_workspace,
-    insert_status,
     insert_project,
+    insert_status,
     insert_task,
     insert_task_dependency,
     insert_task_history,
+    insert_workspace,
 )
+
 from sticky_notes.connection import read_schema, transaction
 from sticky_notes.mappers import (
     group_to_detail,
     group_to_ref,
     project_to_detail,
-    row_to_workspace,
-    row_to_status,
     row_to_project,
+    row_to_status,
     row_to_task,
     row_to_task_history,
+    row_to_workspace,
     shallow_fields,
     task_to_detail,
     task_to_list_item,
 )
 from sticky_notes.models import (
-    Workspace,
-    Status,
     Group,
-    NewWorkspace,
-    NewStatus,
     NewProject,
+    NewStatus,
     NewTask,
     NewTaskHistory,
+    NewWorkspace,
     Project,
+    Status,
     Task,
     TaskField,
     TaskHistory,
+    Workspace,
 )
-from sticky_notes.service_models import GroupDetail, GroupRef, ProjectDetail, TaskDetail, TaskListItem
-
+from sticky_notes.service_models import (
+    GroupDetail,
+    GroupRef,
+    ProjectDetail,
+    TaskDetail,
+    TaskListItem,
+)
 
 # ---- Seed helpers ----
 

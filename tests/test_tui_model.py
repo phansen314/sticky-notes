@@ -5,8 +5,6 @@ import pytest
 from sticky_notes.models import Group
 from sticky_notes.tui.model import (
     GroupNode,
-    ProjectNode,
-    WorkspaceModel,
     flatten_group_tree,
     load_workspace_model,
 )

@@ -33,6 +33,6 @@ class NewResourceModal(ModalScreen[str | None]):
             "new-group": "group",
             "new-project": "project",
         }
-        resource_type = mapping.get(event.button.id)
+        resource_type = mapping.get(event.button.id)  # type: ignore[arg-type]
         if resource_type is not None:
             self.dismiss(resource_type)

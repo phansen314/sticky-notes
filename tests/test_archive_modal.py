@@ -3,14 +3,11 @@ from __future__ import annotations
 import pytest
 
 from sticky_notes import service
-from sticky_notes.active_workspace import set_active_workspace_id
-from sticky_notes.connection import get_connection, init_db
-from sticky_notes.models import Group, Project, Task, Workspace
+from sticky_notes.models import Group, Task
 from sticky_notes.tui.app import StickyNotesApp
 from sticky_notes.tui.config import TuiConfig
 from sticky_notes.tui.screens.archive_confirm import ArchiveConfirmModal
-from sticky_notes.tui.widgets import KanbanBoard, KanbanColumn, TaskCard
-
+from sticky_notes.tui.widgets import KanbanColumn, TaskCard
 
 # ---------------------------------------------------------------------------
 # ArchiveConfirmModal unit tests
@@ -211,7 +208,6 @@ class TestArchiveKeyDispatch:
                 if task_leaf is None:
                     # Already archived tasks not shown in tree — test guard via service directly
                     # The guard fires before the modal — verify by calling _open_archive_task
-                    from sticky_notes.models import Task as TaskModel
                     task_obj = service.get_task(app.conn, task_id)
                     assert task_obj.archived is True
                     return
@@ -357,7 +353,6 @@ class TestArchiveConfirm:
             modal = app.screen
             assert isinstance(modal, ArchiveConfirmModal)
             # Default focus is No — pressing enter should cancel
-            from textual.widgets import Button
             assert modal.focused.id == "archive-no"
             await pilot.press("enter")
             await pilot.pause()

@@ -1,15 +1,12 @@
 from __future__ import annotations
 
-import pytest
-
+from helpers import ModalTestApp
 from textual.widgets import Input, Select, Static, TextArea
 
 from sticky_notes.models import Group, Project, Status
 from sticky_notes.service_models import TaskDetail
 from sticky_notes.tui.model import GroupNode, ProjectNode
 from sticky_notes.tui.screens.task_edit import TaskEditModal
-
-from helpers import ModalTestApp
 
 
 def _group(id: int, project_id: int, title: str) -> Group:

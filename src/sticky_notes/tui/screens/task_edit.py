@@ -142,7 +142,7 @@ class TaskEditModal(BaseEditModal):
         # don't depend on Textual's compose-time value handling, which only
         # takes effect once the widget is on-screen.
         group_select = self.query_one("#task-edit-group", Select)
-        options = self._groups_by_project.get(self.detail.project_id, [])
+        options = self._groups_by_project.get(self.detail.project_id, [])  # type: ignore[arg-type]
         group_select.set_options(options)
         group_select.disabled = not options
         if self.detail.group_id is not None and self.detail.group_id in {gid for _, gid in options}:

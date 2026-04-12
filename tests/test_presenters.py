@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from sticky_notes import presenters
 from sticky_notes.models import (
-    Workspace,
     Group,
     Project,
     Status,
@@ -10,20 +9,20 @@ from sticky_notes.models import (
     Task,
     TaskField,
     TaskHistory,
+    Workspace,
 )
 from sticky_notes.service_models import (
     ArchivePreview,
-    WorkspaceContext,
-    WorkspaceListStatus,
-    WorkspaceListView,
     GroupDetail,
     GroupRef,
     MoveToWorkspacePreview,
     ProjectDetail,
     TaskDetail,
     TaskListItem,
+    WorkspaceContext,
+    WorkspaceListStatus,
+    WorkspaceListView,
 )
-
 
 # ---- factories (structural, no DB) ----
 

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
-from pathlib import Path
 
 from sticky_notes.active_workspace import (
     active_workspace_path,
@@ -18,7 +18,6 @@ from sticky_notes.formatting import (
     parse_date,
     parse_task_num,
 )
-
 
 # ---- Fixtures ----
 
@@ -718,7 +717,7 @@ class TestLsFilters:
         out, _ = cli("task", "ls", "-p", "alpha")
         assert "task1" in out
         # task2 not in any non-empty column section
-        lines = [l for l in out.splitlines() if "task2" in l]
+        lines = [ln for ln in out.splitlines() if "task2" in ln]
         assert len(lines) == 0
 
     def test_filter_by_priority(self, cli):
@@ -727,7 +726,7 @@ class TestLsFilters:
         cli("task", "create", "high", "--priority", "3", "-S", "backlog")
         out, _ = cli("task", "ls", "--priority", "3")
         assert "high" in out
-        lines = [l for l in out.splitlines() if "low" in l]
+        lines = [ln for ln in out.splitlines() if "low" in ln]
         assert len(lines) == 0
 
     def test_filter_by_search(self, cli):
@@ -736,7 +735,7 @@ class TestLsFilters:
         cli("task", "create", "Add search feature", "-S", "backlog")
         out, _ = cli("task", "ls", "--search", "login")
         assert "Fix login bug" in out
-        lines = [l for l in out.splitlines() if "search feature" in l]
+        lines = [ln for ln in out.splitlines() if "search feature" in ln]
         assert len(lines) == 0
 
     def test_combined_filters(self, cli):
@@ -746,7 +745,7 @@ class TestLsFilters:
         cli("task", "create", "task3", "-S", "doing", "--priority", "3")
         out, _ = cli("task", "ls", "-S", "backlog", "--priority", "3")
         assert "task1" in out
-        lines = [l for l in out.splitlines() if l.strip().startswith("task-")]
+        lines = [ln for ln in out.splitlines() if ln.strip().startswith("task-")]
         assert len(lines) == 1
 
     def test_invalid_status_name(self, cli):
@@ -1593,8 +1592,8 @@ class TestErrorHandlingExtended:
 
     def test_keyboard_interrupt_exits_130(self, db_path, monkeypatch):
         """KeyboardInterrupt during a command must exit 130 without output."""
-        import json
-        from sticky_notes.cli import main, HANDLERS
+
+        from sticky_notes.cli import HANDLERS, main
 
         original = HANDLERS["task_ls"]
         monkeypatch.setitem(HANDLERS, "task_ls", lambda *a, **kw: (_ for _ in ()).throw(KeyboardInterrupt()))
@@ -1606,7 +1605,8 @@ class TestErrorHandlingExtended:
     def test_operational_error_exits_2(self, db_path, capsys, monkeypatch):
         """sqlite3.OperationalError must print a friendly message and exit 2."""
         import sqlite3
-        from sticky_notes.cli import main, HANDLERS
+
+        from sticky_notes.cli import HANDLERS, main
 
         original = HANDLERS["task_ls"]
         monkeypatch.setitem(HANDLERS, "task_ls", lambda *a, **kw: (_ for _ in ()).throw(
@@ -1624,7 +1624,8 @@ class TestErrorHandlingExtended:
         """sqlite3.OperationalError in --json mode emits JSON error and exits 2."""
         import json
         import sqlite3
-        from sticky_notes.cli import main, HANDLERS
+
+        from sticky_notes.cli import HANDLERS, main
 
         original = HANDLERS["task_ls"]
         monkeypatch.setitem(HANDLERS, "task_ls", lambda *a, **kw: (_ for _ in ()).throw(
@@ -2696,7 +2697,7 @@ class TestStatusListArchivedMarker:
 
     def test_no_archived_marker_on_active(self):
         out, _ = self.cli("status", "ls", "--archived", "include")
-        lines = [l for l in out.splitlines() if "active" in l]
+        lines = [ln for ln in out.splitlines() if "active" in ln]
         assert len(lines) == 1
         assert "(archived)" not in lines[0]
 
@@ -2726,7 +2727,7 @@ class TestProjectListArchivedMarker:
 
     def test_no_archived_marker_on_live_project(self):
         out, _ = self.cli("project", "ls", "--archived", "include")
-        lines = [l for l in out.splitlines() if "live" in l]
+        lines = [ln for ln in out.splitlines() if "live" in ln]
         assert len(lines) == 1
         assert "(archived)" not in lines[0]
 
@@ -2753,9 +2754,8 @@ class TestTransferDryRunSourceName:
         assert "dry-run" in out
         assert "source-ws" in out
         # Must not show a bare integer where the workspace name should be
-        import re
         # The "from workspace" line should not contain a standalone integer
-        from_line = next((l for l in out.splitlines() if "from workspace" in l), "")
+        from_line = next((ln for ln in out.splitlines() if "from workspace" in ln), "")
         assert "source-ws" in from_line
 
 
@@ -2782,7 +2782,6 @@ class TestArchivePreviewPrefixSeparation:
         # Capture stderr where preview is printed
         seen = []
         original_print = __builtins__["print"] if isinstance(__builtins__, dict) else print
-        import sys
         self.monkeypatch.setattr("builtins.input", lambda _: "n")
         # Run and capture stderr
         _, err = self.cli("task", "archive", "1")

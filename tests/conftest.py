@@ -2,19 +2,19 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from collections.abc import Generator
 from pathlib import Path
-from typing import Generator
 
 import pytest
+
+from sticky_notes import service
+from sticky_notes.connection import get_connection, init_db
+from tests.seed import seed_multi_workspace, seed_workspace
 
 
 def pytest_configure(config):
     """Enable coverage in xdist workers by setting COVERAGE_PROCESS_START."""
     os.environ.setdefault("COVERAGE_PROCESS_START", "pyproject.toml")
-
-from sticky_notes import service
-from sticky_notes.connection import get_connection, init_db
-from tests.seed import seed_multi_workspace, seed_workspace
 
 
 @pytest.fixture

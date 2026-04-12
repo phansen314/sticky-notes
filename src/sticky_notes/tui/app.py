@@ -9,20 +9,59 @@ from pathlib import Path
 from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical, Horizontal
+from textual.containers import Horizontal, Vertical
 from textual.message import Message
-from textual.widgets import Header, Footer
+from textual.widgets import Footer, Header
 
 from sticky_notes.active_workspace import clear_active_workspace_id, get_active_workspace_id
 from sticky_notes.connection import DEFAULT_DB_PATH, get_connection, init_db
-from sticky_notes.models import Group, Project, Status, Task, Workspace
 from sticky_notes.formatting import format_task_num
+from sticky_notes.models import Group, Project, Status, Task, Workspace
 from sticky_notes.presenters import format_archive_preview
-from sticky_notes.service import archive_task, cascade_archive_group, cascade_archive_project, cascade_archive_workspace, create_group, create_project, create_task, get_group, get_group_detail, get_project, get_project_detail, get_task_detail, get_workspace, list_workspaces, preview_archive_group, preview_archive_project, preview_archive_task, preview_archive_workspace, replace_group_metadata, replace_project_metadata, replace_task_metadata, replace_workspace_metadata, update_group, update_project, update_task, update_workspace
+from sticky_notes.service import (
+    archive_task,
+    cascade_archive_group,
+    cascade_archive_project,
+    cascade_archive_workspace,
+    create_group,
+    create_project,
+    create_task,
+    get_group,
+    get_group_detail,
+    get_project,
+    get_project_detail,
+    get_task_detail,
+    get_workspace,
+    list_workspaces,
+    preview_archive_group,
+    preview_archive_project,
+    preview_archive_task,
+    preview_archive_workspace,
+    replace_group_metadata,
+    replace_project_metadata,
+    replace_task_metadata,
+    replace_workspace_metadata,
+    update_group,
+    update_project,
+    update_task,
+    update_workspace,
+)
 from sticky_notes.tui.config import DEFAULT_CONFIG_PATH, TuiConfig, load_config, save_config
 from sticky_notes.tui.markup import escape_markup
 from sticky_notes.tui.model import WorkspaceModel, load_workspace_model
-from sticky_notes.tui.screens import ArchiveConfirmModal, ConfigModal, GroupCreateModal, GroupEditModal, MetadataModal, NewResourceModal, ProjectCreateModal, ProjectEditModal, TaskCreateModal, TaskEditModal, WorkspaceEditModal
+from sticky_notes.tui.screens import (
+    ArchiveConfirmModal,
+    ConfigModal,
+    GroupCreateModal,
+    GroupEditModal,
+    MetadataModal,
+    NewResourceModal,
+    ProjectCreateModal,
+    ProjectEditModal,
+    TaskCreateModal,
+    TaskEditModal,
+    WorkspaceEditModal,
+)
 from sticky_notes.tui.widgets import KanbanBoard, KanbanColumn, TaskCard, WorkspaceTree
 
 
@@ -175,6 +214,7 @@ class StickyNotesApp(App):
 
     def _reload_active_model(self) -> WorkspaceModel | None:
         """Reload the active workspace from disk. Returns None if it's gone."""
+        assert self._active_workspace_id is not None
         try:
             model = load_workspace_model(self.conn, self._active_workspace_id)
         except LookupError:
@@ -258,6 +298,7 @@ class StickyNotesApp(App):
         model = self._active_model
         if model is None:
             return
+        assert self._active_workspace_id is not None
         ids = [s.id for s in model.statuses]
         try:
             i = ids.index(col.status_id)
@@ -323,7 +364,7 @@ class StickyNotesApp(App):
         elif isinstance(self._kanban_last_focused, TaskCard):
             self._edit_task(self._kanban_last_focused.task_data)
 
-    def _dismiss_callback(self, result: dict | None, save: Callable[[], None]) -> None:
+    def _dismiss_callback(self, result: dict | None, save: Callable[[], object]) -> None:
         if result is None:
             return
         try:
@@ -342,7 +383,10 @@ class StickyNotesApp(App):
         )
 
     def _on_task_edit_dismiss(self, result: dict | None) -> None:
-        self._dismiss_callback(result, lambda: update_task(self.conn, result["task_id"], result["changes"], source="tui"))
+        if result is None:
+            return
+        r = result
+        self._dismiss_callback(result, lambda: update_task(self.conn, r["task_id"], r["changes"], source="tui"))
 
     def action_metadata(self) -> None:
         if self._active_model is None:
@@ -416,34 +460,46 @@ class StickyNotesApp(App):
         )
 
     def _on_task_metadata_dismiss(self, result: dict | None) -> None:
+        if result is None:
+            return
+        r = result
         self._dismiss_callback(
             result,
             lambda: replace_task_metadata(
-                self.conn, result["task_id"], result["metadata"], source="tui",
+                self.conn, r["task_id"], r["metadata"], source="tui",
             ),
         )
 
     def _on_workspace_metadata_dismiss(self, result: dict | None) -> None:
+        if result is None:
+            return
+        r = result
         self._dismiss_callback(
             result,
             lambda: replace_workspace_metadata(
-                self.conn, result["workspace_id"], result["metadata"], source="tui",
+                self.conn, r["workspace_id"], r["metadata"], source="tui",
             ),
         )
 
     def _on_project_metadata_dismiss(self, result: dict | None) -> None:
+        if result is None:
+            return
+        r = result
         self._dismiss_callback(
             result,
             lambda: replace_project_metadata(
-                self.conn, result["project_id"], result["metadata"], source="tui",
+                self.conn, r["project_id"], r["metadata"], source="tui",
             ),
         )
 
     def _on_group_metadata_dismiss(self, result: dict | None) -> None:
+        if result is None:
+            return
+        r = result
         self._dismiss_callback(
             result,
             lambda: replace_group_metadata(
-                self.conn, result["group_id"], result["metadata"], source="tui",
+                self.conn, r["group_id"], r["metadata"], source="tui",
             ),
         )
 
@@ -566,7 +622,10 @@ class StickyNotesApp(App):
         )
 
     def _on_project_edit_dismiss(self, result: dict | None) -> None:
-        self._dismiss_callback(result, lambda: update_project(self.conn, result["project_id"], result["changes"]))
+        if result is None:
+            return
+        r = result
+        self._dismiss_callback(result, lambda: update_project(self.conn, r["project_id"], r["changes"]))
 
     def _edit_group(self, group: Group) -> None:
         detail = get_group_detail(self.conn, group.id)
@@ -576,7 +635,10 @@ class StickyNotesApp(App):
         )
 
     def _on_group_edit_dismiss(self, result: dict | None) -> None:
-        self._dismiss_callback(result, lambda: update_group(self.conn, result["group_id"], result["changes"]))
+        if result is None:
+            return
+        r = result
+        self._dismiss_callback(result, lambda: update_group(self.conn, r["group_id"], r["changes"]))
 
     def _edit_workspace(self, workspace: Workspace) -> None:
         fresh = get_workspace(self.conn, workspace.id)
@@ -586,7 +648,10 @@ class StickyNotesApp(App):
         )
 
     def _on_workspace_edit_dismiss(self, result: dict | None) -> None:
-        self._dismiss_callback(result, lambda: update_workspace(self.conn, result["workspace_id"], result["changes"]))
+        if result is None:
+            return
+        r = result
+        self._dismiss_callback(result, lambda: update_workspace(self.conn, r["workspace_id"], r["changes"]))
 
     async def on_kanban_board_task_status_move(self, event: KanbanBoard.TaskStatusMove) -> None:
         try:
@@ -605,7 +670,8 @@ class StickyNotesApp(App):
     def _on_config_dismiss(self, result: dict | None) -> None:
         if result is None:
             return
-        changes = result["changes"]
+        r = result
+        changes = r["changes"]
         self._dismiss_callback(result, lambda: self._apply_config_changes(changes))
 
     def _apply_config_changes(self, changes: dict) -> None:
@@ -614,7 +680,7 @@ class StickyNotesApp(App):
         if "theme" in changes:
             self.theme = changes["theme"]
         if "auto_refresh_seconds" in changes and self._refresh_timer is not None:
-            self._refresh_timer.stop()
+            self._refresh_timer.stop()  # type: ignore[attr-defined]
             self._refresh_timer = self.set_interval(changes["auto_refresh_seconds"], self.request_refresh)
         for key, value in changes.items():
             setattr(self.config, key, value)
@@ -626,6 +692,8 @@ class StickyNotesApp(App):
         self.push_screen(NewResourceModal(), callback=self._on_new_resource)
 
     def _on_new_resource(self, resource_type: str | None) -> None:
+        if resource_type is None:
+            return
         dispatch = {
             "task": self._create_task,
             "group": self._create_group,
@@ -636,6 +704,8 @@ class StickyNotesApp(App):
             action()
 
     def _create_task(self) -> None:
+        if self._active_model is None:
+            return
         statuses = self._active_model.statuses
         if not statuses:
             self.notify("No statuses — create one first", severity="warning")
@@ -646,18 +716,32 @@ class StickyNotesApp(App):
         )
 
     def _on_task_create_dismiss(self, result: dict | None) -> None:
-        self._dismiss_callback(result, lambda: create_task(self.conn, self._active_workspace_id, **result))
+        if result is None:
+            return
+        r = result
+        ws_id = self._active_workspace_id
+        assert ws_id is not None
+        self._dismiss_callback(result, lambda: create_task(self.conn, ws_id, **r))
 
     def _create_project(self) -> None:
+        if self._active_model is None:
+            return
         self.push_screen(
             ProjectCreateModal(),
             callback=self._on_project_create_dismiss,
         )
 
     def _on_project_create_dismiss(self, result: dict | None) -> None:
-        self._dismiss_callback(result, lambda: create_project(self.conn, self._active_workspace_id, **result))
+        if result is None:
+            return
+        r = result
+        ws_id = self._active_workspace_id
+        assert ws_id is not None
+        self._dismiss_callback(result, lambda: create_project(self.conn, ws_id, **r))
 
     def _create_group(self) -> None:
+        if self._active_model is None:
+            return
         projects = tuple(p.project for p in self._active_model.projects)
         if not projects:
             self.notify("No projects — create one first", severity="warning")
@@ -668,7 +752,10 @@ class StickyNotesApp(App):
         )
 
     def _on_group_create_dismiss(self, result: dict | None) -> None:
-        self._dismiss_callback(result, lambda: create_group(self.conn, **result))
+        if result is None:
+            return
+        r = result
+        self._dismiss_callback(result, lambda: create_group(self.conn, **r))
 
     def _order_statuses(self, statuses: tuple[Status, ...], workspace_id: int) -> tuple[Status, ...]:
         order = self.config.status_order.get(workspace_id, [])

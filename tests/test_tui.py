@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 from textual.widgets import Input
 
@@ -12,7 +10,7 @@ from sticky_notes.models import Group, Project, Task, Workspace
 from sticky_notes.tui.app import StickyNotesApp
 from sticky_notes.tui.config import TuiConfig
 from sticky_notes.tui.screens import MetadataModal
-from sticky_notes.tui.widgets import KanbanBoard, KanbanColumn, TaskCard
+from sticky_notes.tui.widgets import KanbanColumn, TaskCard
 
 
 class TestTreePopulation:
@@ -1005,7 +1003,6 @@ class TestColumnFocus:
 
     async def test_column_order_persists_across_restart(self, seeded_tui_db, tmp_path):
         """Reorder columns in session 1, then verify session 2 loads the saved order."""
-        from sticky_notes.tui.config import load_config
         db_path, ids = seeded_tui_db
         toml_path = tmp_path / "tui.toml"
         ws_id = ids["workspace_id"]
@@ -1190,8 +1187,9 @@ class TestConfigModal:
 
     @pytest.mark.asyncio
     async def test_change_theme_live_applies_and_persists(self, app):
-        from sticky_notes.tui.config import load_config
         from textual.widgets import Select
+
+        from sticky_notes.tui.config import load_config
         app, toml_path = app
         async with app.run_test() as pilot:
             themes = list(app.available_themes.keys())
@@ -1246,8 +1244,9 @@ class TestConfigModal:
 
     @pytest.mark.asyncio
     async def test_change_auto_refresh_swaps_timer(self, app):
-        from sticky_notes.tui.config import load_config
         from textual.widgets import Input
+
+        from sticky_notes.tui.config import load_config
         app, toml_path = app
         async with app.run_test() as pilot:
             original_timer = app._refresh_timer
@@ -1266,8 +1265,9 @@ class TestConfigModal:
 
     @pytest.mark.asyncio
     async def test_invalid_auto_refresh_shows_error(self, seeded_tui_db, tmp_path):
-        from sticky_notes.tui.screens.config_modal import ConfigModal
         from textual.widgets import Input, Static
+
+        from sticky_notes.tui.screens.config_modal import ConfigModal
         db_path, _ = seeded_tui_db
         for bad_value in ("abc", "0", "-3"):
             toml_path = tmp_path / f"cfg-{bad_value}.toml"

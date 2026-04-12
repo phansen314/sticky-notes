@@ -1,6 +1,7 @@
 """Tests for create modals: NewResourceModal, TaskCreateModal, ProjectCreateModal, GroupCreateModal."""
 from __future__ import annotations
 
+from helpers import ModalTestApp
 from textual.widgets import Input, Select, Static, TextArea
 
 from sticky_notes.models import Group, Project, Status
@@ -9,9 +10,6 @@ from sticky_notes.tui.screens.group_create import GroupCreateModal
 from sticky_notes.tui.screens.new_resource import NewResourceModal
 from sticky_notes.tui.screens.project_create import ProjectCreateModal
 from sticky_notes.tui.screens.task_create import TaskCreateModal
-
-from helpers import ModalTestApp
-
 
 # ---- Factories ----
 

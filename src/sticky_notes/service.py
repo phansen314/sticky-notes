@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from typing import Any, Generator
+from typing import Any
 
 from . import repository as repo
 from .connection import transaction
@@ -49,7 +49,6 @@ from .service_models import (
     WorkspaceListStatus,
     WorkspaceListView,
 )
-
 
 # Sentinel that distinguishes "caller did not pass this field" from "caller
 # explicitly set this field to None".  Used by update_task() to support
@@ -723,13 +722,13 @@ def _update_task_body(
         tag = _ensure_tag(conn, old.workspace_id, tag_name)
         repo.add_tag_to_task(conn, task_id, tag.id)
     for tag_name in remove_tags:
-        tag = repo.get_tag_by_name(conn, old.workspace_id, tag_name)
-        if tag is None:
+        existing_tag = repo.get_tag_by_name(conn, old.workspace_id, tag_name)
+        if existing_tag is None:
             raise LookupError(f"tag {tag_name!r} not found")
         existing = repo.list_tag_ids_by_task(conn, task_id)
-        if tag.id not in existing:
+        if existing_tag.id not in existing:
             raise LookupError(f"task {task_id} is not tagged {tag_name!r}")
-        repo.remove_tag_from_task(conn, task_id, tag.id)
+        repo.remove_tag_from_task(conn, task_id, existing_tag.id)
     return updated
 
 
@@ -1737,7 +1736,7 @@ def preview_move_task(
     from_status = get_status(conn, task.status_id)
     to_status = get_status(conn, status_id)
     from_project = (
-        repo.get_project(conn, task.project_id).name if task.project_id is not None else None
+        repo.get_project(conn, task.project_id).name if task.project_id is not None else None  # type: ignore[union-attr]
     )
     if change_project:
         to_project_id = project_id
@@ -1746,7 +1745,7 @@ def preview_move_task(
         to_project_id = task.project_id
         project_changed = False
     to_project = (
-        repo.get_project(conn, to_project_id).name if to_project_id is not None else None
+        repo.get_project(conn, to_project_id).name if to_project_id is not None else None  # type: ignore[union-attr]
     )
     return TaskMovePreview(
         task_id=task_id,

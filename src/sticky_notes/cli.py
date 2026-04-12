@@ -11,14 +11,18 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from .active_workspace import active_workspace_path, clear_active_workspace_id, get_active_workspace_id, set_active_workspace_id
-from .connection import DEFAULT_DB_PATH, get_connection, init_db
 from . import presenters, service
+from .active_workspace import (
+    active_workspace_path,
+    clear_active_workspace_id,
+    get_active_workspace_id,
+    set_active_workspace_id,
+)
+from .connection import DEFAULT_DB_PATH, get_connection, init_db
 from .export import export_full_json, export_markdown
 from .formatting import format_group_num, format_task_num, parse_date
 from .models import Workspace
 from .service_models import ArchivePreview
-
 
 EXIT_DB_ERROR = 2
 EXIT_NOT_FOUND = 3
@@ -63,7 +67,7 @@ class NoActiveWorkspaceError(Exception):
 # ---- JSON serialisation ----
 
 
-def to_dict(obj: object) -> object:
+def to_dict(obj: object) -> Any:
     """Convert dataclasses (possibly nested) to plain dicts for JSON serialisation.
 
     Handles StrEnum -> .value, tuples/lists, nested dataclasses, and plain dicts
@@ -608,7 +612,7 @@ def cmd_group_ls(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunCon
     if project_name:
         projects = (service.get_project_by_name(conn, workspace.id, project_name),)
     else:
-        projects = service.list_projects(conn, workspace.id)
+        projects = service.list_projects(conn, workspace.id)  # type: ignore[assignment]
     if not projects:
         return Ok(data=[], text=presenters.format_group_list(()))
     include_archived = args.archived in ("include", "only")
@@ -771,8 +775,8 @@ def cmd_workspace_show(conn: sqlite3.Connection, args: argparse.Namespace, ctx: 
         workspace = service.get_workspace_by_name(conn, args.name)
     else:
         workspace = _resolve_workspace(conn, args, ctx)
-    ctx = service.get_workspace_context(conn, workspace.id)
-    return Ok(data=ctx, text=presenters.format_workspace_context(ctx))
+    ws_ctx = service.get_workspace_context(conn, workspace.id)
+    return Ok(data=ws_ctx, text=presenters.format_workspace_context(ws_ctx))
 
 
 # ---- Export ----
@@ -1002,6 +1006,7 @@ def cmd_group_meta_del(conn: sqlite3.Connection, args: argparse.Namespace, ctx: 
 def cmd_tui(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     conn.close()
     from sticky_notes.tui import main as tui_main
+
     from .tui.config import DEFAULT_CONFIG_PATH
     tui_argv: list[str] = []
     if ctx.db_path != DEFAULT_DB_PATH:
@@ -1052,6 +1057,7 @@ def cmd_config_ls(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunCo
 
 def cmd_config_get(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     from dataclasses import fields
+
     from .tui.config import TuiConfig, load_config
     all_keys = {f.name for f in fields(TuiConfig)}
     if args.key not in all_keys:
@@ -1074,6 +1080,7 @@ def cmd_config_set(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunC
 
 def cmd_config_unset(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     from dataclasses import fields
+
     from .tui.config import TuiConfig, load_config, save_config
     if args.key not in _CONFIG_EDITABLE:
         raise ValueError(f"config key {args.key!r} is not editable via CLI (editable: {', '.join(sorted(_CONFIG_EDITABLE))})")

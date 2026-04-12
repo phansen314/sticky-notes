@@ -1,18 +1,14 @@
 """Tests for project, group, and workspace edit modals."""
 from __future__ import annotations
 
-import pytest
-
+from helpers import ModalTestApp
 from textual.widgets import Input, Static, TextArea
 
-from sticky_notes.models import Group, Workspace
+from sticky_notes.models import Workspace
 from sticky_notes.service_models import GroupDetail, ProjectDetail
 from sticky_notes.tui.screens.group_edit import GroupEditModal
 from sticky_notes.tui.screens.project_edit import ProjectEditModal
 from sticky_notes.tui.screens.workspace_edit import WorkspaceEditModal
-
-from helpers import ModalTestApp
-
 
 # ---- Factories ----
 

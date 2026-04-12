@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Protocol
 
 from sticky_notes import service
 from sticky_notes.models import Group, Project, Status, Task, Workspace

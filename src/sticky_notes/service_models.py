@@ -5,7 +5,6 @@ from typing import Any, Literal
 
 from .models import Group, Project, Status, Tag, Task, TaskHistory, Workspace
 
-
 # ---- List view types ----
 
 
