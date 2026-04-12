@@ -22,6 +22,19 @@ def config_path(tmp_path: Path) -> Path:
     return tmp_path / "tui.toml"
 
 
+@pytest.fixture(autouse=True)
+def _isolate_config_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Redirect DEFAULT_CONFIG_PATH to a per-test tmp location.
+
+    Prevents any test from reading or writing ~/.config/sticky-notes/tui.toml,
+    whether via StickyNotesApp() with no config_path, load_config() with no arg,
+    or save_config() falling back to the default.
+    """
+    safe = tmp_path / "tui.toml"
+    monkeypatch.setattr("sticky_notes.tui.config.DEFAULT_CONFIG_PATH", safe)
+    monkeypatch.setattr("sticky_notes.tui.app.DEFAULT_CONFIG_PATH", safe)
+
+
 @pytest.fixture
 def db_path(tmp_path: Path) -> Path:
     return tmp_path / "test.db"
