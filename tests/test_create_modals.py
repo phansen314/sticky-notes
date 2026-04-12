@@ -1,15 +1,16 @@
-"""Tests for create modals: NewResourceModal, TaskCreateModal, ProjectCreateModal, GroupCreateModal."""
+"""Tests for create modals: NewResourceModal, TaskCreateModal, ProjectCreateModal, GroupCreateModal, StatusCreateModal."""
 
 from __future__ import annotations
 
 from helpers import ModalTestApp
 from textual.widgets import Input, Select, Static, TextArea
 
-from sticky_notes.models import Group, Project, Status
+from sticky_notes.models import Group, Project, Status, Workspace
 from sticky_notes.tui.model import GroupNode, ProjectNode
 from sticky_notes.tui.screens.group_create import GroupCreateModal
 from sticky_notes.tui.screens.new_resource import NewResourceModal
 from sticky_notes.tui.screens.project_create import ProjectCreateModal
+from sticky_notes.tui.screens.status_create import StatusCreateModal
 from sticky_notes.tui.screens.task_create import TaskCreateModal
 
 # ---- Factories ----
@@ -288,3 +289,106 @@ class TestGroupCreateModal:
             app.screen.action_save()
             await pilot.pause()
             assert app.result == {"project_id": 1, "title": "Sprint 1", "description": None}
+
+
+# ---- StatusCreateModal tests ----
+
+
+def make_workspace(**overrides) -> Workspace:
+    defaults = dict(
+        id=1,
+        name="Main",
+        archived=False,
+        created_at=0,
+        metadata={},
+    )
+    defaults.update(overrides)
+    return Workspace(**defaults)
+
+
+WORKSPACES = (make_workspace(id=1, name="Main"), make_workspace(id=2, name="Work"))
+
+
+class TestStatusCreateModal:
+    async def test_empty_name_shows_error(self):
+        app = ModalTestApp(StatusCreateModal(WORKSPACES, 1))
+        async with app.run_test() as pilot:
+            app.screen.action_save()
+            await pilot.pause()
+            error = app.screen.query_one("#modal-error", Static)
+            assert "Name is required" in str(error.render())
+            assert app.result == "NOT_SET"
+
+    async def test_cancel_dismisses_none(self):
+        app = ModalTestApp(StatusCreateModal(WORKSPACES, 1))
+        async with app.run_test() as pilot:
+            await pilot.press("escape")
+            assert app.result is None
+
+    async def test_valid_status(self):
+        app = ModalTestApp(StatusCreateModal(WORKSPACES, 1))
+        async with app.run_test() as pilot:
+            app.screen.query_one("#status-create-name", Input).value = "in-progress"
+            app.screen.action_save()
+            await pilot.pause()
+            assert app.result == {"workspace_id": 1, "name": "in-progress"}
+
+    async def test_default_workspace_selected(self):
+        app = ModalTestApp(StatusCreateModal(WORKSPACES, 2))
+        async with app.run_test() as pilot:
+            sel = app.screen.query_one("#status-create-workspace", Select)
+            assert sel.value == 2
+
+    async def test_s_key_dismisses_status(self):
+        app = ModalTestApp(NewResourceModal())
+        async with app.run_test() as pilot:
+            await pilot.press("s")
+            assert app.result == "status"
+
+    async def test_status_button_click(self):
+        app = ModalTestApp(NewResourceModal())
+        async with app.run_test() as pilot:
+            await pilot.click("#new-status")
+            assert app.result == "status"
+
+
+# ---- WorkspaceCreateModal tests ----
+
+from sticky_notes.tui.screens.workspace_create import WorkspaceCreateModal  # noqa: E402
+
+
+class TestWorkspaceCreateModal:
+    async def test_empty_name_shows_error(self):
+        app = ModalTestApp(WorkspaceCreateModal())
+        async with app.run_test() as pilot:
+            app.screen.action_save()
+            await pilot.pause()
+            error = app.screen.query_one("#modal-error", Static)
+            assert "Name is required" in str(error.render())
+            assert app.result == "NOT_SET"
+
+    async def test_cancel_dismisses_none(self):
+        app = ModalTestApp(WorkspaceCreateModal())
+        async with app.run_test() as pilot:
+            await pilot.press("escape")
+            assert app.result is None
+
+    async def test_valid_workspace(self):
+        app = ModalTestApp(WorkspaceCreateModal())
+        async with app.run_test() as pilot:
+            app.screen.query_one("#workspace-create-name", Input).value = "My WS"
+            app.screen.action_save()
+            await pilot.pause()
+            assert app.result == {"name": "My WS"}
+
+    async def test_w_key_dismisses_workspace(self):
+        app = ModalTestApp(NewResourceModal())
+        async with app.run_test() as pilot:
+            await pilot.press("w")
+            assert app.result == "workspace"
+
+    async def test_workspace_button_click(self):
+        app = ModalTestApp(NewResourceModal())
+        async with app.run_test() as pilot:
+            await pilot.click("#new-workspace")
+            assert app.result == "workspace"

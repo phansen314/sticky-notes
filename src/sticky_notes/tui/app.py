@@ -25,7 +25,9 @@ from sticky_notes.service import (
     cascade_archive_workspace,
     create_group,
     create_project,
+    create_status,
     create_task,
+    create_workspace,
     get_group,
     get_group_detail,
     get_project,
@@ -58,8 +60,10 @@ from sticky_notes.tui.screens import (
     NewResourceModal,
     ProjectCreateModal,
     ProjectEditModal,
+    StatusCreateModal,
     TaskCreateModal,
     TaskEditModal,
+    WorkspaceCreateModal,
     WorkspaceEditModal,
 )
 from sticky_notes.tui.widgets import KanbanBoard, KanbanColumn, TaskCard, WorkspaceTree
@@ -736,6 +740,8 @@ class StickyNotesApp(App):
             "task": self._create_task,
             "group": self._create_group,
             "project": self._create_project,
+            "status": self._create_status,
+            "workspace": self._create_workspace_modal,
         }
         action = dispatch.get(resource_type)
         if action is not None:
@@ -794,6 +800,28 @@ class StickyNotesApp(App):
             return
         r = result
         self._dismiss_callback(result, lambda: create_group(self.conn, **r))
+
+    def _create_status(self) -> None:
+        workspaces = list_workspaces(self.conn)
+        self.push_screen(
+            StatusCreateModal(workspaces, self._active_workspace_id),
+            callback=self._on_status_create_dismiss,
+        )
+
+    def _on_status_create_dismiss(self, result: dict | None) -> None:
+        if result is None:
+            return
+        r = result
+        self._dismiss_callback(result, lambda: create_status(self.conn, **r))
+
+    def _create_workspace_modal(self) -> None:
+        self.push_screen(WorkspaceCreateModal(), callback=self._on_workspace_create_dismiss)
+
+    def _on_workspace_create_dismiss(self, result: dict | None) -> None:
+        if result is None:
+            return
+        r = result
+        self._dismiss_callback(result, lambda: create_workspace(self.conn, **r))
 
     def _order_statuses(
         self, statuses: tuple[Status, ...], workspace_id: int
