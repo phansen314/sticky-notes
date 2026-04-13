@@ -57,6 +57,7 @@ _GROUP_UPDATABLE: frozenset[str] = frozenset(
         "archived",
     }
 )
+_EDGE_UPDATABLE: frozenset[str] = frozenset({"acyclic"})
 
 
 # ---- Internal helpers ----
@@ -627,6 +628,79 @@ def get_active_edge(
     return (row["kind"], row["acyclic"]) if row is not None else None
 
 
+def get_edge_detail_row(
+    conn: sqlite3.Connection,
+    from_type: str,
+    from_id: int,
+    to_type: str,
+    to_id: int,
+    kind: str,
+) -> Row | None:
+    """Return a full denormalized edge row (including endpoint titles,
+    metadata, archived) for `edge show` / `edge edit` / `edge log`.
+
+    Does NOT filter on archived — `show` should be able to inspect archived
+    edges. Endpoint titles come from the nodes CTE, which also hides archived
+    endpoints; an edge whose endpoint was archived will therefore be
+    unreachable via this query (matching the rest of the edge surface)."""
+    row = conn.execute(
+        _NODES_CTE + """
+        SELECT e.from_type, e.from_id, nf.title AS from_title,
+               e.to_type, e.to_id, nt.title AS to_title,
+               e.workspace_id, e.kind, e.acyclic, e.archived, e.metadata
+        FROM edges e
+        JOIN nodes nf ON nf.node_type = e.from_type AND nf.id = e.from_id
+        JOIN nodes nt ON nt.node_type = e.to_type AND nt.id = e.to_id
+        WHERE e.from_type = ? AND e.from_id = ?
+          AND e.to_type = ? AND e.to_id = ?
+          AND e.kind = ?
+        """,
+        (from_type, from_id, to_type, to_id, kind),
+    ).fetchone()
+    return row
+
+
+def update_edge(
+    conn: sqlite3.Connection,
+    from_type: str,
+    from_id: int,
+    to_type: str,
+    to_id: int,
+    kind: str,
+    changes: dict[str, Any],
+) -> None:
+    """Update fields on an active edge identified by composite PK.
+
+    Only fields in `_EDGE_UPDATABLE` are accepted. The composite PK fields
+    (from_type, from_id, to_type, to_id, kind) are immutable."""
+    if not changes:
+        raise ValueError("changes must not be empty")
+    bad = changes.keys() - _EDGE_UPDATABLE
+    if bad:
+        raise ValueError(f"disallowed fields: {', '.join(sorted(bad))}")
+    for k in changes:
+        if not _SAFE_COLUMN_RE.match(k):
+            raise ValueError(f"invalid column name: {k!r}")
+    set_clause = ", ".join(f"{k} = ?" for k in changes)
+    params = (
+        *changes.values(),
+        from_type,
+        from_id,
+        to_type,
+        to_id,
+        kind,
+    )
+    cur = conn.execute(
+        f"UPDATE edges SET {set_clause} "
+        "WHERE from_type = ? AND from_id = ? AND to_type = ? AND to_id = ? AND kind = ? AND archived = 0",
+        params,
+    )
+    if cur.rowcount == 0:
+        raise LookupError(
+            f"edge ({from_type}:{from_id} → {to_type}:{to_id} [{kind}]) not found"
+        )
+
+
 def get_archived_edge(
     conn: sqlite3.Connection,
     from_type: str,
@@ -852,6 +926,46 @@ def list_all_journal(
 ) -> tuple[JournalEntry, ...]:
     """Return all journal rows ordered by workspace and time."""
     rows = conn.execute("SELECT * FROM journal ORDER BY workspace_id, changed_at, id").fetchall()
+    return tuple(row_to_journal_entry(r) for r in rows)
+
+
+def list_journal_for_edge(
+    conn: sqlite3.Connection,
+    from_type: str,
+    from_id: int,
+    to_type: str,
+    to_id: int,
+) -> tuple[JournalEntry, ...]:
+    """Return journal entries related to a specific edge identified by its
+    endpoint pair (kind is NOT filtered — all kinds sharing the same endpoint
+    are returned; callers that want kind-specific history can filter the
+    result by looking at paired `kind` rows).
+
+    Implementation: journal stores edge rows with ``entity_id = from_id`` and
+    encodes the endpoint string (``from_type:from_id→to_type:to_id``) in
+    ``old_value`` / ``new_value`` of `endpoint`-field rows. This query
+    selects entries for that `entity_id` where either the row itself is an
+    endpoint row matching the endpoint string, or it shares a `changed_at`
+    timestamp with such a row (the service layer writes paired rows within
+    one transaction, so sibling rows share the second-resolution timestamp).
+    """
+    endpoint = f"{from_type}:{from_id}\u2192{to_type}:{to_id}"
+    rows = conn.execute(
+        """
+        SELECT * FROM journal
+        WHERE entity_type = 'edge' AND entity_id = ?
+          AND (
+            (field = 'endpoint' AND (old_value = ? OR new_value = ?))
+            OR changed_at IN (
+              SELECT changed_at FROM journal
+              WHERE entity_type = 'edge' AND entity_id = ? AND field = 'endpoint'
+                AND (old_value = ? OR new_value = ?)
+            )
+          )
+        ORDER BY changed_at DESC, id DESC
+        """,
+        (from_id, endpoint, endpoint, from_id, endpoint, endpoint),
+    ).fetchall()
     return tuple(row_to_journal_entry(r) for r in rows)
 
 

@@ -13,6 +13,7 @@ from .formatting import parse_task_num
 from .mappers import (
     group_to_detail,
     group_to_ref,
+    row_to_edge_detail,
     task_to_detail,
     task_to_list_item,
 )
@@ -33,6 +34,7 @@ from .models import (
 )
 from .service_models import (
     ArchivePreview,
+    EdgeDetail,
     EdgeListItem,
     EdgeRef,
     EntityUpdatePreview,
@@ -1489,6 +1491,162 @@ def replace_edge_metadata(
                         source=source,
                     ),
                 )
+
+
+# ---- Edge detail / edit / log ----
+
+
+def get_edge_detail(
+    conn: sqlite3.Connection,
+    src: tuple[str, int],
+    dst: tuple[str, int],
+    *,
+    kind: str,
+) -> EdgeDetail:
+    """Return a fully hydrated single-edge view."""
+    from_type, from_id = src
+    to_type, to_id = dst
+    kind = _normalize_edge_kind(kind)
+    row = repo.get_edge_detail_row(conn, from_type, from_id, to_type, to_id, kind)
+    if row is None:
+        raise LookupError(
+            f"edge ({from_type}:{from_id} → {to_type}:{to_id} [{kind}]) not found"
+        )
+    history = repo.list_journal_for_edge(conn, from_type, from_id, to_type, to_id)
+    # Filter history to entries matching this specific kind (same endpoint,
+    # different kinds share entity_id + timestamps in pathological cases).
+    endpoint = f"{from_type}:{from_id}\u2192{to_type}:{to_id}"
+    history = _filter_edge_history(history, endpoint, kind)
+    return row_to_edge_detail(row, history=history)
+
+
+def _filter_edge_history(
+    history: tuple[JournalEntry, ...],
+    endpoint: str,
+    kind: str,
+) -> tuple[JournalEntry, ...]:
+    """Narrow edge journal entries to those attributable to one (endpoint, kind)
+    pair. Endpoint rows are unambiguous by content; sibling rows (kind,
+    acyclic, archived, meta.*) are kept when they share a `changed_at` with a
+    matched endpoint row AND, for kind rows, the value matches."""
+    matched_timestamps: set[int] = set()
+    for h in history:
+        if h.field == EdgeField.ENDPOINT and endpoint in (h.old_value or "", h.new_value or ""):
+            matched_timestamps.add(h.changed_at)
+    out: list[JournalEntry] = []
+    for h in history:
+        if h.changed_at not in matched_timestamps:
+            continue
+        if h.field == EdgeField.KIND:
+            if kind not in (h.old_value or "", h.new_value or ""):
+                continue
+        out.append(h)
+    return tuple(out)
+
+
+def update_edge(
+    conn: sqlite3.Connection,
+    src: tuple[str, int],
+    dst: tuple[str, int],
+    *,
+    kind: str,
+    changes: dict[str, Any],
+    source: str = "cli",
+) -> EdgeDetail:
+    """Update mutable edge fields (currently only ``acyclic``).
+
+    When flipping acyclic from 0 → 1, re-runs cycle detection over the
+    post-update acyclic subgraph. Journals both an ENDPOINT anchor row and
+    the ACYCLIC delta so `edge log` can recover the mutation via the
+    shared changed_at timestamp (entity_id + endpoint match)."""
+    from_type, from_id = src
+    to_type, to_id = dst
+    kind = _normalize_edge_kind(kind)
+    normalized_changes: dict[str, Any] = {}
+    if "acyclic" in changes:
+        normalized_changes["acyclic"] = 1 if changes["acyclic"] else 0
+    if not normalized_changes:
+        raise ValueError("no valid fields to update")
+    with transaction(conn), _friendly_errors():
+        row = repo.get_edge_detail_row(conn, from_type, from_id, to_type, to_id, kind)
+        if row is None or row["archived"]:
+            raise LookupError(
+                f"edge ({from_type}:{from_id} → {to_type}:{to_id} [{kind}]) not found"
+            )
+        workspace_id = row["workspace_id"]
+        old_acyclic = int(row["acyclic"])
+        new_acyclic = normalized_changes["acyclic"]
+        if new_acyclic == old_acyclic:
+            # No-op — skip write and journal.
+            history = repo.list_journal_for_edge(conn, from_type, from_id, to_type, to_id)
+            endpoint = f"{from_type}:{from_id}\u2192{to_type}:{to_id}"
+            return row_to_edge_detail(
+                row, history=_filter_edge_history(history, endpoint, kind)
+            )
+        repo.update_edge(
+            conn, from_type, from_id, to_type, to_id, kind, normalized_changes
+        )
+        if new_acyclic == 1 and old_acyclic == 0:
+            # Transition off→on: cycle check runs against the post-write
+            # edge set (our edge now participates as acyclic=1). Any cycle
+            # raises ValueError, rolling back the transaction.
+            _check_no_cycle(conn, from_type, from_id, to_type, to_id)
+        endpoint = f"{from_type}:{from_id}\u2192{to_type}:{to_id}"
+        repo.insert_journal_entry(
+            conn,
+            NewJournalEntry(
+                entity_type=EntityType.EDGE,
+                entity_id=from_id,
+                workspace_id=workspace_id,
+                field=EdgeField.ENDPOINT,
+                old_value=endpoint,
+                new_value=endpoint,
+                source=source,
+            ),
+        )
+        repo.insert_journal_entry(
+            conn,
+            NewJournalEntry(
+                entity_type=EntityType.EDGE,
+                entity_id=from_id,
+                workspace_id=workspace_id,
+                field=EdgeField.ACYCLIC,
+                old_value=str(old_acyclic),
+                new_value=str(new_acyclic),
+                source=source,
+            ),
+        )
+        # Also emit a kind row at the same timestamp so history filter can
+        # disambiguate multi-kind edges sharing an endpoint.
+        repo.insert_journal_entry(
+            conn,
+            NewJournalEntry(
+                entity_type=EntityType.EDGE,
+                entity_id=from_id,
+                workspace_id=workspace_id,
+                field=EdgeField.KIND,
+                old_value=kind,
+                new_value=kind,
+                source=source,
+            ),
+        )
+    return get_edge_detail(conn, src, dst, kind=kind)
+
+
+def list_journal_for_edge(
+    conn: sqlite3.Connection,
+    src: tuple[str, int],
+    dst: tuple[str, int],
+    *,
+    kind: str,
+) -> tuple[JournalEntry, ...]:
+    """Return journal entries attributable to a single (endpoint, kind) edge."""
+    from_type, from_id = src
+    to_type, to_id = dst
+    kind = _normalize_edge_kind(kind)
+    history = repo.list_journal_for_edge(conn, from_type, from_id, to_type, to_id)
+    endpoint = f"{from_type}:{from_id}\u2192{to_type}:{to_id}"
+    return _filter_edge_history(history, endpoint, kind)
 
 
 # ---- History ----

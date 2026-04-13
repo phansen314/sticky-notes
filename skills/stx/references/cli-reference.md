@@ -111,30 +111,39 @@ All flags are optional; only provided fields are updated.
 |---|---|---|---|
 | `--title` | — | — | New title |
 | `--desc` | `-d` | — | New description |
-| `--priority` | — | — | New priority integer |
+| `--priority` | `-p` | — | New priority integer |
 | `--due` | — | — | New due date `YYYY-MM-DD` |
-| `--dry-run` | — | off | Preview the field diff without writing |
+| `--group` | `-g` | — | Group title to assign; pass `""` to unassign |
+| `--dry-run` | — | off | Preview the field diff without writing (ignores `--group`) |
 
 ```sh
 stx task edit task-0003 --priority 4 --due 2026-06-01
 stx task edit task-0003 --priority 5 --dry-run
+stx task edit task-0003 --group "backend"      # assign
+stx task edit task-0003 --group ""             # unassign
 ```
+
+`--group` and `stx group assign` / `stx group unassign` funnel through the same
+service path (`update_task` / `_update_task_body`) — either surface is
+equivalent.
 
 ---
 
-### `stx task mv <task> --status <status> [position] [flags]`
+### `stx task mv <task> --status <status> [--position N] [flags]`
 
 **Within-workspace only.** Use `stx task transfer` for cross-workspace moves.
 
 | Arg/Flag | Description |
 |---|---|
 | `--status` / `-S` | Target status name (**required**) |
-| `position` (optional positional) | Integer position within status (default: `0` = top) |
+| `--position` | Integer position within status (default: `0` = top) |
+| `position` (legacy positional) | **Deprecated** — prefer `--position`. Still accepted for one release. Passing both with different values errors. |
 | `--dry-run` | Preview from/to status + position without writing |
 
 ```sh
 stx task mv task-0001 --status "In Progress"
-stx task mv task-0001 -S Done 2          # position 2 within Done status
+stx task mv task-0001 -S Done --position 2
+stx task mv task-0001 -S Done 2               # legacy positional, still works
 stx task mv task-0001 -S Done --dry-run
 ```
 
@@ -301,7 +310,7 @@ stx workspace archive work --force
 | `status show` | `name` | — | Show status detail (including task count) |
 | `status edit` | `name` | `--name NEW` | Edit status (rename via `--name`) |
 | `status order` | `status1 status2 ...` | — | Set the TUI display order for statuses on the active workspace (or `-w`). Writes `~/.config/stx/tui.toml`. Partial ordering allowed — unlisted statuses fall to the end. |
-| `status archive` | `name` | `--reassign-to STATUS`, `--force`, `--dry-run` | Archive status. `--dry-run` previews without executing. `--reassign-to` moves tasks to another status before archiving. `--force` archives all tasks in the status instead. Neither flag triggers a confirmation prompt — `--reassign-to` and `--force` both proceed immediately (works from pipes and CI without `--force` being special-cased). Without either flag the service layer blocks on active tasks and exits with an error. |
+| `status archive` | `name` | `--reassign-to STATUS`, `--force`, `--dry-run` | Archive status. `--dry-run` previews without executing. `--reassign-to` moves tasks to another status before archiving. `--force` cascade-archives all tasks in the status instead — when active tasks exist, a warning line is emitted to stderr before the archive runs (no prompt, pipe-friendly). Neither flag triggers a confirmation prompt. Without either flag the service layer blocks on active tasks and exits with an error. |
 
 ```sh
 stx status create "Blocked"
@@ -326,6 +335,9 @@ Edges are polymorphic directional links with a free-form `kind` label and their 
 | Command | Args | Flags | Description |
 |---|---|---|---|
 | `edge create` | — | `--source REF --target REF --kind KIND` (all required), `--source-parent`, `--target-parent`, `--acyclic`/`--no-acyclic` | Add an edge from source to target with the given kind. |
+| `edge show` | — | `--source REF --target REF --kind KIND` (all required), `--source-parent`, `--target-parent` | Show full edge detail (endpoints, kind, acyclic, archived, metadata, filtered history). |
+| `edge edit` | — | `--source REF --target REF --kind KIND` (all required), `--source-parent`, `--target-parent`, `--acyclic`/`--no-acyclic` | Mutate the `acyclic` flag. Kind and endpoints are immutable (part of PK). Flipping off→on re-runs cycle detection and rejects the edit if a cycle would result. |
+| `edge log` | — | `--source REF --target REF --kind KIND` (all required), `--source-parent`, `--target-parent` | Show journal history attributable to this (endpoint, kind) pair. **Caveat:** metadata events (`meta.*`) are journaled with `entity_id = from_id` only and cannot be disambiguated when multiple edges share a source — `edge log` captures endpoint/kind/acyclic/archived events but may omit metadata events for source nodes with multiple outgoing edges. |
 | `edge archive` | — | `--source REF --target REF --kind KIND` (all required), `--source-parent`, `--target-parent` | Soft-archive the active edge. Re-create via `edge create`. |
 | `edge ls` | — | `--source REF`, `--target REF`, `--kind KIND`, `--source-parent`, `--target-parent` | List active edges on the active workspace; filters are optional. Both endpoints must be active (archived endpoints are hidden). |
 | `edge meta ls` | — | `--source REF --target REF --kind KIND` | List all metadata on the edge. |
@@ -336,6 +348,9 @@ Edges are polymorphic directional links with a free-form `kind` label and their 
 ```sh
 stx edge create --source task-0003 --target task-0001 --kind blocks
 stx edge create --source task-0002 --target "group:Auth" --kind informs
+stx edge show --source task-0003 --target task-0001 --kind blocks
+stx edge edit --source task-0003 --target task-0001 --kind blocks --no-acyclic
+stx edge log --source task-0003 --target task-0001 --kind blocks
 stx edge ls
 stx edge ls --kind blocks
 stx edge ls --source task-0003

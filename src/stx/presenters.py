@@ -10,6 +10,7 @@ from .formatting import format_group_num, format_priority, format_task_num, form
 from .models import JournalEntry, Status, Workspace
 from .service_models import (
     ArchivePreview,
+    EdgeDetail,
     EntityUpdatePreview,
     GroupDetail,
     GroupRef,
@@ -278,6 +279,25 @@ def format_config(config: object) -> str:
     lines = ["config:"]
     for f in fields(config):  # type: ignore[arg-type]
         lines.append(f"  {f.name}: {getattr(config, f.name)!r}")
+    return "\n".join(lines)
+
+
+def format_edge_detail(detail: EdgeDetail) -> str:
+    src = f"{detail.from_type}:{detail.from_id}  {detail.from_title}"
+    tgt = f"{detail.to_type}:{detail.to_id}  {detail.to_title}"
+    acyclic_marker = " [acyclic]" if detail.acyclic else ""
+    header = f"{src}  --[{detail.kind}]{acyclic_marker}-->  {tgt}"
+    lines = [header]
+    lines.append(f"  Kind:        {detail.kind}")
+    lines.append(f"  Acyclic:     {detail.acyclic}")
+    lines.append(f"  Archived:    {detail.archived}")
+    if detail.metadata:
+        lines.append("  Metadata:")
+        lines.append(format_metadata_block(detail.metadata, indent=4))
+    if detail.history:
+        lines.append("\n  History:")
+        for h in detail.history:
+            lines.append(f"    {format_history_entry(h)}")
     return "\n".join(lines)
 
 

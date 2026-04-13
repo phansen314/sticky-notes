@@ -14,6 +14,7 @@ from .models import (
     Workspace,
 )
 from .service_models import (
+    EdgeDetail,
     EdgeListItem,
     EdgeRef,
     GroupDetail,
@@ -106,6 +107,27 @@ def row_to_edge_list_item(row: Row) -> EdgeListItem:
         workspace_id=row["workspace_id"],
         kind=row["kind"],
         acyclic=bool(row["acyclic"]),
+    )
+
+
+def row_to_edge_detail(
+    row: Row,
+    *,
+    history: tuple[JournalEntry, ...],
+) -> EdgeDetail:
+    return EdgeDetail(
+        from_type=row["from_type"],
+        from_id=row["from_id"],
+        from_title=row["from_title"],
+        to_type=row["to_type"],
+        to_id=row["to_id"],
+        to_title=row["to_title"],
+        workspace_id=row["workspace_id"],
+        kind=row["kind"],
+        acyclic=bool(row["acyclic"]),
+        archived=bool(row["archived"]),
+        metadata=json.loads(row["metadata"]),
+        history=history,
     )
 
 

@@ -482,6 +482,45 @@ class TestTaskCommands:
         out, _ = cli("task", "mv", "1", "-S", "In Progress")
         assert "moved task-0001: todo -> in progress" in out
 
+    def test_mv_position_flag(self, cli):
+        cli("task", "create", "Task A", "-S", "todo")
+        cli("task", "create", "Task B", "-S", "todo")
+        out, _ = cli("task", "mv", "2", "-S", "in progress", "--position", "0")
+        assert "moved task-0002" in out
+
+    def test_mv_position_positional_legacy(self, cli):
+        cli("task", "create", "Task A", "-S", "todo")
+        out, _ = cli("task", "mv", "1", "-S", "in progress", "0")
+        assert "moved task-0001" in out
+
+    def test_mv_position_conflict(self, cli):
+        cli("task", "create", "Task A", "-S", "todo")
+        _, err = cli(
+            "task", "mv", "1", "-S", "in progress", "2", "--position", "5",
+            expect_exit=4,
+        )
+        assert "conflicting position" in err
+
+    def test_edit_group_assign(self, cli):
+        cli("group", "create", "g1")
+        cli("task", "create", "Task A", "-S", "todo")
+        out, _ = cli("task", "edit", "1", "--group", "g1")
+        assert "updated task-0001" in out
+        show_out, _ = cli("task", "show", "1")
+        assert "g1" in show_out
+
+    def test_edit_group_unassign(self, cli):
+        cli("group", "create", "g1")
+        cli("task", "create", "Task A", "-S", "todo", "-g", "g1")
+        cli("task", "edit", "1", "--group", "")
+        show_out, _ = cli("task", "show", "1")
+        assert "Group:" not in show_out
+
+    def test_edit_group_unknown(self, cli):
+        cli("task", "create", "Task A", "-S", "todo")
+        _, err = cli("task", "edit", "1", "--group", "nope", expect_exit=3)
+        assert "not found" in err
+
     def test_archive(self, cli):
         cli("task", "create", "Task A", "-S", "todo")
         out, _ = cli("task", "archive", "1", "--force")
@@ -587,6 +626,81 @@ class TestEdgeCommands:
         cli("edge", "create", "--source", "2", "--target", "1", "--kind", "blocks")
         out, _ = cli("edge", "archive", "--source", "2", "--target", "1", "--kind", "blocks")
         assert "archived edge" in out
+
+    def test_show(self, cli):
+        cli("task", "create", "Task A", "-S", "todo")
+        cli("task", "create", "Task B", "-S", "todo")
+        cli("edge", "create", "--source", "2", "--target", "1", "--kind", "blocks")
+        out, _ = cli(
+            "edge", "show", "--source", "2", "--target", "1", "--kind", "blocks"
+        )
+        assert "task:2" in out and "task:1" in out
+        assert "blocks" in out
+        assert "[acyclic]" in out  # blocks defaults to acyclic
+
+    def test_show_missing(self, cli):
+        cli("task", "create", "Task A", "-S", "todo")
+        cli("task", "create", "Task B", "-S", "todo")
+        _, err = cli(
+            "edge", "show", "--source", "2", "--target", "1", "--kind", "blocks",
+            expect_exit=3,
+        )
+        assert "not found" in err
+
+    def test_edit_acyclic_disable(self, cli):
+        cli("task", "create", "Task A", "-S", "todo")
+        cli("task", "create", "Task B", "-S", "todo")
+        cli("edge", "create", "--source", "2", "--target", "1", "--kind", "blocks")
+        out, _ = cli(
+            "edge", "edit", "--source", "2", "--target", "1", "--kind", "blocks",
+            "--no-acyclic",
+        )
+        assert "updated edge" in out
+        # Verify flag is off now
+        out2, _ = cli(
+            "edge", "show", "--source", "2", "--target", "1", "--kind", "blocks"
+        )
+        assert "[acyclic]" not in out2
+
+    def test_edit_acyclic_cycle_rejected(self, cli):
+        cli("task", "create", "A", "-S", "todo")
+        cli("task", "create", "B", "-S", "todo")
+        cli("task", "create", "C", "-S", "todo")
+        # Build A→B→C→A with a non-acyclic kind.
+        cli("edge", "create", "--source", "1", "--target", "2", "--kind", "refs", "--no-acyclic")
+        cli("edge", "create", "--source", "2", "--target", "3", "--kind", "refs", "--no-acyclic")
+        cli("edge", "create", "--source", "3", "--target", "1", "--kind", "refs", "--no-acyclic")
+        # Flipping any to acyclic should fail cycle check — the other two
+        # are non-acyclic so graph stays cycle-free on DAG subset until we
+        # try to promote the whole cycle. Flip them one at a time:
+        cli("edge", "edit", "--source", "1", "--target", "2", "--kind", "refs", "--acyclic")
+        cli("edge", "edit", "--source", "2", "--target", "3", "--kind", "refs", "--acyclic")
+        _, err = cli(
+            "edge", "edit", "--source", "3", "--target", "1", "--kind", "refs",
+            "--acyclic", expect_exit=4,
+        )
+        assert "cycle" in err
+
+    def test_edit_noop(self, cli):
+        cli("task", "create", "A", "-S", "todo")
+        cli("task", "create", "B", "-S", "todo")
+        cli("edge", "create", "--source", "2", "--target", "1", "--kind", "blocks")
+        out, _ = cli(
+            "edge", "edit", "--source", "2", "--target", "1", "--kind", "blocks"
+        )
+        assert "nothing to update" in out
+
+    def test_log(self, cli):
+        cli("task", "create", "Task A", "-S", "todo")
+        cli("task", "create", "Task B", "-S", "todo")
+        cli("edge", "create", "--source", "2", "--target", "1", "--kind", "blocks")
+        cli("edge", "edit", "--source", "2", "--target", "1", "--kind", "blocks", "--no-acyclic")
+        out, _ = cli(
+            "edge", "log", "--source", "2", "--target", "1", "--kind", "blocks"
+        )
+        # Should contain at least one endpoint entry plus the acyclic delta
+        assert "endpoint" in out
+        assert "acyclic" in out
 
 
 # ---- Error handling ----
@@ -1726,9 +1840,16 @@ class TestStatusArchiveConfirmation:
         cli("task", "create", "t1", "-S", "todo")
 
     def test_force_archives_tasks(self):
-        # --force skips prompt entirely (no input() call)
-        out, _ = self.cli("status", "archive", "todo", "--force")
+        # --force skips prompt entirely (no input() call) but does emit a stderr warning
+        out, err = self.cli("status", "archive", "todo", "--force")
         assert "archived status 'todo'" in out
+        assert "warning" in err and "1 active task" in err
+
+    def test_force_without_active_tasks_no_warning(self):
+        # A status with no tasks — --force produces no warning.
+        self.cli("status", "create", "idle")
+        _, err = self.cli("status", "archive", "idle", "--force")
+        assert "warning" not in err
 
     def test_reassign_archives(self):
         # --reassign-to moves tasks and archives without prompting

@@ -223,6 +223,12 @@ def cmd_task_edit(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunCo
         changes["priority"] = args.priority
     if args.due is not None:
         changes["due_date"] = parse_date(args.due)
+    if args.group is not None:
+        if args.group == "":
+            changes["group_id"] = None
+        else:
+            grp = service.resolve_group(conn, workspace.id, args.group)
+            changes["group_id"] = grp.id
     if not changes:
         detail = service.get_task_detail(conn, task_id)
         return Ok(data=detail, text="nothing to update")
@@ -238,7 +244,16 @@ def cmd_task_mv(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunCont
     workspace = _resolve_workspace(conn, args, ctx)
     task_id = _resolve_task(conn, workspace, args.task)
     col = service.get_status_by_name(conn, workspace.id, args.status)
-    position = args.position if args.position is not None else 0
+    if args.position is not None and args.position_positional is not None:
+        if args.position != args.position_positional:
+            raise ValueError(
+                "conflicting position arguments: --position and positional value differ"
+            )
+    position = args.position
+    if position is None:
+        position = args.position_positional
+    if position is None:
+        position = 0
     pre = service.get_task_detail(conn, task_id)
     from_status = pre.status.name
     if args.dry_run:
@@ -493,10 +508,19 @@ def cmd_status_archive(
     # No confirmation prompt: --force means "archive tasks, just do it";
     # --reassign-to means "move tasks, no data loss". Without either flag the
     # service layer blocks on active tasks, so no side-effects to confirm.
+    # When --force is used with active tasks, emit a stderr warning so the
+    # cascade-archive is not silent (parity with task/group/workspace prompts).
     reassign_to_id = None
     if args.reassign_to:
         reassign_col = service.get_status_by_name(conn, workspace.id, args.reassign_to)
         reassign_to_id = reassign_col.id
+    if args.force and not args.reassign_to:
+        preview = service.preview_archive_status(conn, col.id)
+        if preview.task_count > 0:
+            print(
+                f"warning: --force will cascade-archive {preview.task_count} active task(s) in status '{col.name}'",
+                file=sys.stderr,
+            )
     updated = service.archive_status(
         conn,
         col.id,
@@ -607,6 +631,70 @@ def cmd_edge_archive(
         },
         text=f"archived edge {from_type}:{from_id} -> {to_type}:{to_id} [{kind}]",
     )
+
+
+def cmd_edge_show(
+    conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext
+) -> CmdResult:
+    workspace = _resolve_workspace(conn, args, ctx)
+    from_type, from_id = _resolve_edge_node(
+        conn, workspace.id, args.source, parent_title=args.source_parent
+    )
+    to_type, to_id = _resolve_edge_node(
+        conn, workspace.id, args.target, parent_title=args.target_parent
+    )
+    detail = service.get_edge_detail(
+        conn, (from_type, from_id), (to_type, to_id), kind=args.kind
+    )
+    return Ok(data=detail, text=presenters.format_edge_detail(detail))
+
+
+def cmd_edge_edit(
+    conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext
+) -> CmdResult:
+    workspace = _resolve_workspace(conn, args, ctx)
+    from_type, from_id = _resolve_edge_node(
+        conn, workspace.id, args.source, parent_title=args.source_parent
+    )
+    to_type, to_id = _resolve_edge_node(
+        conn, workspace.id, args.target, parent_title=args.target_parent
+    )
+    changes: dict[str, Any] = {}
+    if args.acyclic is not None:
+        changes["acyclic"] = args.acyclic
+    if not changes:
+        detail = service.get_edge_detail(
+            conn, (from_type, from_id), (to_type, to_id), kind=args.kind
+        )
+        return Ok(data=detail, text="nothing to update")
+    detail = service.update_edge(
+        conn,
+        (from_type, from_id),
+        (to_type, to_id),
+        kind=args.kind,
+        changes=changes,
+        source="cli",
+    )
+    return Ok(
+        data=detail,
+        text=f"updated edge {from_type}:{from_id} --({detail.kind})--> {to_type}:{to_id}",
+    )
+
+
+def cmd_edge_log(
+    conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext
+) -> CmdResult:
+    workspace = _resolve_workspace(conn, args, ctx)
+    from_type, from_id = _resolve_edge_node(
+        conn, workspace.id, args.source, parent_title=args.source_parent
+    )
+    to_type, to_id = _resolve_edge_node(
+        conn, workspace.id, args.target, parent_title=args.target_parent
+    )
+    history = service.list_journal_for_edge(
+        conn, (from_type, from_id), (to_type, to_id), kind=args.kind
+    )
+    return Ok(data=history, text=presenters.format_journal_entries(history))
 
 
 def cmd_edge_ls(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
@@ -1228,6 +1316,9 @@ HANDLERS: dict[str, CommandHandler] = {
     "edge_create": cmd_edge_create,
     "edge_archive": cmd_edge_archive,
     "edge_ls": cmd_edge_ls,
+    "edge_show": cmd_edge_show,
+    "edge_edit": cmd_edge_edit,
+    "edge_log": cmd_edge_log,
     "edge_meta_ls": cmd_edge_meta_ls,
     "edge_meta_get": cmd_edge_meta_get,
     "edge_meta_set": cmd_edge_meta_set,
@@ -1312,6 +1403,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_edit.add_argument("--desc", "-d", default=None)
     p_edit.add_argument("--priority", "-p", type=int, default=None)
     p_edit.add_argument("--due", default=None, help="YYYY-MM-DD")
+    p_edit.add_argument(
+        "--group",
+        "-g",
+        default=None,
+        help="group title to assign; pass empty string to unassign",
+    )
     p_edit.add_argument("--dry-run", action="store_true", help="preview changes without writing")
 
     p_mv = task_sub.add_parser("mv", help="move task to status (within workspace)")
@@ -1319,11 +1416,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_mv.add_argument("task", help="task number (task-NNNN/N/#N) or title")
     p_mv.add_argument("--status", "-S", required=True, help="target status name")
     p_mv.add_argument(
-        "position",
+        "--position",
+        type=int,
+        default=None,
+        help="zero-indexed position within status; 0 = top (default), higher values move further down",
+    )
+    p_mv.add_argument(
+        "position_positional",
+        metavar="position",
         type=int,
         nargs="?",
         default=None,
-        help="zero-indexed position within status; 0 = top (default), higher values move further down",
+        help="(deprecated) positional form of --position; prefer --position",
     )
     p_mv.add_argument("--dry-run", action="store_true", help="preview move without writing")
 
@@ -1568,6 +1672,27 @@ def build_parser() -> argparse.ArgumentParser:
     p_emeta_del.set_defaults(command="edge_meta_del")
     _add_edge_meta_args(p_emeta_del)
     p_emeta_del.add_argument("key")
+
+    p_esh = edge_sub.add_parser("show", help="show edge detail")
+    p_esh.set_defaults(command="edge_show")
+    _add_edge_meta_args(p_esh)
+
+    p_eed = edge_sub.add_parser("edit", help="edit edge fields (acyclic flag)")
+    p_eed.set_defaults(command="edge_edit")
+    _add_edge_meta_args(p_eed)
+    p_eed_acyclic = p_eed.add_mutually_exclusive_group()
+    p_eed_acyclic.add_argument(
+        "--acyclic", dest="acyclic", action="store_const", const=True, default=None,
+        help="enable DAG constraint (re-runs cycle detection)",
+    )
+    p_eed_acyclic.add_argument(
+        "--no-acyclic", dest="acyclic", action="store_const", const=False,
+        help="disable DAG constraint",
+    )
+
+    p_elog = edge_sub.add_parser("log", help="show edge journal / change history")
+    p_elog.set_defaults(command="edge_log")
+    _add_edge_meta_args(p_elog)
 
     # ---- Group subcommands ----
 

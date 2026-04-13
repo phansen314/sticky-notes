@@ -140,6 +140,27 @@ class TaskDetail:
 
 
 @dataclass(frozen=True)
+class EdgeDetail:
+    """Fully hydrated polymorphic edge view. Flat redeclaration of edge
+    fields plus hydrated endpoint titles, metadata, and journal history.
+    Follows the TaskDetail/GroupDetail pattern — does not inherit from
+    EdgeListItem."""
+
+    from_type: NodeType
+    from_id: int
+    from_title: str
+    to_type: NodeType
+    to_id: int
+    to_title: str
+    workspace_id: int
+    kind: str
+    acyclic: bool
+    archived: bool
+    metadata: dict[str, str]
+    history: tuple[JournalEntry, ...]
+
+
+@dataclass(frozen=True)
 class GroupDetail:
     """Fully hydrated group view.
 

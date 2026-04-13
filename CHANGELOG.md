@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- `stx edge show` — full detail view for a single polymorphic edge,
+  including endpoint titles, acyclic flag, archived flag, metadata, and
+  filtered journal history.
+- `stx edge edit` — mutate the `acyclic` flag on an existing edge. Kind
+  and endpoints remain immutable (composite PK). Flipping `0 → 1` re-runs
+  cycle detection and rejects the edit if a cycle would result.
+- `stx edge log` — journal history for a single edge, recovered via
+  paired endpoint/kind rows sharing a transaction timestamp.
+- `stx task edit --group <title>` assigns a task to a group; pass an
+  empty string (`--group ""`) to unassign. Complements the existing
+  `stx group assign` / `stx group unassign` commands — both routes funnel
+  through `service.update_task` / `_update_task_body`.
+- `stx task mv --position <N>` — flag form for the position argument.
+  The positional form still works but is deprecated; mixing both with
+  conflicting values errors.
+
+### Changed
+- `stx status archive --force` now emits a stderr warning line when
+  active tasks will be cascade-archived (parity with task/group/workspace
+  prompts — informational only, not a prompt, preserves pipe-friendliness).
+
+### Deprecated
+- Positional `position` argument on `stx task mv`. Use `--position N`.
+  Current form remains accepted for one release.
+
 ## [0.15.0] — 2026-04-13
 
 ### Removed
