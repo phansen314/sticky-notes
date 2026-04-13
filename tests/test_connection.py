@@ -128,8 +128,8 @@ class TestTransaction:
         assert "disk full" in str(exc_info.value.__cause__)
 
 
-class TestSelfDependencyConstraint:
-    def test_task_cannot_depend_on_itself(self, conn: sqlite3.Connection) -> None:
+class TestSelfEdgeConstraint:
+    def test_edge_cannot_point_to_itself(self, conn: sqlite3.Connection) -> None:
         with transaction(conn):
             workspace_id = insert_workspace(conn, "b")
             col_id = insert_status(conn, workspace_id, "col")
@@ -137,11 +137,13 @@ class TestSelfDependencyConstraint:
         with pytest.raises(sqlite3.IntegrityError):
             with transaction(conn):
                 conn.execute(
-                    "INSERT INTO task_edges (source_id, target_id, kind) VALUES (?, ?, 'blocks')",
-                    (task_id, task_id),
+                    "INSERT INTO edges "
+                    "(from_type, from_id, to_type, to_id, workspace_id, kind) "
+                    "VALUES ('task', ?, 'task', ?, ?, 'blocks')",
+                    (task_id, task_id, workspace_id),
                 )
 
-    def test_valid_dependency_allowed(self, conn: sqlite3.Connection) -> None:
+    def test_valid_edge_allowed(self, conn: sqlite3.Connection) -> None:
         with transaction(conn):
             workspace_id = insert_workspace(conn, "b")
             col_id = insert_status(conn, workspace_id, "col")
@@ -149,13 +151,16 @@ class TestSelfDependencyConstraint:
             t2 = insert_task(conn, workspace_id, "t2", col_id)
         with transaction(conn):
             conn.execute(
-                "INSERT INTO task_edges (source_id, target_id, workspace_id, kind) "
-                "VALUES (?, ?, ?, 'blocks')",
+                "INSERT INTO edges "
+                "(from_type, from_id, to_type, to_id, workspace_id, kind) "
+                "VALUES ('task', ?, 'task', ?, ?, 'blocks')",
                 (t1, t2, workspace_id),
             )
-        row = conn.execute("SELECT * FROM task_edges").fetchone()
-        assert row["source_id"] == t1
-        assert row["target_id"] == t2
+        row = conn.execute("SELECT * FROM edges").fetchone()
+        assert row["from_type"] == "task"
+        assert row["from_id"] == t1
+        assert row["to_type"] == "task"
+        assert row["to_id"] == t2
 
 
 class TestStatusArchived:
@@ -207,7 +212,7 @@ class TestForeignKeyEnforcement:
 
 
 class TestCrossWorkspaceConstraints:
-    def test_dependency_same_workspace_allowed(self, conn: sqlite3.Connection) -> None:
+    def test_edge_same_workspace_allowed(self, conn: sqlite3.Connection) -> None:
         with transaction(conn):
             bid = insert_workspace(conn, "b")
             cid = insert_status(conn, bid)
@@ -215,16 +220,24 @@ class TestCrossWorkspaceConstraints:
             t2 = insert_task(conn, bid, "t2", cid)
         with transaction(conn):
             conn.execute(
-                "INSERT INTO task_edges (source_id, target_id, workspace_id, kind) "
-                "VALUES (?, ?, ?, 'blocks')",
+                "INSERT INTO edges "
+                "(from_type, from_id, to_type, to_id, workspace_id, kind) "
+                "VALUES ('task', ?, 'task', ?, ?, 'blocks')",
                 (t1, t2, bid),
             )
-        row = conn.execute("SELECT * FROM task_edges").fetchone()
-        assert row["source_id"] == t1
-        assert row["target_id"] == t2
+        row = conn.execute("SELECT * FROM edges").fetchone()
+        assert row["from_id"] == t1
+        assert row["to_id"] == t2
         assert row["workspace_id"] == bid
 
-    def test_dependency_cross_workspace_rejected(self, conn: sqlite3.Connection) -> None:
+    def test_edge_cross_workspace_rejected_by_service(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        """Cross-workspace edges are rejected at the service layer, not the DB.
+        The unified ``edges`` table has no composite FK to endpoints (edges are
+        polymorphic), so DB-level enforcement was traded for an app-layer check
+        in ``service.add_edge``."""
+        from stx import service
         with transaction(conn):
             b1 = insert_workspace(conn, "b1")
             b2 = insert_workspace(conn, "b2")
@@ -232,13 +245,8 @@ class TestCrossWorkspaceConstraints:
             c2 = insert_status(conn, b2)
             t1 = insert_task(conn, b1, "t1", c1)
             t2 = insert_task(conn, b2, "t2", c2)
-        with pytest.raises(sqlite3.IntegrityError):
-            with transaction(conn):
-                conn.execute(
-                    "INSERT INTO task_edges (source_id, target_id, workspace_id, kind) "
-                    "VALUES (?, ?, ?, 'blocks')",
-                    (t1, t2, b1),
-                )
+        with pytest.raises(ValueError, match="same workspace"):
+            service.add_edge(conn, "task", t1, "task", t2, kind="blocks")
 
     def test_tag_same_workspace_allowed(self, conn: sqlite3.Connection) -> None:
         with transaction(conn):
@@ -600,14 +608,21 @@ class TestMigrations:
                 "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
             ).fetchall()
         }
-        assert "group_edges" in tables
-        # After all migrations: boards→workspaces (006), projects removed (015)
+        # After migration 016: task_edges + group_edges are unified into `edges`.
+        assert "edges" in tables
+        assert "task_edges" not in tables
+        assert "group_edges" not in tables
+        # After all migrations: boards→workspaces (006), projects removed (015),
+        # unified edges (016). Self-loop on the polymorphic edges table is still
+        # rejected by the CHECK constraint.
         conn.execute("INSERT INTO workspaces (id, name) VALUES (1, 'b')")
         conn.execute("INSERT INTO groups (id, workspace_id, title) VALUES (1, 1, 'g')")
         conn.commit()
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute(
-                "INSERT INTO group_edges (source_id, target_id, workspace_id, kind) VALUES (1, 1, 1, 'blocks')"
+                "INSERT INTO edges "
+                "(from_type, from_id, to_type, to_id, workspace_id, kind) "
+                "VALUES ('group', 1, 'group', 1, 1, 'blocks')"
             )
         conn.close()
 
@@ -806,9 +821,9 @@ class TestMigrations:
             with pytest.raises(sqlite3.IntegrityError, match="json_valid"):
                 conn.execute(sql)
 
-        # Dependent rows preserved (task_history migrated to journal by migration 013,
-        # task_dependencies renamed to task_edges by migration 014)
-        assert conn.execute("SELECT COUNT(*) FROM task_edges").fetchone()[0] == 1
+        # Dependent rows preserved (task_history→journal in 013,
+        # task_dependencies→task_edges in 014, task_edges+group_edges→edges in 016)
+        assert conn.execute("SELECT COUNT(*) FROM edges").fetchone()[0] == 1
         assert conn.execute("SELECT COUNT(*) FROM task_tags").fetchone()[0] == 1
         assert (
             conn.execute("SELECT COUNT(*) FROM journal WHERE entity_type='task'").fetchone()[0] == 1

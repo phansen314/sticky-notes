@@ -701,26 +701,30 @@ def _validate_move_to_workspace(
     task_id: int,
     target_workspace_id: int,
     target_status_id: int,
-) -> tuple[Task, bool, str | None, tuple[int, ...]]:
+) -> tuple[Task, bool, str | None, tuple[tuple[str, int], ...]]:
     """Check move-to-workspace preconditions. Non-mutating.
-    Returns (task, can_move, blocking_reason, edge_ids).
+    Returns (task, can_move, blocking_reason, edge_endpoints).
+    edge_endpoints is a deduped, sorted tuple of (node_type, node_id) pairs
+    for every active edge touching this task (in or out). Type is preserved
+    so tasks and groups with the same numeric ID don't collapse.
     Raises LookupError only if task_id does not exist."""
     task = get_task(conn, task_id)
-    edge_ids: tuple[int, ...] = ()
+    edge_endpoints: tuple[tuple[str, int], ...] = ()
     if task.archived:
-        return task, False, f"task {task_id} is archived", edge_ids
+        return task, False, f"task {task_id} is archived", edge_endpoints
     sources = repo.list_edge_sources_into(conn, "task", task_id)
     targets = repo.list_edge_targets_from(conn, "task", task_id)
     if sources or targets:
-        edge_ids = tuple(sorted({nid for _, nid in (*sources, *targets)}))
+        edge_endpoints = tuple(sorted(set((*sources, *targets))))
+        label = ", ".join(f"{nt}:{nid}" for nt, nid in edge_endpoints)
         return (
             task,
             False,
             (
-                f"task {task_id} has active edges ({', '.join(str(d) for d in edge_ids)}); "
+                f"task {task_id} has active edges ({label}); "
                 "archive them before moving to another workspace"
             ),
-            edge_ids,
+            edge_endpoints,
         )
     target_col = repo.get_status(conn, target_status_id)
     if target_col is None or target_col.workspace_id != target_workspace_id:
@@ -728,11 +732,11 @@ def _validate_move_to_workspace(
             task,
             False,
             (f"status {target_status_id} does not belong to workspace {target_workspace_id}"),
-            edge_ids,
+            edge_endpoints,
         )
     if target_col.archived:
-        return task, False, f"status {target_status_id} is archived", edge_ids
-    return task, True, None, edge_ids
+        return task, False, f"status {target_status_id} is archived", edge_endpoints
+    return task, True, None, edge_endpoints
 
 
 def preview_move_to_workspace(
@@ -742,7 +746,7 @@ def preview_move_to_workspace(
     target_status_id: int,
 ) -> MoveToWorkspacePreview:
     """Dry-run the same validation as move_task_to_workspace. Does not mutate."""
-    task, can_move, reason, edge_ids = _validate_move_to_workspace(
+    task, can_move, reason, edge_endpoints = _validate_move_to_workspace(
         conn,
         task_id,
         target_workspace_id,
@@ -756,7 +760,7 @@ def preview_move_to_workspace(
         target_status_id=target_status_id,
         can_move=can_move,
         blocking_reason=reason,
-        edge_ids=edge_ids,
+        edge_endpoints=edge_endpoints,
         is_archived=task.archived,
     )
 
@@ -1221,13 +1225,25 @@ def add_edge(
     kind: str,
     acyclic: bool | None = None,
     source: str = "cli",
-) -> None:
+) -> str:
     """Create an edge from (from_type, from_id) to (to_type, to_id).
 
     Both endpoints must exist on the same workspace and not be archived.
     If ``acyclic`` is None the default for the given kind is used.
     Cycle detection runs only when the edge is acyclic.
-    Reviving an archived edge journals the unarchive + any kind/acyclic change.
+
+    Returns the normalized (lowercased, validated) kind — callers that need
+    to surface the kind back to the user should prefer the returned value
+    over the input so CLI/JSON output matches what actually hit the DB.
+
+    **Revival semantics.** When this call reactivates a previously archived
+    edge (same PK — from_type/from_id/to_type/to_id/kind), the existing row's
+    metadata is wiped back to ``{}`` and ``acyclic`` is overwritten with the
+    new value. The revival journals only ``archived: 1→0`` (plus an
+    ``acyclic`` entry if it changed) — it does NOT re-emit ``endpoint`` /
+    ``kind`` journal rows, since the edge identity is unchanged. Treat
+    archive+revive as "fresh start": don't archive an edge if you want its
+    metadata preserved.
     """
     kind = _normalize_edge_kind(kind)
     if acyclic is None:
@@ -1298,6 +1314,7 @@ def add_edge(
                 acyclic=acyclic_int,
                 source=source,
             )
+    return kind
 
 
 def archive_edge(
@@ -1308,7 +1325,13 @@ def archive_edge(
     to_id: int,
     kind: str,
     source: str = "cli",
-) -> None:
+) -> str:
+    """Archive an active edge identified by endpoints + kind.
+
+    Returns the normalized kind so CLI/JSON output reflects the value that
+    actually hit the DB, not the raw user input.
+    """
+    kind = _normalize_edge_kind(kind)
     with transaction(conn), _friendly_errors():
         active = repo.get_active_edge(conn, from_type, from_id, to_type, to_id, kind)
         if active is None:
@@ -1334,6 +1357,7 @@ def archive_edge(
             acyclic=active[1],
             source=source,
         )
+    return kind
 
 
 def list_edges(

@@ -693,6 +693,50 @@ class TestEdgeService:
         service.add_edge(conn, "task", t1, "task", t2, kind="related-to")
         service.add_edge(conn, "task", t2, "task", t1, kind="related-to")  # cycle OK
 
+    def test_cycle_ignores_non_acyclic_path(self, conn: sqlite3.Connection) -> None:
+        """A cycle that closes through a non-acyclic edge is NOT rejected.
+        Design guarantee: only ``acyclic=1`` edges participate in DAG
+        enforcement — a ``related-to`` hop cannot transitively create a cycle
+        for ``blocks``."""
+        bid = insert_workspace(conn)
+        cid = insert_status(conn, bid)
+        t1 = insert_task(conn, bid, "a", cid)
+        t2 = insert_task(conn, bid, "b", cid)
+        t3 = insert_task(conn, bid, "c", cid)
+        service.add_edge(conn, "task", t1, "task", t2, kind="blocks")        # acyclic
+        service.add_edge(conn, "task", t2, "task", t3, kind="related-to")    # non-acyclic
+        # t3 -blocks-> t1 closes the loop only via the related-to hop.
+        # Reachability CTE walks only acyclic=1 edges, so t1 is NOT reachable
+        # from t3 and this edge must succeed.
+        service.add_edge(conn, "task", t3, "task", t1, kind="blocks")
+
+    def test_cycle_cross_type_rejected(self, conn: sqlite3.Connection) -> None:
+        """Cycle detection must walk heterogeneous node types. Adding
+        task → group → task where the closing edge uses an acyclic kind
+        must be rejected. A bug in the polymorphic nodes CTE or reachability
+        join would silently let this through."""
+        bid = insert_workspace(conn)
+        cid = insert_status(conn, bid)
+        t1 = insert_task(conn, bid, "a", cid)
+        g1 = insert_group(conn, bid, "g")
+        service.add_edge(conn, "task", t1, "group", g1, kind="blocks")  # t1 -> g1 (acyclic)
+        with pytest.raises(ValueError, match="cycle"):
+            service.add_edge(conn, "group", g1, "task", t1, kind="spawns")  # closes the loop
+
+    def test_cross_type_edge_via_service(self, conn: sqlite3.Connection) -> None:
+        """Smoke test for polymorphic add_edge through the service layer
+        (task → group). The repo test covers raw insert; this verifies that
+        _resolve_edge_node + workspace_id resolution + hydration all work
+        across types end-to-end."""
+        bid = insert_workspace(conn)
+        cid = insert_status(conn, bid)
+        t1 = insert_task(conn, bid, "t", cid)
+        g1 = insert_group(conn, bid, "g")
+        service.add_edge(conn, "task", t1, "group", g1, kind="spawns")
+        detail = service.get_task_detail(conn, t1)
+        targets = {(ref.node_type, ref.node_id) for ref in detail.edge_targets}
+        assert ("group", g1) in targets
+
     def test_non_cycle_allowed(self, conn: sqlite3.Connection) -> None:
         bid = insert_workspace(conn)
         cid = insert_status(conn, bid)
@@ -978,7 +1022,7 @@ class TestMoveTaskToWorkspace:
         preview = service.preview_move_to_workspace(conn, tid, b2, c2)
         assert preview.can_move is True
         assert preview.blocking_reason is None
-        assert preview.edge_ids == ()
+        assert preview.edge_endpoints == ()
         assert preview.is_archived is False
         assert preview.task_title == "t"
         assert preview.source_workspace_id == b1
@@ -995,7 +1039,7 @@ class TestMoveTaskToWorkspace:
         c2 = insert_status(conn, b2, "backlog")
         preview = service.preview_move_to_workspace(conn, t2, b2, c2)
         assert preview.can_move is False
-        assert preview.edge_ids == (t1,)
+        assert preview.edge_endpoints == (("task", t1),)
         assert "active edges" in preview.blocking_reason
 
     def test_preview_archived_task(self, conn: sqlite3.Connection) -> None:
@@ -2099,7 +2143,7 @@ class TestArchivePreviewAndCascade:
         c2 = insert_status(conn, b2, "backlog")
         preview = service.preview_move_to_workspace(conn, t1, b2, c2)
         assert preview.can_move is True
-        assert preview.edge_ids == ()
+        assert preview.edge_endpoints == ()
 
 
 # ---- Task metadata ----

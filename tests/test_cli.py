@@ -518,7 +518,7 @@ class TestTaskCommands:
         out, _ = cli(
             "edge", "create", "--source", "Task B", "--target", "Task A", "--kind", "blocks"
         )
-        assert "task-0002" in out and "task-0001" in out
+        assert "task:2" in out and "task:1" in out
 
 
 # ---- Project commands ----
@@ -537,7 +537,7 @@ class TestEdgeCommands:
         cli("task", "create", "Task A", "-S", "todo")
         cli("task", "create", "Task B", "-S", "todo")
         out, _ = cli("edge", "create", "--source", "2", "--target", "1", "--kind", "blocks")
-        assert "task-0002" in out and "task-0001" in out
+        assert "task:2" in out and "task:1" in out
         assert "blocks" in out
 
     def test_add_with_kind(self, cli):
@@ -552,7 +552,7 @@ class TestEdgeCommands:
         cli("edge", "create", "--source", "2", "--target", "1", "--kind", "blocks")
         out, _ = cli("edge", "ls")
         assert "blocks" in out
-        assert "task-0001" in out and "task-0002" in out
+        assert "task:1" in out and "task:2" in out
 
     def test_invalid_kind_rejected(self, cli):
         cli("task", "create", "Task A", "-S", "todo")
@@ -1164,10 +1164,11 @@ class TestJsonOutput:
             cli, "edge", "create", "--source", "1", "--target", "2", "--kind", "blocks"
         )
         assert data["ok"] is True
-        assert data["data"]["source_id"] == 1
-        assert data["data"]["source_title"] == "T1"
-        assert data["data"]["target_id"] == 2
-        assert data["data"]["target_title"] == "T2"
+        assert data["data"]["from_type"] == "task"
+        assert data["data"]["from_id"] == 1
+        assert data["data"]["to_type"] == "task"
+        assert data["data"]["to_id"] == 2
+        assert data["data"]["kind"] == "blocks"
 
     def test_tag_create(self, cli):
         cli("workspace", "create", "B")
@@ -1306,7 +1307,7 @@ class TestJsonOutput:
         assert data["ok"] is True
         payload = data["data"]
         assert payload["can_move"] is True
-        assert payload["edge_ids"] == []
+        assert payload["edge_endpoints"] == []
         assert payload["blocking_reason"] is None
         assert payload["is_archived"] is False
 
@@ -2007,7 +2008,7 @@ class TestEdgeReCreation:
         self.cli("edge", "create", "--source", "2", "--target", "1", "--kind", "blocks")
         self.cli("edge", "archive", "--source", "2", "--target", "1", "--kind", "blocks")
         out, _ = self.cli("edge", "create", "--source", "2", "--target", "1", "--kind", "blocks")
-        assert "task-0002" in out
+        assert "task:2" in out
 
 
 # ---- End-to-end smoke test ----

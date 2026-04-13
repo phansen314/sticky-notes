@@ -489,6 +489,8 @@ def _resolve_edge_node(
     conn: sqlite3.Connection,
     workspace_id: int,
     ref: str,
+    *,
+    parent_title: str | None = None,
 ) -> tuple[str, int]:
     """Parse a typed node ref and return (node_type, node_id).
 
@@ -498,10 +500,14 @@ def _resolve_edge_node(
       workspace:<name>                     → ('workspace', id)
 
     When no prefix is given, the ref is resolved as a task (task number or title).
+    ``parent_title`` disambiguates group refs when multiple groups share a title
+    under different parents. Ignored for task and workspace refs.
     """
     if ref.startswith("group:"):
         title = ref[len("group:"):]
-        grp = service.resolve_group(conn, workspace_id, title)
+        grp = service.resolve_group(
+            conn, workspace_id, title, parent_title=parent_title
+        )
         return "group", grp.id
     elif ref.startswith("workspace:"):
         name = ref[len("workspace:"):]
@@ -528,13 +534,20 @@ def cmd_edge_create(
     conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext
 ) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
-    from_type, from_id = _resolve_edge_node(conn, workspace.id, args.source)
-    to_type, to_id = _resolve_edge_node(conn, workspace.id, args.target)
-    kind = args.kind
+    from_type, from_id = _resolve_edge_node(
+        conn, workspace.id, args.source, parent_title=args.source_parent
+    )
+    to_type, to_id = _resolve_edge_node(
+        conn, workspace.id, args.target, parent_title=args.target_parent
+    )
     acyclic: bool | None = None
     if args.acyclic is not None:
         acyclic = args.acyclic
-    service.add_edge(conn, from_type, from_id, to_type, to_id, kind, acyclic=acyclic)
+    # service.add_edge returns the normalized kind so the Ok payload matches
+    # what actually hit the DB (e.g. --kind BLOCKS → "blocks").
+    kind = service.add_edge(
+        conn, from_type, from_id, to_type, to_id, args.kind, acyclic=acyclic
+    )
     return Ok(
         data={
             "from_type": from_type,
@@ -551,10 +564,13 @@ def cmd_edge_archive(
     conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext
 ) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
-    from_type, from_id = _resolve_edge_node(conn, workspace.id, args.source)
-    to_type, to_id = _resolve_edge_node(conn, workspace.id, args.target)
-    kind = args.kind
-    service.archive_edge(conn, from_type, from_id, to_type, to_id, kind)
+    from_type, from_id = _resolve_edge_node(
+        conn, workspace.id, args.source, parent_title=args.source_parent
+    )
+    to_type, to_id = _resolve_edge_node(
+        conn, workspace.id, args.target, parent_title=args.target_parent
+    )
+    kind = service.archive_edge(conn, from_type, from_id, to_type, to_id, args.kind)
     return Ok(
         data={
             "from_type": from_type,
@@ -574,9 +590,13 @@ def cmd_edge_ls(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunCont
     to_type: str | None = None
     to_id: int | None = None
     if args.source:
-        from_type, from_id = _resolve_edge_node(conn, workspace.id, args.source)
+        from_type, from_id = _resolve_edge_node(
+            conn, workspace.id, args.source, parent_title=args.source_parent
+        )
     if args.target:
-        to_type, to_id = _resolve_edge_node(conn, workspace.id, args.target)
+        to_type, to_id = _resolve_edge_node(
+            conn, workspace.id, args.target, parent_title=args.target_parent
+        )
     edges = service.list_edges(
         conn,
         workspace.id,
@@ -593,12 +613,23 @@ def cmd_edge_ls(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunCont
 # ---- Edge metadata subcommands ----
 
 
+def _resolve_edge_meta_endpoints(
+    conn: sqlite3.Connection, args: argparse.Namespace, workspace_id: int
+) -> tuple[str, int, str, int]:
+    from_type, from_id = _resolve_edge_node(
+        conn, workspace_id, args.source, parent_title=args.source_parent
+    )
+    to_type, to_id = _resolve_edge_node(
+        conn, workspace_id, args.target, parent_title=args.target_parent
+    )
+    return from_type, from_id, to_type, to_id
+
+
 def cmd_edge_meta_ls(
     conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext
 ) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
-    from_type, from_id = _resolve_edge_node(conn, workspace.id, args.source)
-    to_type, to_id = _resolve_edge_node(conn, workspace.id, args.target)
+    from_type, from_id, to_type, to_id = _resolve_edge_meta_endpoints(conn, args, workspace.id)
     kind = args.kind
     meta = service.list_edge_metadata(conn, from_type, from_id, to_type, to_id, kind)
     records = _meta_records(meta)
@@ -610,8 +641,7 @@ def cmd_edge_meta_get(
     conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext
 ) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
-    from_type, from_id = _resolve_edge_node(conn, workspace.id, args.source)
-    to_type, to_id = _resolve_edge_node(conn, workspace.id, args.target)
+    from_type, from_id, to_type, to_id = _resolve_edge_meta_endpoints(conn, args, workspace.id)
     kind = args.kind
     value = service.get_edge_meta(conn, from_type, from_id, to_type, to_id, kind, args.key)
     key = args.key.lower()
@@ -622,8 +652,7 @@ def cmd_edge_meta_set(
     conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext
 ) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
-    from_type, from_id = _resolve_edge_node(conn, workspace.id, args.source)
-    to_type, to_id = _resolve_edge_node(conn, workspace.id, args.target)
+    from_type, from_id, to_type, to_id = _resolve_edge_meta_endpoints(conn, args, workspace.id)
     kind = args.kind
     service.set_edge_meta(conn, from_type, from_id, to_type, to_id, kind, args.key, args.value)
     key = args.key.lower()
@@ -637,8 +666,7 @@ def cmd_edge_meta_del(
     conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext
 ) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
-    from_type, from_id = _resolve_edge_node(conn, workspace.id, args.source)
-    to_type, to_id = _resolve_edge_node(conn, workspace.id, args.target)
+    from_type, from_id, to_type, to_id = _resolve_edge_meta_endpoints(conn, args, workspace.id)
     kind = args.kind
     removed = service.remove_edge_meta(conn, from_type, from_id, to_type, to_id, kind, args.key)
     key = args.key.lower()
@@ -1485,10 +1513,17 @@ def build_parser() -> argparse.ArgumentParser:
         "group:<title> for groups; workspace:<name> for workspaces"
     )
 
+    _parent_help = (
+        "disambiguate a group: ref when multiple groups share a title under "
+        "different parents (parent group title)"
+    )
+
     p_ea = edge_sub.add_parser("create", help="add an edge")
     p_ea.set_defaults(command="edge_create")
     p_ea.add_argument("--source", "-s", required=True, help=f"source node — {_edge_ref_help}")
     p_ea.add_argument("--target", "-t", required=True, help=f"target node — {_edge_ref_help}")
+    p_ea.add_argument("--source-parent", default=None, help=_parent_help)
+    p_ea.add_argument("--target-parent", default=None, help=_parent_help)
     p_ea.add_argument("--kind", "-k", required=True, help="edge kind (e.g. blocks, spawns, informs)")
     p_ea_acyclic = p_ea.add_mutually_exclusive_group()
     p_ea_acyclic.add_argument(
@@ -1504,12 +1539,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_er.set_defaults(command="edge_archive")
     p_er.add_argument("--source", "-s", required=True, help=f"source node — {_edge_ref_help}")
     p_er.add_argument("--target", "-t", required=True, help=f"target node — {_edge_ref_help}")
+    p_er.add_argument("--source-parent", default=None, help=_parent_help)
+    p_er.add_argument("--target-parent", default=None, help=_parent_help)
     p_er.add_argument("--kind", "-k", required=True, help="edge kind to archive")
 
     p_els = edge_sub.add_parser("ls", help="list edges in workspace")
     p_els.set_defaults(command="edge_ls")
     p_els.add_argument("--source", "-s", default=None, help=f"filter by source node — {_edge_ref_help}")
     p_els.add_argument("--target", "-t", default=None, help=f"filter by target node — {_edge_ref_help}")
+    p_els.add_argument("--source-parent", default=None, help=_parent_help)
+    p_els.add_argument("--target-parent", default=None, help=_parent_help)
     p_els.add_argument("--kind", "-k", default=None, help="filter by edge kind")
 
     p_emeta = edge_sub.add_parser("meta", help="edge metadata management")
@@ -1518,6 +1557,8 @@ def build_parser() -> argparse.ArgumentParser:
     def _add_edge_meta_args(p: argparse.ArgumentParser) -> None:
         p.add_argument("--source", "-s", required=True, help=f"source node — {_edge_ref_help}")
         p.add_argument("--target", "-t", required=True, help=f"target node — {_edge_ref_help}")
+        p.add_argument("--source-parent", default=None, help=_parent_help)
+        p.add_argument("--target-parent", default=None, help=_parent_help)
         p.add_argument("--kind", "-k", required=True, help="edge kind")
 
     p_emeta_ls = emeta_sub.add_parser("ls", help="list all edge metadata")

@@ -207,8 +207,10 @@ def format_move_preview(
     dest = f"workspace '{target_workspace_name}' / status '{target_status_name}'"
     lines.append(f"  from workspace '{source_workspace_name}' -> {dest}")
     if not preview.can_move:
-        if preview.edge_ids:
-            edge_list = ", ".join(format_task_num(d) for d in preview.edge_ids)
+        if preview.edge_endpoints:
+            edge_list = ", ".join(
+                f"{nt}:{nid}" for nt, nid in preview.edge_endpoints
+            )
             lines.append(f"  \u26a0 has active edges: {edge_list}")
             lines.append("  move would FAIL \u2014 archive edges first")
         else:

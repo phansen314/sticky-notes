@@ -176,7 +176,7 @@ class MoveToWorkspacePreview:
     target_status_id: int
     can_move: bool
     blocking_reason: str | None
-    edge_ids: tuple[int, ...]
+    edge_endpoints: tuple[tuple[str, int], ...]
     is_archived: bool
 
 

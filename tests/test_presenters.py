@@ -521,7 +521,7 @@ class TestFormatMovePreview:
             target_status_id=3,
             can_move=True,
             blocking_reason=None,
-            edge_ids=(),
+            edge_endpoints=(),
             is_archived=False,
         )
         base.update(overrides)
@@ -538,9 +538,12 @@ class TestFormatMovePreview:
         assert "transfer OK" in out
 
     def test_blocked_by_active_edges(self):
-        p = self._preview(can_move=False, edge_ids=(10, 11))
+        p = self._preview(
+            can_move=False,
+            edge_endpoints=(("task", 10), ("group", 11)),
+        )
         out = presenters.format_move_preview(p, "other", "Backlog", source_workspace_name="dev")
-        assert "has active edges: task-0010, task-0011" in out
+        assert "has active edges: task:10, group:11" in out
         assert "move would FAIL" in out
 
     def test_blocked_other_reason(self):

@@ -656,11 +656,16 @@ def list_edge_targets_from(
     from_type: str,
     from_id: int,
 ) -> tuple[tuple[str, int], ...]:
-    """Return (to_type, to_id) pairs for all active edges originating at (from_type, from_id).
-    Archived edges are excluded."""
+    """Return (to_type, to_id) pairs for all active edges originating at (from_type, from_id)
+    whose target endpoint is also active. Archived edges and archived endpoints are
+    hidden so this function agrees with the hydrated variant and with list_edges_by_workspace."""
     rows = conn.execute(
-        "SELECT to_type, to_id FROM edges "
-        "WHERE from_type = ? AND from_id = ? AND archived = 0",
+        _NODES_CTE + """
+        SELECT e.to_type, e.to_id
+        FROM edges e
+        JOIN nodes n ON n.node_type = e.to_type AND n.id = e.to_id
+        WHERE e.from_type = ? AND e.from_id = ? AND e.archived = 0
+        """,
         (from_type, from_id),
     ).fetchall()
     return tuple((r["to_type"], r["to_id"]) for r in rows)
@@ -671,11 +676,16 @@ def list_edge_sources_into(
     to_type: str,
     to_id: int,
 ) -> tuple[tuple[str, int], ...]:
-    """Return (from_type, from_id) pairs for all active edges pointing into (to_type, to_id).
-    Archived edges are excluded."""
+    """Return (from_type, from_id) pairs for all active edges pointing into (to_type, to_id)
+    whose source endpoint is also active. Archived edges and archived endpoints are
+    hidden so this function agrees with the hydrated variant and with list_edges_by_workspace."""
     rows = conn.execute(
-        "SELECT from_type, from_id FROM edges "
-        "WHERE to_type = ? AND to_id = ? AND archived = 0",
+        _NODES_CTE + """
+        SELECT e.from_type, e.from_id
+        FROM edges e
+        JOIN nodes n ON n.node_type = e.from_type AND n.id = e.from_id
+        WHERE e.to_type = ? AND e.to_id = ? AND e.archived = 0
+        """,
         (to_type, to_id),
     ).fetchall()
     return tuple((r["from_type"], r["from_id"]) for r in rows)
