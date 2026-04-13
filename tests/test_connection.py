@@ -46,12 +46,11 @@ class TestInitDb:
             "workspaces",
             "statuses",
             "tasks",
-            "task_edges",
+            "edges",
             "journal",
             "tags",
             "task_tags",
             "groups",
-            "group_edges",
         }
 
     def test_idempotent(self, conn: sqlite3.Connection) -> None:

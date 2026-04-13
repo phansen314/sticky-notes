@@ -5,22 +5,17 @@ from typing import Any, Literal
 
 from .models import Group, JournalEntry, Status, Tag, Task, Workspace
 
-# ---- Edge ref types (hydrated edge with kind) ----
+# ---- Edge ref types (hydrated edge endpoint with kind) ----
 
 
 @dataclass(frozen=True)
-class TaskEdgeRef:
-    """A task edge hydrated with the full task object and its kind."""
+class EdgeRef:
+    """A polymorphic edge endpoint — the far end of an edge, hydrated with
+    its type, ID, display title, and the edge kind label."""
 
-    task: Task
-    kind: str
-
-
-@dataclass(frozen=True)
-class GroupEdgeRef:
-    """A group edge hydrated with the full group object and its kind."""
-
-    group: Group
+    node_type: str  # 'task' | 'group' | 'workspace'
+    node_id: int
+    node_title: str
     kind: str
 
 
@@ -28,27 +23,19 @@ class GroupEdgeRef:
 
 
 @dataclass(frozen=True)
-class TaskEdgeListItem:
-    """Denormalized task edge for list rendering — carries task titles."""
+class EdgeListItem:
+    """Denormalized polymorphic edge for list rendering — carries display
+    titles for both endpoints."""
 
-    source_id: int
-    source_title: str
-    target_id: int
-    target_title: str
+    from_type: str
+    from_id: int
+    from_title: str
+    to_type: str
+    to_id: int
+    to_title: str
     workspace_id: int
     kind: str
-
-
-@dataclass(frozen=True)
-class GroupEdgeListItem:
-    """Denormalized group edge for list rendering — carries group titles."""
-
-    source_id: int
-    source_title: str
-    target_id: int
-    target_title: str
-    workspace_id: int
-    kind: str
+    acyclic: bool
 
 
 @dataclass(frozen=True)
@@ -144,8 +131,8 @@ class TaskDetail:
     metadata: dict[str, str]
     status: Status
     group: Group | None
-    edge_sources: tuple[TaskEdgeRef, ...]
-    edge_targets: tuple[TaskEdgeRef, ...]
+    edge_sources: tuple[EdgeRef, ...]
+    edge_targets: tuple[EdgeRef, ...]
     history: tuple[JournalEntry, ...]
     tags: tuple[Tag, ...]
 
@@ -173,8 +160,8 @@ class GroupDetail:
     children: tuple[Group, ...]
     parent: Group | None
     metadata: dict[str, str]
-    edge_sources: tuple[GroupEdgeRef, ...]
-    edge_targets: tuple[GroupEdgeRef, ...]
+    edge_sources: tuple[EdgeRef, ...]
+    edge_targets: tuple[EdgeRef, ...]
 
 
 # ---- Preview types ----

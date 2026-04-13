@@ -97,12 +97,14 @@ def format_task_detail(detail: TaskDetail) -> str:
     lines.append(f"  Created:     {format_timestamp(detail.created_at)}")
     if detail.edge_sources:
         items = ", ".join(
-            f"{format_task_num(ref.task.id)} ({ref.kind})" for ref in detail.edge_sources
+            f"{ref.node_type}:{ref.node_id} {ref.node_title} ({ref.kind})"
+            for ref in detail.edge_sources
         )
         lines.append(f"  Edge sources: {items}")
     if detail.edge_targets:
         items = ", ".join(
-            f"{format_task_num(ref.task.id)} ({ref.kind})" for ref in detail.edge_targets
+            f"{ref.node_type}:{ref.node_id} {ref.node_title} ({ref.kind})"
+            for ref in detail.edge_targets
         )
         lines.append(f"  Edge targets: {items}")
     if detail.description:
@@ -176,12 +178,14 @@ def format_group_detail(
         lines.append(f"  Sub-groups: {child_names}")
     if detail.edge_sources:
         items = ", ".join(
-            f"{format_group_num(ref.group.id)} ({ref.kind})" for ref in detail.edge_sources
+            f"{ref.node_type}:{ref.node_id} {ref.node_title} ({ref.kind})"
+            for ref in detail.edge_sources
         )
         lines.append(f"  Edge sources: {items}")
     if detail.edge_targets:
         items = ", ".join(
-            f"{format_group_num(ref.group.id)} ({ref.kind})" for ref in detail.edge_targets
+            f"{ref.node_type}:{ref.node_id} {ref.node_title} ({ref.kind})"
+            for ref in detail.edge_targets
         )
         lines.append(f"  Edge targets: {items}")
     if detail.tasks:
@@ -288,17 +292,14 @@ def format_config(config: object) -> str:
     return "\n".join(lines)
 
 
-def format_edge_list(edges: tuple, *, entity: str = "task") -> str:
-    """Render a list of TaskEdgeListItem or GroupEdgeListItem as a table.
-
-    ``entity`` is 'task' or 'group' — controls the ID formatter.
-    """
+def format_edge_list(edges: tuple) -> str:
+    """Render a list of EdgeListItem as a table."""
     if not edges:
-        return f"no {entity} edges"
-    fmt_id = format_task_num if entity == "task" else format_group_num
+        return "no edges"
     lines = []
     for e in edges:
-        src = f"{fmt_id(e.source_id)}  {e.source_title}"
-        tgt = f"{fmt_id(e.target_id)}  {e.target_title}"
-        lines.append(f"  {src}  --[{e.kind}]-->  {tgt}")
+        src = f"{e.from_type}:{e.from_id}  {e.from_title}"
+        tgt = f"{e.to_type}:{e.to_id}  {e.to_title}"
+        acyclic_marker = " [acyclic]" if e.acyclic else ""
+        lines.append(f"  {src}  --[{e.kind}]{acyclic_marker}-->  {tgt}")
     return "\n".join(lines)

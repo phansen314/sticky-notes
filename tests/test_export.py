@@ -310,8 +310,7 @@ class TestExportFullJson:
             "tags",
             "groups",
             "task_tags",
-            "task_edges",
-            "group_edges",
+            "edges",
             "journal",
         }
 
@@ -324,7 +323,7 @@ class TestExportFullJson:
             "tags",
             "groups",
             "task_tags",
-            "task_edges",
+            "edges",
             "journal",
         ):
             assert result[key] == [], f"expected {key} to be empty"
@@ -368,8 +367,8 @@ class TestExportFullJson:
         task_ids = {t["id"] for t in result["tasks"]}
         assert {t1, t2} <= task_ids
         edge_row = next(
-            d for d in result["task_edges"]
-            if d["source_id"] == t2 and d["target_id"] == t1
+            d for d in result["edges"]
+            if d["from_id"] == t2 and d["to_id"] == t1
         )
         assert edge_row["kind"] == "blocks"
         assert edge_row["metadata"] == {}
@@ -399,7 +398,7 @@ class TestExportFullJson:
             t2 = insert_task(conn, bid, "T2", col)
             insert_task_dependency(conn, t2, t1)
         result = export_full_json(conn)
-        dep = result["task_edges"][0]
+        dep = next(d for d in result["edges"] if d["from_id"] == t2 and d["to_id"] == t1)
         assert dep["workspace_id"] == bid
 
 
