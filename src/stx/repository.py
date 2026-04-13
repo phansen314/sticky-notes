@@ -307,6 +307,29 @@ def update_task(
     return row_to_task(row)
 
 
+def reassign_tasks_by_status(
+    conn: sqlite3.Connection,
+    old_status_id: int,
+    new_status_id: int,
+) -> None:
+    """Bulk move every non-archived task from one status to another in one UPDATE."""
+    conn.execute(
+        "UPDATE tasks SET status_id = ? WHERE status_id = ? AND archived = 0",
+        (new_status_id, old_status_id),
+    )
+
+
+def archive_tasks_by_status(
+    conn: sqlite3.Connection,
+    status_id: int,
+) -> None:
+    """Bulk archive every non-archived task in a status in one UPDATE."""
+    conn.execute(
+        "UPDATE tasks SET archived = 1 WHERE status_id = ? AND archived = 0",
+        (status_id,),
+    )
+
+
 def list_tasks_by_ids(
     conn: sqlite3.Connection,
     task_ids: tuple[int, ...],

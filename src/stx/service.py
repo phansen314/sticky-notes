@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import json
 import re
 import sqlite3
@@ -355,11 +356,41 @@ def archive_status(
         active_tasks = repo.list_tasks_by_status(conn, status_id)
         if active_tasks:
             if reassign_to_status_id is not None:
+                target = repo.get_status(conn, reassign_to_status_id)
+                if target is None:
+                    raise LookupError(f"status {reassign_to_status_id} not found")
+                if old is not None and target.workspace_id != old.workspace_id:
+                    raise ValueError(
+                        f"reassign target status {reassign_to_status_id} "
+                        f"belongs to a different workspace"
+                    )
+                if target.archived:
+                    raise ValueError(
+                        f"reassign target status {reassign_to_status_id} is archived"
+                    )
+                repo.reassign_tasks_by_status(conn, status_id, reassign_to_status_id)
                 for task in active_tasks:
-                    repo.update_task(conn, task.id, {"status_id": reassign_to_status_id})
+                    _record_entity_changes(
+                        conn,
+                        EntityType.TASK,
+                        task.id,
+                        task.workspace_id,
+                        task,
+                        {"status_id": reassign_to_status_id},
+                        source,
+                    )
             elif force:
+                repo.archive_tasks_by_status(conn, status_id)
                 for task in active_tasks:
-                    repo.update_task(conn, task.id, {"archived": True})
+                    _record_entity_changes(
+                        conn,
+                        EntityType.TASK,
+                        task.id,
+                        task.workspace_id,
+                        task,
+                        {"archived": True},
+                        source,
+                    )
             else:
                 raise ValueError(
                     f"status has {len(active_tasks)} active task(s); "
@@ -775,6 +806,8 @@ def _get_entity_meta(
     """
     normalized = _normalize_meta_key(key)
     entity = fetcher(conn, entity_id)
+    if entity is None:
+        raise LookupError(f"{entity_name} {entity_id} not found")
     if normalized not in entity.metadata:
         raise LookupError(f"metadata key {key!r} not found on {entity_name} {entity_id}")
     return entity.metadata[normalized]
@@ -789,33 +822,40 @@ def _set_entity_meta(
     entity_type: EntityType,
     setter: Callable[[sqlite3.Connection, int, str, str], None],
     fetcher: Callable[[sqlite3.Connection, int], Any],
+    workspace_id_of: Callable[[Any], int],
+    entity_name: str,
     source: str = "cli",
 ) -> Any:
     """Generic entity-metadata write. Validates the key and value length,
-    then persists via `setter` and returns the refreshed entity from `fetcher`.
+    persists via `setter`, and returns the new entity built from the old
+    one — skipping a redundant re-fetch.
     """
     normalized = _normalize_meta_key(key)
     if len(value) > _META_VALUE_MAX:
         raise ValueError(f"metadata value must be \u2264 {_META_VALUE_MAX} characters")
     with transaction(conn), _friendly_errors():
         old_entity = fetcher(conn, entity_id)
-        old_value = old_entity.metadata.get(normalized) if old_entity is not None else None
+        if old_entity is None:
+            raise LookupError(f"{entity_name} {entity_id} not found")
+        old_value = old_entity.metadata.get(normalized)
         setter(conn, entity_id, normalized, value)
-        result = fetcher(conn, entity_id)
-        if old_value != value and result is not None:
+        if old_value != value:
             repo.insert_journal_entry(
                 conn,
                 NewJournalEntry(
                     entity_type=entity_type,
                     entity_id=entity_id,
-                    workspace_id=getattr(result, "workspace_id", entity_id),
+                    workspace_id=workspace_id_of(old_entity),
                     field=f"meta.{normalized}",
                     old_value=old_value,
                     new_value=value,
                     source=source,
                 ),
             )
-        return result
+        return dataclasses.replace(
+            old_entity,
+            metadata={**old_entity.metadata, normalized: value},
+        )
 
 
 def _remove_entity_meta(
@@ -826,6 +866,7 @@ def _remove_entity_meta(
     entity_type: EntityType,
     remover: Callable[[sqlite3.Connection, int, str], None],
     fetcher: Callable[[sqlite3.Connection, int], Any],
+    workspace_id_of: Callable[[Any], int],
     entity_name: str,
     source: str = "cli",
 ) -> str:
@@ -836,6 +877,8 @@ def _remove_entity_meta(
     normalized = _normalize_meta_key(key)
     with transaction(conn), _friendly_errors():
         old = fetcher(conn, entity_id)
+        if old is None:
+            raise LookupError(f"{entity_name} {entity_id} not found")
         if normalized not in old.metadata:
             raise LookupError(f"metadata key {key!r} not found on {entity_name} {entity_id}")
         old_value = old.metadata[normalized]
@@ -845,7 +888,7 @@ def _remove_entity_meta(
             NewJournalEntry(
                 entity_type=entity_type,
                 entity_id=entity_id,
-                workspace_id=getattr(old, "workspace_id", entity_id),
+                workspace_id=workspace_id_of(old),
                 field=f"meta.{normalized}",
                 old_value=old_value,
                 new_value=None,
@@ -863,6 +906,8 @@ def _replace_entity_metadata(
     entity_type: EntityType,
     writer: Callable[[sqlite3.Connection, int, str], None],
     fetcher: Callable[[sqlite3.Connection, int], Any],
+    workspace_id_of: Callable[[Any], int],
+    entity_name: str,
     source: str = "cli",
 ) -> Any:
     """Generic bulk-replace for an entity's metadata blob.
@@ -883,27 +928,28 @@ def _replace_entity_metadata(
         normalized[key] = value
     with transaction(conn), _friendly_errors():
         old_entity = fetcher(conn, entity_id)
-        old_meta = old_entity.metadata if old_entity is not None else {}
+        if old_entity is None:
+            raise LookupError(f"{entity_name} {entity_id} not found")
+        old_meta = old_entity.metadata
         writer(conn, entity_id, json.dumps(normalized))
-        result = fetcher(conn, entity_id)
-        if result is not None:
-            for k in set(old_meta) | set(normalized):
-                old_val = old_meta.get(k)
-                new_val = normalized.get(k)
-                if old_val != new_val:
-                    repo.insert_journal_entry(
-                        conn,
-                        NewJournalEntry(
-                            entity_type=entity_type,
-                            entity_id=entity_id,
-                            workspace_id=getattr(result, "workspace_id", entity_id),
-                            field=f"meta.{k}",
-                            old_value=old_val,
-                            new_value=new_val,
-                            source=source,
-                        ),
-                    )
-        return result
+        workspace_id = workspace_id_of(old_entity)
+        for k in set(old_meta) | set(normalized):
+            old_val = old_meta.get(k)
+            new_val = normalized.get(k)
+            if old_val != new_val:
+                repo.insert_journal_entry(
+                    conn,
+                    NewJournalEntry(
+                        entity_type=entity_type,
+                        entity_id=entity_id,
+                        workspace_id=workspace_id,
+                        field=f"meta.{k}",
+                        old_value=old_val,
+                        new_value=new_val,
+                        source=source,
+                    ),
+                )
+        return dataclasses.replace(old_entity, metadata=dict(normalized))
 
 
 # ---- Task metadata ----
@@ -929,6 +975,8 @@ def set_task_meta(
         entity_type=EntityType.TASK,
         setter=repo.set_task_metadata_key,
         fetcher=get_task,
+        workspace_id_of=lambda t: t.workspace_id,
+        entity_name="task",
         source=source,
     )
 
@@ -947,6 +995,7 @@ def remove_task_meta(
         entity_type=EntityType.TASK,
         remover=repo.remove_task_metadata_key,
         fetcher=get_task,
+        workspace_id_of=lambda t: t.workspace_id,
         entity_name="task",
         source=source,
     )
@@ -970,6 +1019,8 @@ def replace_task_metadata(
         entity_type=EntityType.TASK,
         writer=repo.replace_task_metadata,
         fetcher=get_task,
+        workspace_id_of=lambda t: t.workspace_id,
+        entity_name="task",
         source=source,
     )
 
@@ -997,6 +1048,8 @@ def set_workspace_meta(
         entity_type=EntityType.WORKSPACE,
         setter=repo.set_workspace_metadata_key,
         fetcher=get_workspace,
+        workspace_id_of=lambda w: w.id,
+        entity_name="workspace",
         source=source,
     )
 
@@ -1015,6 +1068,7 @@ def remove_workspace_meta(
         entity_type=EntityType.WORKSPACE,
         remover=repo.remove_workspace_metadata_key,
         fetcher=get_workspace,
+        workspace_id_of=lambda w: w.id,
         entity_name="workspace",
         source=source,
     )
@@ -1037,6 +1091,8 @@ def replace_workspace_metadata(
         entity_type=EntityType.WORKSPACE,
         writer=repo.replace_workspace_metadata,
         fetcher=get_workspace,
+        workspace_id_of=lambda w: w.id,
+        entity_name="workspace",
         source=source,
     )
 
@@ -1064,6 +1120,8 @@ def set_group_meta(
         entity_type=EntityType.GROUP,
         setter=repo.set_group_metadata_key,
         fetcher=get_group,
+        workspace_id_of=lambda g: g.workspace_id,
+        entity_name="group",
         source=source,
     )
 
@@ -1082,6 +1140,7 @@ def remove_group_meta(
         entity_type=EntityType.GROUP,
         remover=repo.remove_group_metadata_key,
         fetcher=get_group,
+        workspace_id_of=lambda g: g.workspace_id,
         entity_name="group",
         source=source,
     )
@@ -1104,6 +1163,8 @@ def replace_group_metadata(
         entity_type=EntityType.GROUP,
         writer=repo.replace_group_metadata,
         fetcher=get_group,
+        workspace_id_of=lambda g: g.workspace_id,
+        entity_name="group",
         source=source,
     )
 

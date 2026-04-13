@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **`archive_status` bulk task moves bypassed the journal.** When archiving a
+  status with `--reassign-to` or `--force`, every affected task was updated
+  via `repo.update_task` without emitting a `TASK` journal entry. The status
+  row itself was journaled, leaving a silent audit gap. Task reassignment
+  and force-archive now record per-task `status_id`/`archived` entries via
+  `_record_entity_changes`, and the reassign path validates the target
+  status (same workspace, not archived) before touching tasks.
+- **`_get_entity_meta` raised `AttributeError` on deleted entities.**
+  Siblings defensively checked `if entity is None` before reading
+  `.metadata`; this one did not, so `stx <entity> meta get` on a
+  nonexistent id crashed instead of raising `LookupError`.
+- **TUI auto-refresh reloaded the full workspace every tick regardless of
+  whether anything changed.** Timer-driven refreshes now read
+  `PRAGMA data_version` and short-circuit when the value is unchanged
+  since the last tick. Manual `r`-key refresh still always reloads.
+
+### Changed
+- **Bulk status reassignment / archival.** `archive_status` now issues a
+  single `UPDATE tasks SET status_id = ? WHERE status_id = ? AND archived = 0`
+  (or `SET archived = 1`) via the new `repo.reassign_tasks_by_status` /
+  `repo.archive_tasks_by_status` helpers instead of N per-row updates. Journal
+  entries are emitted per task from the pre-fetched list.
+- **Metadata helpers skip a redundant re-fetch.** `_set_entity_meta` /
+  `_replace_entity_metadata` previously fetched the entity twice per write
+  (before + after the UPDATE). They now reuse the pre-fetched entity via
+  `dataclasses.replace`. Each helper also takes a required `workspace_id_of`
+  callable so the journaled `workspace_id` is explicit rather than a
+  `getattr(..., entity_id)` fallback that only worked by coincidence for
+  workspace entities.
+- **Connection `busy_timeout` raised to 30 s.** `get_connection` now passes
+  `timeout=30.0` to `sqlite3.connect` and issues `PRAGMA busy_timeout = 30000`
+  alongside `foreign_keys` / `journal_mode`. Under TUI + CLI contention the
+  previous 5 s default surfaced as `database is locked` errors with no retry
+  window.
+- **SQL splitter rewritten.** `connection.py` migration and schema loading
+  no longer use `sql.split(";")`, which could slice a statement mid-
+  definition when a semicolon appeared inside a string literal or line
+  comment. The new `_split_sql_statements` accumulates lines through
+  `sqlite3.complete_statement` after stripping `-- ...` comments.
+
 ## [0.15.0] — 2026-04-13
 
 ### Removed
