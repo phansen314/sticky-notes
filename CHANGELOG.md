@@ -69,13 +69,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   empty string (`--group ""`) to unassign. Complements the existing
   `stx group assign` / `stx group unassign` commands — both routes funnel
   through `service.update_task` / `_update_task_body`.
-- `stx task mv --position <N>` — flag form for the position argument.
-  The positional form still works but is deprecated; mixing both with
-  conflicting values errors.
-
-### Deprecated
-- Positional `position` argument on `stx task mv`. Use `--position N`.
-  Current form remains accepted for one release.
 
 ### Docs
 - README no longer claims metadata is supported on every entity kind — statuses
