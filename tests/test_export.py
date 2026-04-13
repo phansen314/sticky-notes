@@ -142,7 +142,7 @@ class TestExportEdgeCases:
             t1 = insert_task(conn, b1, "T1", c1)
             t2 = insert_task(conn, b2, "T2", c2)
         with pytest.raises(ValueError, match="same workspace"):
-            service.add_edge(conn, "task", t2, "task", t1, kind="blocks")
+            service.add_edge(conn, ("task", t2), ("task", t1), kind="blocks")
 
 
 class TestExportTags:

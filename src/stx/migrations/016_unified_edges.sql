@@ -28,7 +28,9 @@ INSERT INTO edges (from_type, from_id, to_type, to_id, workspace_id, kind, acycl
     FROM task_edges;
 
 -- 3. Copy group_edges → edges (group→group, acyclic=1)
-INSERT OR IGNORE INTO edges (from_type, from_id, to_type, to_id, workspace_id, kind, acyclic, metadata, archived)
+--    Plain INSERT: the PK includes from_type so task rows (step 2) and
+--    group rows cannot collide.
+INSERT INTO edges (from_type, from_id, to_type, to_id, workspace_id, kind, acyclic, metadata, archived)
     SELECT 'group', source_id, 'group', target_id, workspace_id, kind, 1, metadata, archived
     FROM group_edges;
 
@@ -79,4 +81,4 @@ ALTER TABLE journal_new RENAME TO journal;
 CREATE INDEX idx_journal_entity
     ON journal(entity_type, entity_id, changed_at DESC, id DESC);
 CREATE INDEX idx_journal_timeline
-    ON journal(workspace_id, changed_at DESC)
+    ON journal(workspace_id, changed_at DESC);

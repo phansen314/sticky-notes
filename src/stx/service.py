@@ -1218,15 +1218,19 @@ def _check_no_cycle(
 
 def add_edge(
     conn: sqlite3.Connection,
-    from_type: str,
-    from_id: int,
-    to_type: str,
-    to_id: int,
+    src: tuple[str, int],
+    dst: tuple[str, int],
+    *,
     kind: str,
     acyclic: bool | None = None,
     source: str = "cli",
 ) -> str:
-    """Create an edge from (from_type, from_id) to (to_type, to_id).
+    """Create an edge from ``src`` to ``dst``.
+
+    ``src`` and ``dst`` are ``(node_type, node_id)`` tuples. The tuple shape
+    is intentional: it prevents callers from silently swapping ``from_id``
+    with ``to_id`` (both plain ints) — a real risk with the unified
+    polymorphic edge table.
 
     Both endpoints must exist on the same workspace and not be archived.
     If ``acyclic`` is None the default for the given kind is used.
@@ -1245,6 +1249,8 @@ def add_edge(
     archive+revive as "fresh start": don't archive an edge if you want its
     metadata preserved.
     """
+    from_type, from_id = src
+    to_type, to_id = dst
     kind = _normalize_edge_kind(kind)
     if acyclic is None:
         acyclic = _default_acyclic(kind)
@@ -1319,18 +1325,22 @@ def add_edge(
 
 def archive_edge(
     conn: sqlite3.Connection,
-    from_type: str,
-    from_id: int,
-    to_type: str,
-    to_id: int,
+    src: tuple[str, int],
+    dst: tuple[str, int],
+    *,
     kind: str,
     source: str = "cli",
 ) -> str:
-    """Archive an active edge identified by endpoints + kind.
+    """Archive an active edge identified by ``src`` → ``dst`` + kind.
+
+    ``src`` and ``dst`` are ``(node_type, node_id)`` tuples — see
+    :func:`add_edge` for the rationale behind the tuple shape.
 
     Returns the normalized kind so CLI/JSON output reflects the value that
     actually hit the DB, not the raw user input.
     """
+    from_type, from_id = src
+    to_type, to_id = dst
     kind = _normalize_edge_kind(kind)
     with transaction(conn), _friendly_errors():
         active = repo.get_active_edge(conn, from_type, from_id, to_type, to_id, kind)

@@ -630,7 +630,7 @@ class TestEdgeService:
         cid = insert_status(conn, bid)
         t1 = insert_task(conn, bid, "a", cid)
         t2 = insert_task(conn, bid, "b", cid)
-        service.add_edge(conn, "task", t2, "task", t1, kind="blocks")
+        service.add_edge(conn, ("task", t2), ("task", t1), kind="blocks")
         detail = service.get_task_detail(conn, t2)
         # t2 is the source → outgoing edge shows up in edge_targets
         assert any(ref.node_id == t1 for ref in detail.edge_targets)
@@ -640,8 +640,8 @@ class TestEdgeService:
         cid = insert_status(conn, bid)
         t1 = insert_task(conn, bid, "a", cid)
         t2 = insert_task(conn, bid, "b", cid)
-        service.add_edge(conn, "task", t2, "task", t1, kind="blocks")
-        service.archive_edge(conn, "task", t2, "task", t1, kind="blocks")
+        service.add_edge(conn, ("task", t2), ("task", t1), kind="blocks")
+        service.archive_edge(conn, ("task", t2), ("task", t1), kind="blocks")
         detail = service.get_task_detail(conn, t2)
         assert detail.edge_sources == ()
         assert detail.edge_targets == ()
@@ -651,7 +651,7 @@ class TestEdgeService:
         cid = insert_status(conn, bid)
         tid = insert_task(conn, bid, "a", cid)
         with pytest.raises(ValueError, match="cannot point to itself"):
-            service.add_edge(conn, "task", tid, "task", tid, kind="blocks")
+            service.add_edge(conn, ("task", tid), ("task", tid), kind="blocks")
 
     def test_add_cross_workspace_raises(self, conn: sqlite3.Connection) -> None:
         b1 = insert_workspace(conn, "workspace1")
@@ -661,7 +661,7 @@ class TestEdgeService:
         t1 = insert_task(conn, b1, "a", c1)
         t2 = insert_task(conn, b2, "b", c2)
         with pytest.raises(ValueError, match="same workspace"):
-            service.add_edge(conn, "task", t2, "task", t1, kind="blocks")
+            service.add_edge(conn, ("task", t2), ("task", t1), kind="blocks")
 
     def test_cycle_direct_rejected_for_acyclic_kind(self, conn: sqlite3.Connection) -> None:
         # "blocks" is acyclic by default — direct cycle must be rejected
@@ -669,9 +669,9 @@ class TestEdgeService:
         cid = insert_status(conn, bid)
         t1 = insert_task(conn, bid, "a", cid)
         t2 = insert_task(conn, bid, "b", cid)
-        service.add_edge(conn, "task", t1, "task", t2, kind="blocks")  # t1 -> t2
+        service.add_edge(conn, ("task", t1), ("task", t2), kind="blocks")  # t1 -> t2
         with pytest.raises(ValueError, match="cycle"):
-            service.add_edge(conn, "task", t2, "task", t1, kind="blocks")  # t2 -> t1 (cycle)
+            service.add_edge(conn, ("task", t2), ("task", t1), kind="blocks")  # t2 -> t1 (cycle)
 
     def test_cycle_transitive_rejected_for_acyclic_kind(self, conn: sqlite3.Connection) -> None:
         bid = insert_workspace(conn)
@@ -679,10 +679,10 @@ class TestEdgeService:
         t1 = insert_task(conn, bid, "a", cid)
         t2 = insert_task(conn, bid, "b", cid)
         t3 = insert_task(conn, bid, "c", cid)
-        service.add_edge(conn, "task", t1, "task", t2, kind="blocks")  # t1 -> t2
-        service.add_edge(conn, "task", t2, "task", t3, kind="blocks")  # t2 -> t3
+        service.add_edge(conn, ("task", t1), ("task", t2), kind="blocks")  # t1 -> t2
+        service.add_edge(conn, ("task", t2), ("task", t3), kind="blocks")  # t2 -> t3
         with pytest.raises(ValueError, match="cycle"):
-            service.add_edge(conn, "task", t3, "task", t1, kind="blocks")  # t3 -> t1 (cycle)
+            service.add_edge(conn, ("task", t3), ("task", t1), kind="blocks")  # t3 -> t1 (cycle)
 
     def test_cycle_allowed_for_non_acyclic_kind(self, conn: sqlite3.Connection) -> None:
         # "related-to" is not acyclic by default — cycles are fine
@@ -690,8 +690,8 @@ class TestEdgeService:
         cid = insert_status(conn, bid)
         t1 = insert_task(conn, bid, "a", cid)
         t2 = insert_task(conn, bid, "b", cid)
-        service.add_edge(conn, "task", t1, "task", t2, kind="related-to")
-        service.add_edge(conn, "task", t2, "task", t1, kind="related-to")  # cycle OK
+        service.add_edge(conn, ("task", t1), ("task", t2), kind="related-to")
+        service.add_edge(conn, ("task", t2), ("task", t1), kind="related-to")  # cycle OK
 
     def test_cycle_ignores_non_acyclic_path(self, conn: sqlite3.Connection) -> None:
         """A cycle that closes through a non-acyclic edge is NOT rejected.
@@ -703,12 +703,12 @@ class TestEdgeService:
         t1 = insert_task(conn, bid, "a", cid)
         t2 = insert_task(conn, bid, "b", cid)
         t3 = insert_task(conn, bid, "c", cid)
-        service.add_edge(conn, "task", t1, "task", t2, kind="blocks")        # acyclic
-        service.add_edge(conn, "task", t2, "task", t3, kind="related-to")    # non-acyclic
+        service.add_edge(conn, ("task", t1), ("task", t2), kind="blocks")        # acyclic
+        service.add_edge(conn, ("task", t2), ("task", t3), kind="related-to")    # non-acyclic
         # t3 -blocks-> t1 closes the loop only via the related-to hop.
         # Reachability CTE walks only acyclic=1 edges, so t1 is NOT reachable
         # from t3 and this edge must succeed.
-        service.add_edge(conn, "task", t3, "task", t1, kind="blocks")
+        service.add_edge(conn, ("task", t3), ("task", t1), kind="blocks")
 
     def test_cycle_cross_type_rejected(self, conn: sqlite3.Connection) -> None:
         """Cycle detection must walk heterogeneous node types. Adding
@@ -719,9 +719,9 @@ class TestEdgeService:
         cid = insert_status(conn, bid)
         t1 = insert_task(conn, bid, "a", cid)
         g1 = insert_group(conn, bid, "g")
-        service.add_edge(conn, "task", t1, "group", g1, kind="blocks")  # t1 -> g1 (acyclic)
+        service.add_edge(conn, ("task", t1), ("group", g1), kind="blocks")  # t1 -> g1 (acyclic)
         with pytest.raises(ValueError, match="cycle"):
-            service.add_edge(conn, "group", g1, "task", t1, kind="spawns")  # closes the loop
+            service.add_edge(conn, ("group", g1), ("task", t1), kind="spawns")  # closes the loop
 
     def test_cross_type_edge_via_service(self, conn: sqlite3.Connection) -> None:
         """Smoke test for polymorphic add_edge through the service layer
@@ -732,7 +732,7 @@ class TestEdgeService:
         cid = insert_status(conn, bid)
         t1 = insert_task(conn, bid, "t", cid)
         g1 = insert_group(conn, bid, "g")
-        service.add_edge(conn, "task", t1, "group", g1, kind="spawns")
+        service.add_edge(conn, ("task", t1), ("group", g1), kind="spawns")
         detail = service.get_task_detail(conn, t1)
         targets = {(ref.node_type, ref.node_id) for ref in detail.edge_targets}
         assert ("group", g1) in targets
@@ -743,9 +743,9 @@ class TestEdgeService:
         t1 = insert_task(conn, bid, "a", cid)
         t2 = insert_task(conn, bid, "b", cid)
         t3 = insert_task(conn, bid, "c", cid)
-        service.add_edge(conn, "task", t1, "task", t2, kind="blocks")  # t1 -> t2
-        service.add_edge(conn, "task", t1, "task", t3, kind="blocks")  # t1 -> t3 (diamond)
-        service.add_edge(conn, "task", t2, "task", t3, kind="blocks")  # t2 -> t3 (converge)
+        service.add_edge(conn, ("task", t1), ("task", t2), kind="blocks")  # t1 -> t2
+        service.add_edge(conn, ("task", t1), ("task", t3), kind="blocks")  # t1 -> t3 (diamond)
+        service.add_edge(conn, ("task", t2), ("task", t3), kind="blocks")  # t2 -> t3 (converge)
         detail = service.get_task_detail(conn, t1)
         # t1 sources two outgoing edges (→t2, →t3) → edge_targets
         assert {ref.node_id for ref in detail.edge_targets} == {t2, t3}
@@ -755,16 +755,16 @@ class TestEdgeService:
         cid = insert_status(conn, bid)
         t1 = insert_task(conn, bid, "a", cid)
         t2 = insert_task(conn, bid, "b", cid)
-        service.add_edge(conn, "task", t1, "task", t2, kind="blocks")
+        service.add_edge(conn, ("task", t1), ("task", t2), kind="blocks")
         with pytest.raises(ValueError, match="edge already exists"):
-            service.add_edge(conn, "task", t1, "task", t2, kind="blocks")
+            service.add_edge(conn, ("task", t1), ("task", t2), kind="blocks")
 
     def test_add_with_kind_stored(self, conn: sqlite3.Connection) -> None:
         bid = insert_workspace(conn)
         cid = insert_status(conn, bid)
         t1 = insert_task(conn, bid, "a", cid)
         t2 = insert_task(conn, bid, "b", cid)
-        service.add_edge(conn, "task", t1, "task", t2, kind="blocks")
+        service.add_edge(conn, ("task", t1), ("task", t2), kind="blocks")
         row = conn.execute(
             "SELECT kind FROM edges WHERE from_type='task' AND from_id=? AND to_id=?", (t1, t2)
         ).fetchone()
@@ -776,7 +776,7 @@ class TestEdgeService:
         cid = insert_status(conn, bid)
         t1 = insert_task(conn, bid, "a", cid)
         t2 = insert_task(conn, bid, "b", cid)
-        service.add_edge(conn, "task", t1, "task", t2, kind="Blocks")
+        service.add_edge(conn, ("task", t1), ("task", t2), kind="Blocks")
         row = conn.execute(
             "SELECT kind FROM edges WHERE from_type='task' AND from_id=? AND to_id=?", (t1, t2)
         ).fetchone()
@@ -788,13 +788,13 @@ class TestEdgeService:
         t1 = insert_task(conn, bid, "a", cid)
         t2 = insert_task(conn, bid, "b", cid)
         with pytest.raises(ValueError, match="edge kind"):
-            service.add_edge(conn, "task", t1, "task", t2, kind="invalid kind!")
+            service.add_edge(conn, ("task", t1), ("task", t2), kind="invalid kind!")
 
     def test_add_group_edge(self, conn: sqlite3.Connection) -> None:
         bid = insert_workspace(conn)
         g1 = insert_group(conn, bid, "g1")
         g2 = insert_group(conn, bid, "g2")
-        service.add_edge(conn, "group", g1, "group", g2, kind="blocks")
+        service.add_edge(conn, ("group", g1), ("group", g2), kind="blocks")
         edges = service.list_edges(conn, bid)
         assert any(e.from_id == g1 and e.to_id == g2 and e.kind == "blocks" for e in edges)
 
@@ -802,41 +802,41 @@ class TestEdgeService:
         bid = insert_workspace(conn)
         g1 = insert_group(conn, bid, "g1")
         g2 = insert_group(conn, bid, "g2")
-        service.add_edge(conn, "group", g1, "group", g2, kind="blocks")
-        service.archive_edge(conn, "group", g1, "group", g2, kind="blocks")
+        service.add_edge(conn, ("group", g1), ("group", g2), kind="blocks")
+        service.archive_edge(conn, ("group", g1), ("group", g2), kind="blocks")
         assert service.list_edges(conn, bid) == ()
 
     def test_group_self_ref_raises(self, conn: sqlite3.Connection) -> None:
         bid = insert_workspace(conn)
         g1 = insert_group(conn, bid, "g1")
         with pytest.raises(ValueError, match="cannot point to itself"):
-            service.add_edge(conn, "group", g1, "group", g1, kind="blocks")
+            service.add_edge(conn, ("group", g1), ("group", g1), kind="blocks")
 
     def test_group_cycle_rejected(self, conn: sqlite3.Connection) -> None:
         bid = insert_workspace(conn)
         g1 = insert_group(conn, bid, "g1")
         g2 = insert_group(conn, bid, "g2")
-        service.add_edge(conn, "group", g1, "group", g2, kind="blocks")
+        service.add_edge(conn, ("group", g1), ("group", g2), kind="blocks")
         with pytest.raises(ValueError, match="cycle"):
-            service.add_edge(conn, "group", g2, "group", g1, kind="blocks")
+            service.add_edge(conn, ("group", g2), ("group", g1), kind="blocks")
 
     def test_group_transitive_cycle_rejected(self, conn: sqlite3.Connection) -> None:
         bid = insert_workspace(conn)
         g1 = insert_group(conn, bid, "g1")
         g2 = insert_group(conn, bid, "g2")
         g3 = insert_group(conn, bid, "g3")
-        service.add_edge(conn, "group", g1, "group", g2, kind="blocks")
-        service.add_edge(conn, "group", g2, "group", g3, kind="blocks")
+        service.add_edge(conn, ("group", g1), ("group", g2), kind="blocks")
+        service.add_edge(conn, ("group", g2), ("group", g3), kind="blocks")
         with pytest.raises(ValueError, match="cycle"):
-            service.add_edge(conn, "group", g3, "group", g1, kind="blocks")
+            service.add_edge(conn, ("group", g3), ("group", g1), kind="blocks")
 
     def test_group_edge_duplicate_raises(self, conn: sqlite3.Connection) -> None:
         bid = insert_workspace(conn)
         g1 = insert_group(conn, bid, "g1")
         g2 = insert_group(conn, bid, "g2")
-        service.add_edge(conn, "group", g1, "group", g2, kind="blocks")
+        service.add_edge(conn, ("group", g1), ("group", g2), kind="blocks")
         with pytest.raises(ValueError, match="edge already exists"):
-            service.add_edge(conn, "group", g1, "group", g2, kind="blocks")
+            service.add_edge(conn, ("group", g1), ("group", g2), kind="blocks")
 
     def test_cross_workspace_group_edge_raises(self, conn: sqlite3.Connection) -> None:
         b1 = insert_workspace(conn, "workspace1")
@@ -844,7 +844,7 @@ class TestEdgeService:
         g1 = insert_group(conn, b1, "g1")
         g2 = insert_group(conn, b2, "g2")
         with pytest.raises(ValueError, match="same workspace"):
-            service.add_edge(conn, "group", g1, "group", g2, kind="blocks")
+            service.add_edge(conn, ("group", g1), ("group", g2), kind="blocks")
 
 
 # ---- History ----
@@ -1994,9 +1994,9 @@ class TestArchivePreviewAndCascade:
         cid = insert_status(conn, bid)
         t1 = insert_task(conn, bid, "a", cid)
         t2 = insert_task(conn, bid, "b", cid)
-        service.add_edge(conn, "task", t2, "task", t1, kind="blocks")
-        service.archive_edge(conn, "task", t2, "task", t1, kind="blocks")
-        service.add_edge(conn, "task", t2, "task", t1, kind="blocks")  # should not crash
+        service.add_edge(conn, ("task", t2), ("task", t1), kind="blocks")
+        service.archive_edge(conn, ("task", t2), ("task", t1), kind="blocks")
+        service.add_edge(conn, ("task", t2), ("task", t1), kind="blocks")  # should not crash
         detail = service.get_task_detail(conn, t2)
         # t2 is the source → outgoing = edge_targets
         assert len(detail.edge_targets) == 1
@@ -2007,9 +2007,9 @@ class TestArchivePreviewAndCascade:
         cid = insert_status(conn, bid)
         t1 = insert_task(conn, bid, "a", cid)
         t2 = insert_task(conn, bid, "b", cid)
-        service.add_edge(conn, "task", t2, "task", t1, kind="blocks")
-        service.archive_edge(conn, "task", t2, "task", t1, kind="blocks")
-        service.add_edge(conn, "task", t2, "task", t1, kind="blocks")  # revive same edge
+        service.add_edge(conn, ("task", t2), ("task", t1), kind="blocks")
+        service.archive_edge(conn, ("task", t2), ("task", t1), kind="blocks")
+        service.add_edge(conn, ("task", t2), ("task", t1), kind="blocks")  # revive same edge
         entries = service.list_journal(conn, EntityType.EDGE, t2)
         archived_flips = [e for e in entries if e.field == "archived" and e.new_value == "0"]
         assert len(archived_flips) == 1
@@ -2019,10 +2019,10 @@ class TestArchivePreviewAndCascade:
         cid = insert_status(conn, bid)
         t1 = insert_task(conn, bid, "a", cid)
         t2 = insert_task(conn, bid, "b", cid)
-        service.add_edge(conn, "task", t1, "task", t2, kind="blocks")
-        service.archive_edge(conn, "task", t1, "task", t2, kind="blocks")
+        service.add_edge(conn, ("task", t1), ("task", t2), kind="blocks")
+        service.archive_edge(conn, ("task", t1), ("task", t2), kind="blocks")
         with pytest.raises(LookupError, match="already archived"):
-            service.archive_edge(conn, "task", t1, "task", t2, kind="blocks")
+            service.archive_edge(conn, ("task", t1), ("task", t2), kind="blocks")
 
     def test_archive_nonexistent_edge_raises(self, conn: sqlite3.Connection) -> None:
         bid = insert_workspace(conn)
@@ -2030,15 +2030,15 @@ class TestArchivePreviewAndCascade:
         t1 = insert_task(conn, bid, "a", cid)
         t2 = insert_task(conn, bid, "b", cid)
         with pytest.raises(LookupError, match="no edge found"):
-            service.archive_edge(conn, "task", t1, "task", t2, kind="blocks")
+            service.archive_edge(conn, ("task", t1), ("task", t2), kind="blocks")
 
     def test_readd_group_edge_after_archive(self, conn: sqlite3.Connection) -> None:
         bid = insert_workspace(conn)
         g1 = insert_group(conn, bid, "g1")
         g2 = insert_group(conn, bid, "g2")
-        service.add_edge(conn, "group", g1, "group", g2, kind="blocks")
-        service.archive_edge(conn, "group", g1, "group", g2, kind="blocks")
-        service.add_edge(conn, "group", g1, "group", g2, kind="blocks")  # should not crash
+        service.add_edge(conn, ("group", g1), ("group", g2), kind="blocks")
+        service.archive_edge(conn, ("group", g1), ("group", g2), kind="blocks")
+        service.add_edge(conn, ("group", g1), ("group", g2), kind="blocks")  # should not crash
         edges = service.list_edges(conn, bid)
         assert any(e.from_id == g1 and e.to_id == g2 and e.kind == "blocks" for e in edges)
 
@@ -2046,17 +2046,17 @@ class TestArchivePreviewAndCascade:
         bid = insert_workspace(conn)
         g1 = insert_group(conn, bid, "g1")
         g2 = insert_group(conn, bid, "g2")
-        service.add_edge(conn, "group", g1, "group", g2, kind="blocks")
-        service.archive_edge(conn, "group", g1, "group", g2, kind="blocks")
+        service.add_edge(conn, ("group", g1), ("group", g2), kind="blocks")
+        service.archive_edge(conn, ("group", g1), ("group", g2), kind="blocks")
         with pytest.raises(LookupError, match="already archived"):
-            service.archive_edge(conn, "group", g1, "group", g2, kind="blocks")
+            service.archive_edge(conn, ("group", g1), ("group", g2), kind="blocks")
 
     def test_archive_nonexistent_group_edge_raises(self, conn: sqlite3.Connection) -> None:
         bid = insert_workspace(conn)
         g1 = insert_group(conn, bid, "g1")
         g2 = insert_group(conn, bid, "g2")
         with pytest.raises(LookupError, match="no edge found"):
-            service.archive_edge(conn, "group", g1, "group", g2, kind="blocks")
+            service.archive_edge(conn, ("group", g1), ("group", g2), kind="blocks")
 
     def test_source_archived_raises(self, conn: sqlite3.Connection) -> None:
         bid = insert_workspace(conn)
@@ -2065,7 +2065,7 @@ class TestArchivePreviewAndCascade:
         t2 = insert_task(conn, bid, "b", cid)
         service.update_task(conn, t1, {"archived": True}, "cli")
         with pytest.raises(ValueError, match=f"task {t1} is archived"):
-            service.add_edge(conn, "task", t1, "task", t2, kind="blocks")
+            service.add_edge(conn, ("task", t1), ("task", t2), kind="blocks")
 
     def test_target_archived_raises(self, conn: sqlite3.Connection) -> None:
         bid = insert_workspace(conn)
@@ -2074,7 +2074,7 @@ class TestArchivePreviewAndCascade:
         t2 = insert_task(conn, bid, "b", cid)
         service.update_task(conn, t2, {"archived": True}, "cli")
         with pytest.raises(ValueError, match=f"task {t2} is archived"):
-            service.add_edge(conn, "task", t1, "task", t2, kind="blocks")
+            service.add_edge(conn, ("task", t1), ("task", t2), kind="blocks")
 
     def test_group_source_archived_raises(self, conn: sqlite3.Connection) -> None:
         bid = insert_workspace(conn)
@@ -2082,7 +2082,7 @@ class TestArchivePreviewAndCascade:
         g2 = insert_group(conn, bid, "g2")
         service.update_group(conn, g1, {"archived": True}, "cli")
         with pytest.raises(ValueError, match=f"group {g1} is archived"):
-            service.add_edge(conn, "group", g1, "group", g2, kind="blocks")
+            service.add_edge(conn, ("group", g1), ("group", g2), kind="blocks")
 
     def test_group_target_archived_raises(self, conn: sqlite3.Connection) -> None:
         bid = insert_workspace(conn)
@@ -2090,7 +2090,7 @@ class TestArchivePreviewAndCascade:
         g2 = insert_group(conn, bid, "g2")
         service.update_group(conn, g2, {"archived": True}, "cli")
         with pytest.raises(ValueError, match=f"group {g2} is archived"):
-            service.add_edge(conn, "group", g1, "group", g2, kind="blocks")
+            service.add_edge(conn, ("group", g1), ("group", g2), kind="blocks")
 
     def test_db_check_rejects_bad_kind(self, conn: sqlite3.Connection) -> None:
         """Raw DB insert with a bad kind must be rejected by the CHECK constraint."""
@@ -2110,7 +2110,7 @@ class TestArchivePreviewAndCascade:
         cid = insert_status(conn, bid)
         t1 = insert_task(conn, bid, "a", cid)
         t2 = insert_task(conn, bid, "b", cid)
-        service.add_edge(conn, "task", t1, "task", t2, kind="blocks")
+        service.add_edge(conn, ("task", t1), ("task", t2), kind="blocks")
         service.update_task(conn, t2, {"archived": True}, "cli")
         edges = service.list_edges(conn, bid)
         assert edges == ()
@@ -2123,7 +2123,7 @@ class TestArchivePreviewAndCascade:
         cid = insert_status(conn, bid)
         t1 = insert_task(conn, bid, "a", cid)
         t2 = insert_task(conn, bid, "b", cid)
-        service.add_edge(conn, "task", t1, "task", t2, kind="blocks")
+        service.add_edge(conn, ("task", t1), ("task", t2), kind="blocks")
         service.update_task(conn, t2, {"archived": True}, "cli")
         detail = service.get_task_detail(conn, t1)
         assert detail.edge_sources == ()
@@ -2137,7 +2137,7 @@ class TestArchivePreviewAndCascade:
         c1 = insert_status(conn, b1, "todo")
         t1 = insert_task(conn, b1, "active", c1)
         t2 = insert_task(conn, b1, "to-be-archived", c1)
-        service.add_edge(conn, "task", t1, "task", t2, kind="blocks")
+        service.add_edge(conn, ("task", t1), ("task", t2), kind="blocks")
         service.update_task(conn, t2, {"archived": True}, "cli")
         b2 = insert_workspace(conn, "dst")
         c2 = insert_status(conn, b2, "backlog")
@@ -2675,7 +2675,7 @@ class TestJournalRecordingEdges:
 
     def test_add_edge_journaled(self, conn):
         wid, t1, t2 = self._seed(conn)
-        service.add_edge(conn, "task", t1, "task", t2, source="test", kind="blocks")
+        service.add_edge(conn, ("task", t1), ("task", t2), kind="blocks", source="test")
         entries = _journal_entries(conn, "edge", t1)
         # Add emits two entries: endpoint (None → value) + kind (None → "blocks").
         assert len(entries) == 2
@@ -2689,8 +2689,8 @@ class TestJournalRecordingEdges:
 
     def test_archive_edge_journaled(self, conn):
         wid, t1, t2 = self._seed(conn)
-        service.add_edge(conn, "task", t1, "task", t2, source="test", kind="blocks")
-        service.archive_edge(conn, "task", t1, "task", t2, kind="blocks", source="test")
+        service.add_edge(conn, ("task", t1), ("task", t2), kind="blocks", source="test")
+        service.archive_edge(conn, ("task", t1), ("task", t2), kind="blocks", source="test")
         entries = _journal_entries(conn, "edge", t1)
         expected_endpoint = f"task:{t1}\u2192task:{t2}"
         endpoint_remove = next(
@@ -2701,6 +2701,55 @@ class TestJournalRecordingEdges:
             e for e in entries if e["field"] == "kind" and e["new_value"] is None
         )
         assert kind_remove["old_value"] == "blocks"
+
+    def test_revive_edge_journals_only_archived_flip(self, conn):
+        """Locks in the revival semantics documented on ``add_edge``:
+        reviving an archived edge writes a single ``archived: 1→0`` entry
+        (plus an ``acyclic`` entry if it changed) and does NOT re-emit the
+        ``endpoint`` / ``kind`` rows. Archive+revive is a "fresh start" —
+        callers that want metadata preserved should not archive."""
+        wid, t1, t2 = self._seed(conn)
+        service.add_edge(conn, ("task", t1), ("task", t2), kind="blocks", source="test")
+        service.archive_edge(conn, ("task", t1), ("task", t2), kind="blocks", source="test")
+        # Baseline: 4 entries so far (add emits 2, archive emits 2).
+        baseline = len(_journal_entries(conn, "edge", t1))
+        assert baseline == 4
+
+        service.add_edge(conn, ("task", t1), ("task", t2), kind="blocks", source="test")
+        entries = _journal_entries(conn, "edge", t1)
+        new_entries = entries[baseline:]
+        # Revival with unchanged acyclic → exactly one new entry: archived flip.
+        assert len(new_entries) == 1
+        archived_flip = new_entries[0]
+        assert archived_flip["field"] == "archived"
+        assert archived_flip["old_value"] == "1"
+        assert archived_flip["new_value"] == "0"
+        # Guard: no endpoint / kind rows re-emitted (the documented no-re-emit).
+        assert not any(e["field"] == "endpoint" for e in new_entries)
+        assert not any(e["field"] == "kind" for e in new_entries)
+
+    def test_revive_edge_with_acyclic_change_journals_both(self, conn):
+        """Reviving with a different ``acyclic`` value writes both the
+        ``archived`` flip and an ``acyclic`` delta."""
+        wid, t1, t2 = self._seed(conn)
+        # Archive the original acyclic=1 (blocks default).
+        service.add_edge(conn, ("task", t1), ("task", t2), kind="blocks", source="test")
+        service.archive_edge(conn, ("task", t1), ("task", t2), kind="blocks", source="test")
+        baseline = len(_journal_entries(conn, "edge", t1))
+
+        # Revive with acyclic=False — the UPSERT flips acyclic 1→0.
+        service.add_edge(
+            conn, ("task", t1), ("task", t2),
+            kind="blocks", acyclic=False, source="test",
+        )
+        entries = _journal_entries(conn, "edge", t1)
+        new_entries = entries[baseline:]
+        fields = {e["field"] for e in new_entries}
+        assert "archived" in fields
+        assert "acyclic" in fields
+        acyclic_entry = next(e for e in new_entries if e["field"] == "acyclic")
+        assert acyclic_entry["old_value"] == "1"
+        assert acyclic_entry["new_value"] == "0"
 
 
 class TestJournalRecordingMetadata:

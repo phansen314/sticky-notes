@@ -546,7 +546,7 @@ def cmd_edge_create(
     # service.add_edge returns the normalized kind so the Ok payload matches
     # what actually hit the DB (e.g. --kind BLOCKS → "blocks").
     kind = service.add_edge(
-        conn, from_type, from_id, to_type, to_id, args.kind, acyclic=acyclic
+        conn, (from_type, from_id), (to_type, to_id), kind=args.kind, acyclic=acyclic
     )
     return Ok(
         data={
@@ -570,7 +570,9 @@ def cmd_edge_archive(
     to_type, to_id = _resolve_edge_node(
         conn, workspace.id, args.target, parent_title=args.target_parent
     )
-    kind = service.archive_edge(conn, from_type, from_id, to_type, to_id, args.kind)
+    kind = service.archive_edge(
+        conn, (from_type, from_id), (to_type, to_id), kind=args.kind
+    )
     return Ok(
         data={
             "from_type": from_type,

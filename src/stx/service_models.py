@@ -8,12 +8,17 @@ from .models import Group, JournalEntry, Status, Tag, Task, Workspace
 # ---- Edge ref types (hydrated edge endpoint with kind) ----
 
 
+# Polymorphic edge endpoint discriminator. Kept in sync with the
+# `CHECK (from_type IN (...))` constraint on the edges table.
+type NodeType = Literal["task", "group", "workspace"]
+
+
 @dataclass(frozen=True)
 class EdgeRef:
     """A polymorphic edge endpoint — the far end of an edge, hydrated with
     its type, ID, display title, and the edge kind label."""
 
-    node_type: str  # 'task' | 'group' | 'workspace'
+    node_type: NodeType
     node_id: int
     node_title: str
     kind: str
@@ -27,10 +32,10 @@ class EdgeListItem:
     """Denormalized polymorphic edge for list rendering — carries display
     titles for both endpoints."""
 
-    from_type: str
+    from_type: NodeType
     from_id: int
     from_title: str
-    to_type: str
+    to_type: NodeType
     to_id: int
     to_title: str
     workspace_id: int
@@ -176,7 +181,7 @@ class MoveToWorkspacePreview:
     target_status_id: int
     can_move: bool
     blocking_reason: str | None
-    edge_endpoints: tuple[tuple[str, int], ...]
+    edge_endpoints: tuple[tuple[NodeType, int], ...]
     is_archived: bool
 
 
