@@ -42,7 +42,6 @@ _TASK_UPDATABLE: frozenset[str] = frozenset(
         "group_id",
         "priority",
         "due_date",
-        "position",
         "archived",
         "start_date",
         "finish_date",
@@ -53,7 +52,6 @@ _GROUP_UPDATABLE: frozenset[str] = frozenset(
         "title",
         "description",
         "parent_id",
-        "position",
         "archived",
     }
 )
@@ -210,8 +208,8 @@ def insert_task(conn: sqlite3.Connection, new: NewTask) -> Task:
     d = _asdict_for_insert(new)
     cur = conn.execute(
         "INSERT INTO tasks "
-        "(workspace_id, title, status_id, description, priority, due_date, position, start_date, finish_date, group_id) "
-        "VALUES (:workspace_id, :title, :status_id, :description, :priority, :due_date, :position, :start_date, :finish_date, :group_id)",
+        "(workspace_id, title, status_id, description, priority, due_date, start_date, finish_date, group_id) "
+        "VALUES (:workspace_id, :title, :status_id, :description, :priority, :due_date, :start_date, :finish_date, :group_id)",
         d,
     )
     row = conn.execute("SELECT * FROM tasks WHERE id = ?", (cur.lastrowid,)).fetchone()
@@ -243,7 +241,7 @@ def list_tasks(
 ) -> tuple[Task, ...]:
     archive_clause = "" if include_archived else " AND archived = 0"
     rows = conn.execute(
-        f"SELECT * FROM tasks WHERE workspace_id = ?{archive_clause} ORDER BY position, id",
+        f"SELECT * FROM tasks WHERE workspace_id = ?{archive_clause} ORDER BY id",
         (workspace_id,),
     ).fetchall()
     return tuple(row_to_task(r) for r in rows)
@@ -257,7 +255,7 @@ def list_tasks_by_status(
 ) -> tuple[Task, ...]:
     archive_clause = "" if include_archived else " AND archived = 0"
     rows = conn.execute(
-        f"SELECT * FROM tasks WHERE status_id = ?{archive_clause} ORDER BY position, id",
+        f"SELECT * FROM tasks WHERE status_id = ?{archive_clause} ORDER BY id",
         (status_id,),
     ).fetchall()
     return tuple(row_to_task(r) for r in rows)
@@ -290,7 +288,7 @@ def list_tasks_filtered(
         params.append(f.group_id)
     where = " AND ".join(clauses)
     rows = conn.execute(
-        f"SELECT * FROM tasks WHERE {where} ORDER BY position, id",
+        f"SELECT * FROM tasks WHERE {where} ORDER BY id",
         params,
     ).fetchall()
     return tuple(row_to_task(r) for r in rows)
@@ -975,8 +973,8 @@ def list_journal_for_edge(
 def insert_group(conn: sqlite3.Connection, new: NewGroup) -> Group:
     d = _asdict_for_insert(new)
     cur = conn.execute(
-        "INSERT INTO groups (workspace_id, title, description, parent_id, position) "
-        "VALUES (:workspace_id, :title, :description, :parent_id, :position)",
+        "INSERT INTO groups (workspace_id, title, description, parent_id) "
+        "VALUES (:workspace_id, :title, :description, :parent_id)",
         d,
     )
     row = conn.execute("SELECT * FROM groups WHERE id = ?", (cur.lastrowid,)).fetchone()
@@ -1026,13 +1024,13 @@ def list_groups(
     if parent_id is None:
         rows = conn.execute(
             f"SELECT * FROM groups WHERE workspace_id = ? AND parent_id IS NULL"
-            f"{archive_clause} ORDER BY position, id",
+            f"{archive_clause} ORDER BY id",
             (workspace_id,),
         ).fetchall()
     else:
         rows = conn.execute(
             f"SELECT * FROM groups WHERE workspace_id = ? AND parent_id = ?"
-            f"{archive_clause} ORDER BY position, id",
+            f"{archive_clause} ORDER BY id",
             (workspace_id, parent_id),
         ).fetchall()
     return tuple(row_to_group(r) for r in rows)
@@ -1130,7 +1128,7 @@ def batch_child_ids_by_group(
     rows = conn.execute(
         f"SELECT id, parent_id FROM groups "
         f"WHERE parent_id IN ({placeholders}){archive_clause} "
-        f"ORDER BY position, id",
+        f"ORDER BY id",
         group_ids,
     ).fetchall()
     mapping: dict[int, list[int]] = {}
@@ -1146,7 +1144,7 @@ def list_groups_by_workspace(
     include_archived: bool = False,
     title: str | None = None,
 ) -> tuple[Group, ...]:
-    """Return all groups on a workspace, ordered by position.
+    """Return all groups on a workspace, ordered by id.
 
     If *title* is given, only groups whose title matches are returned.
     The match is case-insensitive because the groups.title column has
@@ -1160,7 +1158,7 @@ def list_groups_by_workspace(
     rows = conn.execute(
         f"SELECT * FROM groups "
         f"WHERE workspace_id = ?{archive_clause}{title_clause} "
-        "ORDER BY position, id",
+        "ORDER BY id",
         params,
     ).fetchall()
     return tuple(row_to_group(r) for r in rows)
@@ -1188,7 +1186,7 @@ def list_child_groups(
 ) -> tuple[Group, ...]:
     archive_clause = "" if include_archived else " AND archived = 0"
     rows = conn.execute(
-        f"SELECT * FROM groups WHERE parent_id = ?{archive_clause} ORDER BY position, id",
+        f"SELECT * FROM groups WHERE parent_id = ?{archive_clause} ORDER BY id",
         (group_id,),
     ).fetchall()
     return tuple(row_to_group(r) for r in rows)
@@ -1217,12 +1215,12 @@ def get_group_ancestry(
     """Return groups from root to the given group, inclusive."""
     rows = conn.execute(
         "WITH RECURSIVE ancestry AS ("
-        "  SELECT id, workspace_id, title, description, metadata, parent_id, position, archived, created_at, 0 AS depth "
+        "  SELECT id, workspace_id, title, description, metadata, parent_id, archived, created_at, 0 AS depth "
         "  FROM groups WHERE id = ? "
         "  UNION ALL "
-        "  SELECT g.id, g.workspace_id, g.title, g.description, g.metadata, g.parent_id, g.position, g.archived, g.created_at, a.depth + 1 "
+        "  SELECT g.id, g.workspace_id, g.title, g.description, g.metadata, g.parent_id, g.archived, g.created_at, a.depth + 1 "
         "  FROM groups g JOIN ancestry a ON g.id = a.parent_id"
-        ") SELECT id, workspace_id, title, description, metadata, parent_id, position, archived, created_at "
+        ") SELECT id, workspace_id, title, description, metadata, parent_id, archived, created_at "
         "FROM ancestry ORDER BY depth DESC",
         (group_id,),
     ).fetchall()

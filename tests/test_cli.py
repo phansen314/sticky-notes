@@ -482,25 +482,6 @@ class TestTaskCommands:
         out, _ = cli("task", "mv", "1", "-S", "In Progress")
         assert "moved task-0001: todo -> in progress" in out
 
-    def test_mv_position_flag(self, cli):
-        cli("task", "create", "Task A", "-S", "todo")
-        cli("task", "create", "Task B", "-S", "todo")
-        out, _ = cli("task", "mv", "2", "-S", "in progress", "--position", "0")
-        assert "moved task-0002" in out
-
-    def test_mv_position_positional_legacy(self, cli):
-        cli("task", "create", "Task A", "-S", "todo")
-        out, _ = cli("task", "mv", "1", "-S", "in progress", "0")
-        assert "moved task-0001" in out
-
-    def test_mv_position_conflict(self, cli):
-        cli("task", "create", "Task A", "-S", "todo")
-        _, err = cli(
-            "task", "mv", "1", "-S", "in progress", "2", "--position", "5",
-            expect_exit=4,
-        )
-        assert "conflicting position" in err
-
     def test_edit_group_assign(self, cli):
         cli("group", "create", "g1")
         cli("task", "create", "Task A", "-S", "todo")

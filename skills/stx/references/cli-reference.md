@@ -129,21 +129,18 @@ equivalent.
 
 ---
 
-### `stx task mv <task> --status <status> [--position N] [flags]`
+### `stx task mv <task> --status <status> [--dry-run]`
 
 **Within-workspace only.** Use `stx task transfer` for cross-workspace moves.
 
 | Arg/Flag | Description |
 |---|---|
 | `--status` / `-S` | Target status name (**required**) |
-| `--position` | Integer position within status (default: `0` = top) |
-| `position` (legacy positional) | **Deprecated** — prefer `--position`. Still accepted for one release. Passing both with different values errors. |
-| `--dry-run` | Preview from/to status + position without writing |
+| `--dry-run` | Preview from/to status without writing |
 
 ```sh
 stx task mv task-0001 --status "In Progress"
-stx task mv task-0001 -S Done --position 2
-stx task mv task-0001 -S Done 2               # legacy positional, still works
+stx task mv task-0001 -S Done
 stx task mv task-0001 -S Done --dry-run
 ```
 
@@ -487,7 +484,7 @@ Every task-referencing command auto-detects whether the argument is an ID or a t
 | `task create` | full TaskDetail (with `status`, `group`, `edge_sources`, `edge_targets`, `history`, `metadata`). `edge_sources`/`edge_targets` each is a list of `{task: Task, kind: str}`. |
 | `task edit`, `task archive`, `task mv` | full TaskDetail (same shape as `task show`) |
 | `task edit --dry-run`, `group edit/rename/mv --dry-run` | `EntityUpdatePreview`: `{entity_type, entity_id, label, before, after}` |
-| `task mv --dry-run` | `TaskMovePreview`: `{task_id, title, from_status, to_status, from_position, to_position}` |
+| `task mv --dry-run` | `TaskMovePreview`: `{task_id, title, from_status, to_status}` |
 | `workspace create/rename` | full Workspace object |
 | `workspace archive` | `{"workspace": {...Workspace}, "active_cleared": bool}` — `active_cleared` is `true` when the archived workspace was the active workspace and the active-workspace pointer was cleared as a side-effect. **Note:** this is the only archive command that returns an envelope rather than a bare entity — the `active_cleared` field represents a CLI state side-effect that cannot be inferred from the workspace object alone. |
 | `status create/rename/archive` | full Status object |

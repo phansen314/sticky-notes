@@ -120,10 +120,6 @@ def _validate_task_fields(
         p = changes["priority"]
         if not isinstance(p, int):
             raise ValueError(f"priority must be an integer, got {p!r}")
-    if "position" in changes:
-        pos = changes["position"]
-        if not isinstance(pos, int) or pos < 0:
-            raise ValueError(f"position must be non-negative, got {pos}")
     start = changes.get("start_date")
     finish = changes.get("finish_date")
     if start is not None and finish is not None and finish < start:
@@ -395,14 +391,12 @@ def create_task(
     description: str | None = None,
     priority: int = 1,
     due_date: int | None = None,
-    position: int = 0,
     start_date: int | None = None,
     finish_date: int | None = None,
     group_id: int | None = None,
 ) -> Task:
     fields: dict[str, Any] = {
         "priority": priority,
-        "position": position,
     }
     if start_date is not None:
         fields["start_date"] = start_date
@@ -421,7 +415,6 @@ def create_task(
                 description=description,
                 priority=priority,
                 due_date=due_date,
-                position=position,
                 start_date=start_date,
                 finish_date=finish_date,
                 group_id=group_id,
@@ -614,12 +607,10 @@ def move_task(
     conn: sqlite3.Connection,
     task_id: int,
     status_id: int,
-    position: int,
     source: str,
 ) -> Task:
-    """Move a task to (status_id, position)."""
-    changes: dict[str, Any] = {"status_id": status_id, "position": position}
-    return update_task(conn, task_id, changes, source)
+    """Move a task to a new status."""
+    return update_task(conn, task_id, {"status_id": status_id}, source)
 
 
 def _validate_move_to_workspace(
@@ -718,7 +709,6 @@ def move_task_to_workspace(
                 description=old.description,
                 priority=old.priority,
                 due_date=old.due_date,
-                position=0,
                 start_date=old.start_date,
                 finish_date=old.finish_date,
             ),
@@ -1677,7 +1667,6 @@ def create_group(
     workspace_id: int,
     title: str,
     parent_id: int | None = None,
-    position: int = 0,
     description: str | None = None,
 ) -> Group:
     with transaction(conn), _friendly_errors():
@@ -1699,7 +1688,6 @@ def create_group(
                 title=title,
                 description=description,
                 parent_id=parent_id,
-                position=position,
             ),
         )
 
@@ -1858,8 +1846,8 @@ def list_all_groups(
     include_archived: bool = False,
 ) -> tuple[GroupRef, ...]:
     """Return every group on a workspace (hydrated as GroupRef). Order is
-    by position/id but the hierarchy is flat — callers that need the tree
-    structure should walk `child_ids`.
+    by id; the hierarchy is flat — callers that need the tree structure
+    should walk `child_ids`.
     """
     groups = repo.list_groups_by_workspace(
         conn, workspace_id, include_archived=include_archived
@@ -2044,7 +2032,6 @@ def preview_move_task(
     conn: sqlite3.Connection,
     task_id: int,
     status_id: int,
-    position: int,
 ) -> TaskMovePreview:
     """Compute a from/to snapshot for `move_task`. No DB writes."""
     task = get_task(conn, task_id)
@@ -2055,8 +2042,6 @@ def preview_move_task(
         title=task.title,
         from_status=from_status.name,
         to_status=to_status.name,
-        from_position=task.position,
-        to_position=position,
     )
 
 

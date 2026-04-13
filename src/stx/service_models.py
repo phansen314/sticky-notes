@@ -55,7 +55,6 @@ class TaskListItem:
     status_id: int
     priority: int
     due_date: int | None
-    position: int
     archived: bool
     created_at: int
     start_date: int | None
@@ -74,7 +73,6 @@ class GroupRef:
     title: str
     description: str | None
     parent_id: int | None
-    position: int
     archived: bool
     created_at: int
     metadata: dict[str, str]
@@ -125,7 +123,6 @@ class TaskDetail:
     status_id: int
     priority: int
     due_date: int | None
-    position: int
     archived: bool
     created_at: int
     start_date: int | None
@@ -176,7 +173,6 @@ class GroupDetail:
     title: str
     description: str | None
     parent_id: int | None
-    position: int
     archived: bool
     created_at: int
     tasks: tuple[Task, ...]
@@ -237,11 +233,9 @@ class EntityUpdatePreview:
 
 @dataclass(frozen=True)
 class TaskMovePreview:
-    """Dry-run result for `task mv`. Shows from/to status and position."""
+    """Dry-run result for `task mv`. Shows from/to status."""
 
     task_id: int
     title: str
     from_status: str
     to_status: str
-    from_position: int
-    to_position: int

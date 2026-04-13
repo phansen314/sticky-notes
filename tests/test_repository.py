@@ -279,14 +279,14 @@ class TestTaskRepository:
     def test_list_tasks_by_workspace(self, conn: sqlite3.Connection) -> None:
         workspace, col = self._setup(conn)
         t1 = insert_task(
-            conn, NewTask(workspace_id=workspace.id, title="a", status_id=col.id, position=1)
+            conn, NewTask(workspace_id=workspace.id, title="a", status_id=col.id)
         )
         t2 = insert_task(
-            conn, NewTask(workspace_id=workspace.id, title="b", status_id=col.id, position=0)
+            conn, NewTask(workspace_id=workspace.id, title="b", status_id=col.id)
         )
         tasks = list_tasks(conn, workspace.id)
-        assert tasks[0].id == t2.id
-        assert tasks[1].id == t1.id
+        assert tasks[0].id == t1.id
+        assert tasks[1].id == t2.id
 
     def test_list_tasks_excludes_archived(self, conn: sqlite3.Connection) -> None:
         workspace, col = self._setup(conn)
@@ -400,7 +400,6 @@ class TestTaskRepository:
                 description="details here",
                 priority=3,
                 due_date=1700000000,
-                position=5,
                 start_date=1699000000,
                 finish_date=1701000000,
             ),
@@ -409,7 +408,6 @@ class TestTaskRepository:
         assert task.description == "details here"
         assert task.priority == 3
         assert task.due_date == 1700000000
-        assert task.position == 5
         assert task.start_date == 1699000000
         assert task.finish_date == 1701000000
 
@@ -904,13 +902,13 @@ class TestGroupRepository:
         assert len(groups) == 1
         assert groups[0].title == "gone"
 
-    def test_list_groups_ordered_by_position(self, conn: sqlite3.Connection) -> None:
+    def test_list_groups_ordered_by_id(self, conn: sqlite3.Connection) -> None:
         workspace = self._setup(conn)
-        g1 = insert_group(conn, NewGroup(workspace_id=workspace.id, title="second", position=1))
-        g2 = insert_group(conn, NewGroup(workspace_id=workspace.id, title="first", position=0))
+        g1 = insert_group(conn, NewGroup(workspace_id=workspace.id, title="first"))
+        g2 = insert_group(conn, NewGroup(workspace_id=workspace.id, title="second"))
         groups = list_groups(conn, workspace.id)
-        assert groups[0].id == g2.id
-        assert groups[1].id == g1.id
+        assert groups[0].id == g1.id
+        assert groups[1].id == g2.id
 
     def test_update_group(self, conn: sqlite3.Connection) -> None:
         workspace = self._setup(conn)
@@ -1194,12 +1192,12 @@ class TestBatchGroupQueries:
 
     def test_list_groups_by_workspace(self, conn: sqlite3.Connection) -> None:
         workspace, _ = self._setup(conn)
-        g1 = insert_group(conn, NewGroup(workspace_id=workspace.id, title="g1", position=1))
-        g2 = insert_group(conn, NewGroup(workspace_id=workspace.id, title="g2", position=0))
+        g1 = insert_group(conn, NewGroup(workspace_id=workspace.id, title="g1"))
+        g2 = insert_group(conn, NewGroup(workspace_id=workspace.id, title="g2"))
         result = list_groups_by_workspace(conn, workspace.id)
         assert len(result) == 2
-        assert result[0].id == g2.id  # position 0 first
-        assert result[1].id == g1.id
+        assert result[0].id == g1.id
+        assert result[1].id == g2.id
 
     def test_list_groups_by_workspace_excludes_archived(self, conn: sqlite3.Connection) -> None:
         workspace, _ = self._setup(conn)

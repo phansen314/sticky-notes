@@ -16,12 +16,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `task edit`. `TaskListItem.tag_names`, `TaskDetail.tags`, and
   `WorkspaceContext.tags` are gone from JSON output. Use per-entity metadata
   JSON blobs if tagging-like grouping is needed.
+- **BREAKING:** `position` column on `tasks` and `groups`. The field was
+  defaulted to 0 for every row, no TUI surface wrote it, and the cross-
+  workspace transfer reset it anyway — ordering effectively collapsed to
+  insertion order. `stx task mv` no longer accepts `--position` or the
+  legacy positional position argument, `TaskMovePreview` drops
+  `from_position`/`to_position`, and task/group JSON no longer includes a
+  `position` field. Task and group list order is now `id ASC`.
 
 ### Migrations
 - **017_drop_tags.sql.** Drops `tags` and `task_tags` tables plus their
   indexes. Historical `journal` rows with `entity_type='tag'`/`'task_tag'` are
   left untouched as dead history (`journal.entity_type` is an unconstrained
   TEXT column). `SCHEMA_VERSION = 17`.
+- **018_drop_position.sql.** Cascade-recreates `tasks` and `groups` without
+  the `position` column, replaces the four `*_archived_position` covering
+  indexes with `*_archived` variants, and preserves all row data. Historical
+  `journal` rows with `field='position'` are left intact as dead history.
+  `SCHEMA_VERSION = 18`.
 
 ### Changed
 - **BREAKING:** `stx workspace rename` removed. Use `stx workspace edit --name <new>`.

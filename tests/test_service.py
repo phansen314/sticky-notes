@@ -83,9 +83,8 @@ def insert_group(
     workspace_id: int,
     title: str = "group1",
     parent_id: int | None = None,
-    position: int = 0,
 ) -> int:
-    rid = _raw_insert_group(conn, workspace_id, title, parent_id, position)
+    rid = _raw_insert_group(conn, workspace_id, title, parent_id)
     _commit(conn)
     return rid
 
@@ -380,7 +379,7 @@ class TestTaskService:
         c1 = insert_status(conn, bid, "todo")
         c2 = insert_status(conn, bid, "done")
         task = service.create_task(conn, bid, "t", c1)
-        moved = service.move_task(conn, task.id, c2, 0, "tui")
+        moved = service.move_task(conn, task.id, c2, "tui")
         assert moved.status_id == c2
         history = service.list_journal(conn, EntityType.TASK, task.id)
         assert any(h.field == "status_id" for h in history)
@@ -401,12 +400,6 @@ class TestTaskService:
         with pytest.raises(ValueError, match="priority"):
             service.create_task(conn, bid, "t", cid, priority="high")  # type: ignore[arg-type]
 
-    def test_create_negative_position(self, conn: sqlite3.Connection) -> None:
-        bid = insert_workspace(conn)
-        cid = insert_status(conn, bid)
-        with pytest.raises(ValueError, match="position"):
-            service.create_task(conn, bid, "t", cid, position=-1)
-
     def test_create_finish_before_start(self, conn: sqlite3.Connection) -> None:
         bid = insert_workspace(conn)
         cid = insert_status(conn, bid)
@@ -419,13 +412,6 @@ class TestTaskService:
         task = service.create_task(conn, bid, "t", cid)
         updated = service.update_task(conn, task.id, {"priority": 99}, "test")
         assert updated.priority == 99
-
-    def test_update_negative_position(self, conn: sqlite3.Connection) -> None:
-        bid = insert_workspace(conn)
-        cid = insert_status(conn, bid)
-        task = service.create_task(conn, bid, "t", cid)
-        with pytest.raises(ValueError, match="position"):
-            service.update_task(conn, task.id, {"position": -1}, "test")
 
     def test_update_finish_before_existing_start(self, conn: sqlite3.Connection) -> None:
         bid = insert_workspace(conn)
@@ -447,9 +433,6 @@ class TestTaskService:
         # finish before start — date merge edge case shared by both paths
         with pytest.raises(ValueError, match="finish date"):
             service.preview_update_task(conn, task.id, {"finish_date": 100})
-        # negative position
-        with pytest.raises(ValueError, match="position"):
-            service.preview_update_task(conn, task.id, {"position": -1})
         # non-int priority
         with pytest.raises(ValueError, match="priority"):
             service.preview_update_task(conn, task.id, {"priority": "high"})  # type: ignore[dict-item]
@@ -1533,7 +1516,7 @@ class TestPreviewHelpers:
     def test_move_happy_path(self, conn: sqlite3.Connection) -> None:
         bid, cid_todo, cid_done = self._setup(conn)
         task = service.create_task(conn, bid, "t", cid_todo)
-        preview = service.preview_move_task(conn, task.id, cid_done, position=0)
+        preview = service.preview_move_task(conn, task.id, cid_done)
         assert preview.from_status == "todo"
         assert preview.to_status == "done"
 

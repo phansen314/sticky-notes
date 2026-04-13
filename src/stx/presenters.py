@@ -269,9 +269,6 @@ def format_task_move_preview(preview: TaskMovePreview) -> str:
     lines.append(
         f"  status: {_fmt_diff_value(preview.from_status)} -> {_fmt_diff_value(preview.to_status)}"
     )
-    lines.append(
-        f"  position: {_fmt_diff_value(preview.from_position)} -> {_fmt_diff_value(preview.to_position)}"
-    )
     return "\n".join(lines)
 
 

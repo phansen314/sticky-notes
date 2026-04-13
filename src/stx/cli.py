@@ -244,22 +244,12 @@ def cmd_task_mv(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunCont
     workspace = _resolve_workspace(conn, args, ctx)
     task_id = _resolve_task(conn, workspace, args.task)
     col = service.get_status_by_name(conn, workspace.id, args.status)
-    if args.position is not None and args.position_positional is not None:
-        if args.position != args.position_positional:
-            raise ValueError(
-                "conflicting position arguments: --position and positional value differ"
-            )
-    position = args.position
-    if position is None:
-        position = args.position_positional
-    if position is None:
-        position = 0
     pre = service.get_task_detail(conn, task_id)
     from_status = pre.status.name
     if args.dry_run:
-        preview = service.preview_move_task(conn, task_id, col.id, position)
+        preview = service.preview_move_task(conn, task_id, col.id)
         return Ok(data=preview, text=presenters.format_task_move_preview(preview))
-    service.move_task(conn, task_id, col.id, position, source="cli")
+    service.move_task(conn, task_id, col.id, source="cli")
     detail = service.get_task_detail(conn, task_id)
     return Ok(data=detail, text=f"moved {format_task_num(task_id)}: {from_status} -> {col.name}")
 
@@ -1415,20 +1405,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_mv.set_defaults(command="task_mv")
     p_mv.add_argument("task", help="task number (task-NNNN/N/#N) or title")
     p_mv.add_argument("--status", "-S", required=True, help="target status name")
-    p_mv.add_argument(
-        "--position",
-        type=int,
-        default=None,
-        help="zero-indexed position within status; 0 = top (default), higher values move further down",
-    )
-    p_mv.add_argument(
-        "position_positional",
-        metavar="position",
-        type=int,
-        nargs="?",
-        default=None,
-        help="(deprecated) positional form of --position; prefer --position",
-    )
     p_mv.add_argument("--dry-run", action="store_true", help="preview move without writing")
 
     p_transfer = task_sub.add_parser("transfer", help="move task to a different workspace")

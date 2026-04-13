@@ -1315,6 +1315,221 @@ class TestMigrations:
         assert violations == []
         conn.close()
 
+    def test_migration_018_drops_position_column(self, tmp_path: Path) -> None:
+        """End-to-end regression for migration 018.
+
+        Bootstraps a minimal v17 schema with `position` columns on tasks
+        and groups, seeds rows with non-zero positions, runs migration 018,
+        and asserts the columns (and their indexes) are gone, data is
+        preserved, and FK checks are clean.
+        """
+        db_path = tmp_path / "v17.db"
+        conn = get_connection(db_path)
+        conn.executescript("""
+            CREATE TABLE workspaces (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL COLLATE NOCASE,
+                archived INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                metadata TEXT NOT NULL DEFAULT '{}'
+            );
+            CREATE TABLE statuses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
+                name TEXT NOT NULL COLLATE NOCASE,
+                archived INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                UNIQUE (id, workspace_id)
+            );
+            CREATE TABLE groups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
+                parent_id INTEGER,
+                title TEXT NOT NULL COLLATE NOCASE,
+                description TEXT,
+                position INTEGER NOT NULL DEFAULT 0 CHECK (position >= 0),
+                archived INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                metadata TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata)),
+                UNIQUE (id, workspace_id),
+                FOREIGN KEY (parent_id, workspace_id) REFERENCES groups(id, workspace_id)
+            );
+            CREATE TABLE tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                workspace_id INTEGER NOT NULL,
+                title TEXT NOT NULL COLLATE NOCASE,
+                description TEXT,
+                status_id INTEGER NOT NULL,
+                priority INTEGER NOT NULL DEFAULT 1,
+                due_date INTEGER,
+                position INTEGER NOT NULL DEFAULT 0 CHECK (position >= 0),
+                archived INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                start_date INTEGER,
+                finish_date INTEGER,
+                group_id INTEGER,
+                metadata TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata)),
+                CHECK (start_date IS NULL OR finish_date IS NULL OR finish_date >= start_date),
+                FOREIGN KEY (status_id, workspace_id) REFERENCES statuses(id, workspace_id),
+                FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
+                FOREIGN KEY (group_id, workspace_id) REFERENCES groups(id, workspace_id),
+                UNIQUE (id, workspace_id)
+            );
+            CREATE TABLE journal (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                entity_type TEXT NOT NULL CHECK (entity_type IN (
+                    'task', 'group', 'workspace', 'status', 'edge'
+                )),
+                entity_id INTEGER NOT NULL,
+                workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
+                field TEXT NOT NULL,
+                old_value TEXT,
+                new_value TEXT,
+                source TEXT NOT NULL,
+                changed_at INTEGER NOT NULL DEFAULT (unixepoch())
+            );
+            CREATE INDEX idx_tasks_status_archived_position
+                ON tasks(status_id, archived, position, id);
+            CREATE INDEX idx_tasks_workspace_archived_position
+                ON tasks(workspace_id, archived, position, id);
+            CREATE INDEX idx_groups_parent_archived_position
+                ON groups(parent_id, archived, position, id);
+            CREATE INDEX idx_groups_workspace_archived_position
+                ON groups(workspace_id, archived, position, id);
+        """)
+        conn.execute("PRAGMA user_version = 17")
+        conn.commit()
+
+        # Seed: 1 workspace, 1 status, a 3-deep nested group chain
+        # (root -> child -> grandchild) to exercise the self-FK during
+        # cascade-recreate, and 3 tasks with rich non-default fields
+        # (metadata, start_date, finish_date, description, priority,
+        # due_date) so a silent column drop in the INSERT list surfaces
+        # as a failed assertion. Also seeds a historical journal row
+        # with field='position' to confirm dead history is preserved.
+        conn.execute("INSERT INTO workspaces (id, name) VALUES (1, 'w')")
+        conn.execute(
+            "INSERT INTO statuses (id, workspace_id, name) VALUES (1, 1, 'todo')"
+        )
+        # Nested group chain: g_root(1) -> g_mid(2) -> g_leaf(3)
+        conn.execute(
+            "INSERT INTO groups (id, workspace_id, parent_id, title, description, "
+            "position, metadata) "
+            "VALUES (1, 1, NULL, 'g_root', 'root desc', 3, '{\"color\":\"red\"}')"
+        )
+        conn.execute(
+            "INSERT INTO groups (id, workspace_id, parent_id, title, position) "
+            "VALUES (2, 1, 1, 'g_mid', 7)"
+        )
+        conn.execute(
+            "INSERT INTO groups (id, workspace_id, parent_id, title, position) "
+            "VALUES (3, 1, 2, 'g_leaf', 0)"
+        )
+        # Task with all rich fields populated, assigned to leaf group
+        conn.execute(
+            "INSERT INTO tasks (id, workspace_id, title, description, status_id, "
+            "priority, due_date, position, start_date, finish_date, group_id, metadata) "
+            "VALUES (1, 1, 't_full', 'full desc', 1, 5, 1700000000, 5, "
+            "1699000000, 1701000000, 3, '{\"note\":\"hi\"}')"
+        )
+        # Task with position=0 and no group
+        conn.execute(
+            "INSERT INTO tasks (id, workspace_id, title, status_id, position) "
+            "VALUES (2, 1, 't_plain', 1, 0)"
+        )
+        # Task mid-chain group
+        conn.execute(
+            "INSERT INTO tasks (id, workspace_id, title, status_id, position, group_id) "
+            "VALUES (3, 1, 't_mid', 1, 2, 2)"
+        )
+        conn.execute(
+            "INSERT INTO journal (entity_type, entity_id, workspace_id, field, "
+            "old_value, new_value, source) "
+            "VALUES ('task', 1, 1, 'position', '0', '5', 'test')"
+        )
+        conn.commit()
+
+        _run_migrations(conn)
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+
+        # position column is gone from tasks and groups.
+        task_cols = {
+            r[1] for r in conn.execute("PRAGMA table_info(tasks)").fetchall()
+        }
+        group_cols = {
+            r[1] for r in conn.execute("PRAGMA table_info(groups)").fetchall()
+        }
+        assert "position" not in task_cols
+        assert "position" not in group_cols
+
+        # Old position-bearing indexes are gone; replacements exist.
+        indexes = {
+            r[0]
+            for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='index'"
+            ).fetchall()
+        }
+        assert "idx_tasks_status_archived_position" not in indexes
+        assert "idx_tasks_workspace_archived_position" not in indexes
+        assert "idx_groups_parent_archived_position" not in indexes
+        assert "idx_groups_workspace_archived_position" not in indexes
+        assert "idx_tasks_status_archived" in indexes
+        assert "idx_tasks_workspace_archived" in indexes
+        assert "idx_groups_parent_archived" in indexes
+        assert "idx_groups_workspace_archived" in indexes
+
+        # Nested group chain preserved with parent_id links intact.
+        assert conn.execute("SELECT COUNT(*) FROM groups").fetchone()[0] == 3
+        g_root = conn.execute(
+            "SELECT parent_id, title, description, metadata FROM groups WHERE id = 1"
+        ).fetchone()
+        assert g_root["parent_id"] is None
+        assert g_root["title"] == "g_root"
+        assert g_root["description"] == "root desc"
+        assert g_root["metadata"] == '{"color":"red"}'
+        g_mid = conn.execute(
+            "SELECT parent_id, title FROM groups WHERE id = 2"
+        ).fetchone()
+        assert g_mid["parent_id"] == 1
+        assert g_mid["title"] == "g_mid"
+        g_leaf = conn.execute(
+            "SELECT parent_id, title FROM groups WHERE id = 3"
+        ).fetchone()
+        assert g_leaf["parent_id"] == 2
+        assert g_leaf["title"] == "g_leaf"
+
+        # Rich task fields round-trip cleanly — guards against a typo'd
+        # INSERT column list silently nulling a field.
+        assert conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0] == 3
+        t_full = conn.execute(
+            "SELECT title, description, priority, due_date, start_date, "
+            "finish_date, group_id, metadata FROM tasks WHERE id = 1"
+        ).fetchone()
+        assert t_full["title"] == "t_full"
+        assert t_full["description"] == "full desc"
+        assert t_full["priority"] == 5
+        assert t_full["due_date"] == 1700000000
+        assert t_full["start_date"] == 1699000000
+        assert t_full["finish_date"] == 1701000000
+        assert t_full["group_id"] == 3
+        assert t_full["metadata"] == '{"note":"hi"}'
+        # Task 3 FKs into mid-chain group; if groups self-FK broke during
+        # migration, this would surface as a foreign_key_check violation.
+        assert conn.execute(
+            "SELECT group_id FROM tasks WHERE id = 3"
+        ).fetchone()[0] == 2
+
+        # Historical journal row with field='position' is left intact.
+        hist = conn.execute(
+            "SELECT field, old_value, new_value FROM journal WHERE field = 'position'"
+        ).fetchall()
+        assert len(hist) == 1
+        assert (hist[0]["old_value"], hist[0]["new_value"]) == ("0", "5")
+
+        violations = conn.execute("PRAGMA foreign_key_check").fetchall()
+        assert violations == []
+        conn.close()
+
 
 class TestJournalEntityTypeConstraint:
     def test_rejects_invalid_entity_type(

@@ -110,13 +110,12 @@ def insert_group(
     workspace_id: int,
     title: str = "group1",
     parent_id: int | None = None,
-    position: int = 0,
     description: str | None = None,
 ) -> int:
     cur = conn.execute(
-        "INSERT INTO groups (workspace_id, title, parent_id, position, description) "
-        "VALUES (?, ?, ?, ?, ?)",
-        (workspace_id, title, parent_id, position, description),
+        "INSERT INTO groups (workspace_id, title, parent_id, description) "
+        "VALUES (?, ?, ?, ?)",
+        (workspace_id, title, parent_id, description),
     )
     return cur.lastrowid  # type: ignore[return-value]
 

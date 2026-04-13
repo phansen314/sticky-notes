@@ -21,7 +21,6 @@ CREATE TABLE IF NOT EXISTS groups (
     parent_id    INTEGER,
     title        TEXT NOT NULL COLLATE NOCASE,
     description  TEXT,
-    position     INTEGER NOT NULL DEFAULT 0 CHECK (position >= 0),
     archived     INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),
     created_at   INTEGER NOT NULL DEFAULT (unixepoch()),
     metadata     TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata)),
@@ -37,7 +36,6 @@ CREATE TABLE IF NOT EXISTS tasks (
     status_id INTEGER NOT NULL,
     priority INTEGER NOT NULL DEFAULT 1,
     due_date INTEGER,
-    position INTEGER NOT NULL DEFAULT 0 CHECK (position >= 0),
     archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),
     created_at INTEGER NOT NULL DEFAULT (unixepoch()),
     start_date INTEGER,
@@ -94,16 +92,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_tasks_workspace_title_active
     ON tasks(workspace_id, title) WHERE archived = 0;
 
 -- Composite covering indexes aligned to actual query patterns
-CREATE INDEX IF NOT EXISTS idx_tasks_status_archived_position
-    ON tasks(status_id, archived, position, id);
-CREATE INDEX IF NOT EXISTS idx_tasks_workspace_archived_position
-    ON tasks(workspace_id, archived, position, id);
+CREATE INDEX IF NOT EXISTS idx_tasks_status_archived
+    ON tasks(status_id, archived, id);
+CREATE INDEX IF NOT EXISTS idx_tasks_workspace_archived
+    ON tasks(workspace_id, archived, id);
 CREATE INDEX IF NOT EXISTS idx_statuses_workspace_archived_name
     ON statuses(workspace_id, archived, name, id);
-CREATE INDEX IF NOT EXISTS idx_groups_parent_archived_position
-    ON groups(parent_id, archived, position, id);
-CREATE INDEX IF NOT EXISTS idx_groups_workspace_archived_position
-    ON groups(workspace_id, archived, position, id);
+CREATE INDEX IF NOT EXISTS idx_groups_parent_archived
+    ON groups(parent_id, archived, id);
+CREATE INDEX IF NOT EXISTS idx_groups_workspace_archived
+    ON groups(workspace_id, archived, id);
 CREATE INDEX IF NOT EXISTS idx_journal_entity
     ON journal(entity_type, entity_id, changed_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_journal_timeline

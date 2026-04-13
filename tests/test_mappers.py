@@ -204,7 +204,6 @@ class TestShallowFields:
             status_id=1,
             priority=1,
             due_date=None,
-            position=0,
             archived=False,
             created_at=0,
             start_date=None,
@@ -221,7 +220,6 @@ class TestShallowFields:
             "status_id",
             "priority",
             "due_date",
-            "position",
             "archived",
             "created_at",
             "start_date",
@@ -252,7 +250,6 @@ def _task() -> Task:
         status_id=1,
         priority=1,
         due_date=None,
-        position=0,
         archived=False,
         created_at=0,
         start_date=None,
@@ -273,7 +270,6 @@ def _group() -> Group:
         title="g",
         description=None,
         parent_id=None,
-        position=0,
         archived=False,
         created_at=0,
         metadata={},
@@ -372,7 +368,6 @@ class TestGroupToDetail:
             title="child",
             description=None,
             parent_id=1,
-            position=0,
             archived=False,
             created_at=0,
             metadata={},
@@ -426,7 +421,6 @@ class TestPreInsertDefaults:
         assert task.description is None
         assert task.priority == 1
         assert task.due_date is None
-        assert task.position == 0
         assert task.start_date is None
         assert task.finish_date is None
         assert task.group_id is None
