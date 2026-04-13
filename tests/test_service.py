@@ -163,12 +163,6 @@ class TestWorkspaceService:
         updated = service.update_workspace(conn, workspace.id, {"name": "new"})
         assert updated.name == "new"
 
-    def test_update_archive_with_active_children_blocked(self, conn: sqlite3.Connection) -> None:
-        workspace = service.create_workspace(conn, "work")
-        service.create_status(conn, workspace.id, "todo")
-        with pytest.raises(ValueError, match="active status"):
-            service.update_workspace(conn, workspace.id, {"archived": True})
-
     def test_archive_empty_workspace_allowed(self, conn: sqlite3.Connection) -> None:
         workspace = service.create_workspace(conn, "work")
         updated = service.update_workspace(conn, workspace.id, {"archived": True})
@@ -1987,6 +1981,38 @@ class TestArchivePreviewAndCascade:
             archived_entries = [h for h in history if h.field == "archived"]
             assert len(archived_entries) == 1
 
+    def test_cascade_archive_group_journals_descendant_groups(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        bid, g1, g2, t1, t2 = self._setup_full(conn)
+        # g1 is the parent (journaled via update_group); g2 is the descendant.
+        service.cascade_archive_group(conn, g1, source="test")
+        descendant_history = service.list_journal(conn, EntityType.GROUP, g2)
+        archived = [h for h in descendant_history if h.field == "archived"]
+        assert len(archived) == 1
+        assert archived[0].old_value == "False"
+        assert archived[0].new_value == "True"
+        assert archived[0].source == "test"
+
+    def test_cascade_archive_workspace_journals_groups_and_statuses(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        bid, g1, g2, t1, t2 = self._setup_full(conn)
+        from stx import repository as repo
+
+        status_ids = tuple(s.id for s in repo.list_statuses(conn, bid))
+        service.cascade_archive_workspace(conn, bid, source="test")
+        for gid in (g1, g2):
+            history = service.list_journal(conn, EntityType.GROUP, gid)
+            archived = [h for h in history if h.field == "archived"]
+            assert len(archived) == 1
+            assert archived[0].source == "test"
+        for sid in status_ids:
+            history = service.list_journal(conn, EntityType.STATUS, sid)
+            archived = [h for h in history if h.field == "archived"]
+            assert len(archived) == 1
+            assert archived[0].source == "test"
+
     # ---- Dep re-creation after archive ----
 
     def test_readd_dependency_after_archive(self, conn: sqlite3.Connection) -> None:
@@ -2641,6 +2667,12 @@ class TestJournalRecordingGroup:
         assert len(entries) == 1
         assert entries[0]["field"] == "title"
         assert entries[0]["new_value"] == "New"
+
+    def test_group_title_collision_friendly_error(self, conn):
+        wid, sid, gid = self._seed(conn)
+        service.create_group(conn, wid, "Other")
+        with pytest.raises(ValueError, match="already exists under the same parent"):
+            service.update_group(conn, gid, {"title": "Other"}, source="test")
 
 
 class TestJournalRecordingWorkspace:

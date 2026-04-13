@@ -30,7 +30,6 @@ from .models import (
     Status,
     Tag,
     Task,
-    TaskField,
     TaskFilter,
     Workspace,
 )
@@ -63,6 +62,7 @@ _UNIQUE_MESSAGES: dict[str, str] = {
     "statuses.workspace_id, statuses.name": "a status with this name already exists on this workspace",
     "tags.workspace_id, tags.name": "a tag with this name already exists on this workspace",
     "tasks.workspace_id, tasks.title": "a task with this title already exists on this workspace",
+    "uq_groups_workspace_parent_title_active": "a group with this title already exists under the same parent",
 }
 
 _UNIQUE_RE = re.compile(r"UNIQUE constraint failed: (.+)")
@@ -284,25 +284,6 @@ def update_workspace(
     source: str = "cli",
 ) -> Workspace:
     with transaction(conn), _friendly_errors():
-        if changes.get("archived") is True:
-            active_cols = repo.list_statuses(conn, workspace_id)
-            if active_cols:
-                raise ValueError(
-                    f"workspace has {len(active_cols)} active status(es); "
-                    "use 'workspace archive' to cascade"
-                )
-            active_groups = repo.count_active_groups_in_workspace(conn, workspace_id)
-            if active_groups:
-                raise ValueError(
-                    f"workspace has {active_groups} active group(s); "
-                    "use 'workspace archive' to cascade"
-                )
-            active_tasks = repo.list_tasks(conn, workspace_id)
-            if active_tasks:
-                raise ValueError(
-                    f"workspace has {len(active_tasks)} active task(s); "
-                    "use 'workspace archive' to cascade"
-                )
         old = repo.get_workspace(conn, workspace_id)
         result = repo.update_workspace(conn, workspace_id, changes)
         if old is not None:
@@ -1009,7 +990,14 @@ def get_task_meta(conn: sqlite3.Connection, task_id: int, key: str) -> str:
     return _get_entity_meta(conn, task_id, key, fetcher=get_task, entity_name="task")
 
 
-def set_task_meta(conn: sqlite3.Connection, task_id: int, key: str, value: str) -> Task:
+def set_task_meta(
+    conn: sqlite3.Connection,
+    task_id: int,
+    key: str,
+    value: str,
+    *,
+    source: str = "cli",
+) -> Task:
     return _set_entity_meta(
         conn,
         task_id,
@@ -1018,10 +1006,17 @@ def set_task_meta(conn: sqlite3.Connection, task_id: int, key: str, value: str) 
         entity_type=EntityType.TASK,
         setter=repo.set_task_metadata_key,
         fetcher=get_task,
+        source=source,
     )
 
 
-def remove_task_meta(conn: sqlite3.Connection, task_id: int, key: str) -> str:
+def remove_task_meta(
+    conn: sqlite3.Connection,
+    task_id: int,
+    key: str,
+    *,
+    source: str = "cli",
+) -> str:
     return _remove_entity_meta(
         conn,
         task_id,
@@ -1030,6 +1025,7 @@ def remove_task_meta(conn: sqlite3.Connection, task_id: int, key: str) -> str:
         remover=repo.remove_task_metadata_key,
         fetcher=get_task,
         entity_name="task",
+        source=source,
     )
 
 
@@ -1040,9 +1036,9 @@ def replace_task_metadata(
     *,
     source: str,
 ) -> Task:
-    """Atomically replace a task's entire metadata blob. `source` is accepted
-    for signature parity with `update_task`; metadata writes don't record
-    history today (consistent with per-key `set_task_meta` / `remove_task_meta`).
+    """Atomically replace a task's entire metadata blob. Each added, changed,
+    or removed key emits a `meta.<key>` journal entry via
+    `_replace_entity_metadata`.
     """
     return _replace_entity_metadata(
         conn,
@@ -1063,7 +1059,12 @@ def get_workspace_meta(conn: sqlite3.Connection, workspace_id: int, key: str) ->
 
 
 def set_workspace_meta(
-    conn: sqlite3.Connection, workspace_id: int, key: str, value: str
+    conn: sqlite3.Connection,
+    workspace_id: int,
+    key: str,
+    value: str,
+    *,
+    source: str = "cli",
 ) -> Workspace:
     return _set_entity_meta(
         conn,
@@ -1073,10 +1074,17 @@ def set_workspace_meta(
         entity_type=EntityType.WORKSPACE,
         setter=repo.set_workspace_metadata_key,
         fetcher=get_workspace,
+        source=source,
     )
 
 
-def remove_workspace_meta(conn: sqlite3.Connection, workspace_id: int, key: str) -> str:
+def remove_workspace_meta(
+    conn: sqlite3.Connection,
+    workspace_id: int,
+    key: str,
+    *,
+    source: str = "cli",
+) -> str:
     return _remove_entity_meta(
         conn,
         workspace_id,
@@ -1085,6 +1093,7 @@ def remove_workspace_meta(conn: sqlite3.Connection, workspace_id: int, key: str)
         remover=repo.remove_workspace_metadata_key,
         fetcher=get_workspace,
         entity_name="workspace",
+        source=source,
     )
 
 
@@ -1095,8 +1104,8 @@ def replace_workspace_metadata(
     *,
     source: str,
 ) -> Workspace:
-    """Atomically replace a workspace's entire metadata blob. See
-    `replace_task_metadata` for the `source` parameter rationale.
+    """Atomically replace a workspace's entire metadata blob. Each added,
+    changed, or removed key emits a `meta.<key>` journal entry.
     """
     return _replace_entity_metadata(
         conn,
@@ -1116,7 +1125,14 @@ def get_group_meta(conn: sqlite3.Connection, group_id: int, key: str) -> str:
     return _get_entity_meta(conn, group_id, key, fetcher=get_group, entity_name="group")
 
 
-def set_group_meta(conn: sqlite3.Connection, group_id: int, key: str, value: str) -> Group:
+def set_group_meta(
+    conn: sqlite3.Connection,
+    group_id: int,
+    key: str,
+    value: str,
+    *,
+    source: str = "cli",
+) -> Group:
     return _set_entity_meta(
         conn,
         group_id,
@@ -1125,10 +1141,17 @@ def set_group_meta(conn: sqlite3.Connection, group_id: int, key: str, value: str
         entity_type=EntityType.GROUP,
         setter=repo.set_group_metadata_key,
         fetcher=get_group,
+        source=source,
     )
 
 
-def remove_group_meta(conn: sqlite3.Connection, group_id: int, key: str) -> str:
+def remove_group_meta(
+    conn: sqlite3.Connection,
+    group_id: int,
+    key: str,
+    *,
+    source: str = "cli",
+) -> str:
     return _remove_entity_meta(
         conn,
         group_id,
@@ -1137,6 +1160,7 @@ def remove_group_meta(conn: sqlite3.Connection, group_id: int, key: str) -> str:
         remover=repo.remove_group_metadata_key,
         fetcher=get_group,
         entity_name="group",
+        source=source,
     )
 
 
@@ -1147,8 +1171,8 @@ def replace_group_metadata(
     *,
     source: str,
 ) -> Group:
-    """Atomically replace a group's entire metadata blob. See
-    `replace_task_metadata` for the `source` parameter rationale.
+    """Atomically replace a group's entire metadata blob. Each added,
+    changed, or removed key emits a `meta.<key>` journal entry.
     """
     return _replace_entity_metadata(
         conn,
@@ -2161,22 +2185,22 @@ def archive_task(
         return updated
 
 
-def _record_archive_history(
+def _record_bulk_archive(
     conn: sqlite3.Connection,
-    task_ids: tuple[int, ...],
+    entity_type: EntityType,
+    entity_ids: tuple[int, ...],
     workspace_id: int,
     source: str,
 ) -> None:
-    # Values must match str(bool) used by _record_changes for single-task archive.
-    # If Task.archived ever changes from bool, update both paths together.
-    for tid in task_ids:
+    # Values must match str(bool) used by _record_changes for single-entity archive.
+    for eid in entity_ids:
         repo.insert_journal_entry(
             conn,
             NewJournalEntry(
-                entity_type=EntityType.TASK,
-                entity_id=tid,
+                entity_type=entity_type,
+                entity_id=eid,
                 workspace_id=workspace_id,
-                field=TaskField.ARCHIVED,
+                field="archived",
                 old_value="False",
                 new_value="True",
                 source=source,
@@ -2193,9 +2217,14 @@ def cascade_archive_group(
     with transaction(conn), _friendly_errors():
         group = get_group(conn, group_id)
         task_ids = repo.list_active_task_ids_in_group_subtree(conn, group_id)
+        descendant_group_ids = repo.list_active_descendant_group_ids(conn, group_id)
         repo.archive_tasks_in_group_subtree(conn, group_id)
-        _record_archive_history(conn, task_ids, group.workspace_id, source)
+        _record_bulk_archive(conn, EntityType.TASK, task_ids, group.workspace_id, source)
         repo.archive_descendant_groups(conn, group_id)
+        _record_bulk_archive(
+            conn, EntityType.GROUP, descendant_group_ids, group.workspace_id, source
+        )
+        # parent group itself is journaled via update_group below
         return repo.update_group(conn, group_id, {"archived": True})
 
 
@@ -2207,8 +2236,12 @@ def cascade_archive_workspace(
 ) -> Workspace:
     with transaction(conn), _friendly_errors():
         task_ids = repo.list_active_task_ids_in_workspace(conn, workspace_id)
+        group_ids = repo.list_active_group_ids_in_workspace(conn, workspace_id)
+        status_ids = repo.list_active_status_ids_in_workspace(conn, workspace_id)
         repo.archive_tasks_in_workspace(conn, workspace_id)
-        _record_archive_history(conn, task_ids, workspace_id, source)
+        _record_bulk_archive(conn, EntityType.TASK, task_ids, workspace_id, source)
         repo.archive_groups_in_workspace(conn, workspace_id)
+        _record_bulk_archive(conn, EntityType.GROUP, group_ids, workspace_id, source)
         repo.archive_statuses_in_workspace(conn, workspace_id)
+        _record_bulk_archive(conn, EntityType.STATUS, status_ids, workspace_id, source)
         return repo.update_workspace(conn, workspace_id, {"archived": True})

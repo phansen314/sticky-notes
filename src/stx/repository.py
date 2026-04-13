@@ -1444,6 +1444,19 @@ def archive_tasks_in_group_subtree(
     return cur.rowcount
 
 
+def list_active_descendant_group_ids(
+    conn: sqlite3.Connection,
+    group_id: int,
+) -> tuple[int, ...]:
+    rows = conn.execute(
+        _SUBTREE_CTE + "SELECT g.id FROM groups g "
+        "JOIN subtree s ON g.id = s.id "
+        "WHERE g.id != ? AND g.archived = 0",
+        (group_id, group_id),
+    ).fetchall()
+    return tuple(r["id"] for r in rows)
+
+
 def archive_descendant_groups(
     conn: sqlite3.Connection,
     group_id: int,
@@ -1467,6 +1480,17 @@ def archive_tasks_in_workspace(
     return cur.rowcount
 
 
+def list_active_group_ids_in_workspace(
+    conn: sqlite3.Connection,
+    workspace_id: int,
+) -> tuple[int, ...]:
+    rows = conn.execute(
+        "SELECT id FROM groups WHERE workspace_id = ? AND archived = 0",
+        (workspace_id,),
+    ).fetchall()
+    return tuple(r["id"] for r in rows)
+
+
 def archive_groups_in_workspace(
     conn: sqlite3.Connection,
     workspace_id: int,
@@ -1476,6 +1500,17 @@ def archive_groups_in_workspace(
         (workspace_id,),
     )
     return cur.rowcount
+
+
+def list_active_status_ids_in_workspace(
+    conn: sqlite3.Connection,
+    workspace_id: int,
+) -> tuple[int, ...]:
+    rows = conn.execute(
+        "SELECT id FROM statuses WHERE workspace_id = ? AND archived = 0",
+        (workspace_id,),
+    ).fetchall()
+    return tuple(r["id"] for r in rows)
 
 
 def archive_statuses_in_workspace(
