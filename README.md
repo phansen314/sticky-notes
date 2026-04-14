@@ -114,6 +114,8 @@ Entry point: `stx`
 | `stx task show <task>` | Show task detail with history, edges, and metadata |
 | `stx task edit <task>` | Edit task fields (`--title`, `--desc`, `--priority`, `--due`) |
 | `stx task mv <task> -S <status> [pos]` | Move task to a status (within-workspace only) |
+| `stx task done <task>` | Mark a task done (independent of status; sticky; no-op if already done) |
+| `stx task undone <task> [--force]` | Clear the done flag (requires `--force` in non-interactive stdin) |
 | `stx task archive <task> [--force] [--dry-run]` | Archive a task (with confirmation) |
 | `stx task log <task>` | Show task change history |
 | `stx task meta ls\|get\|set\|del <task> ...` | Key/value metadata CRUD (workspaces and groups expose the same four verbs) |
@@ -136,8 +138,9 @@ Task identifiers are auto-detected: numeric forms (`1`, `task-0001`, `#1`) resol
 
 | Command | Description |
 |---------|-------------|
-| `stx status ...` | `create`, `ls`, `show`, `edit [--name]`, `order <statuses...>`, `archive [--reassign-to STATUS\|--force]` |
+| `stx status ...` | `create`, `ls`, `show`, `edit [--name] [--terminal\|--no-terminal]`, `order <statuses...>`, `archive [--reassign-to STATUS\|--force]`. `--terminal` marks a status so tasks moved into it auto-set `done=true`. |
 | `stx edge ...` | `create --source <t> --target <t> --kind <k>`, `archive --source <t> --target <t>`, `ls [--source <t>] [--kind <k>]`, `meta ls\|get\|set\|del --source <t> --target <t>` |
+| `stx next [--rank] [--limit N] [--include-blocked] [--edge-kind KIND]` | Topo-sort the acyclic `blocks` DAG to surface the actionable task frontier and the blocked list with pending blocker IDs |
 | `stx export` | Export database as JSON (default) or Markdown with Mermaid edge graphs labelled by `kind` (`--md`) |
 | `stx info` | Show stx file locations |
 | `stx backup <dest>` | Atomic binary DB snapshot (safe pre-migration backup) |

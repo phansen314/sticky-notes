@@ -26,6 +26,7 @@ Error codes and exit codes:
 | `not_found` | 3 | Entity doesn't exist |
 | `missing_active_workspace` | 5 | No active workspace set and `-w` not provided |
 | `db_error` | 2 | SQLite error |
+| `conflict` | 6 | Optimistic lock exhausted after max CAS retries |
 
 ---
 
@@ -50,12 +51,15 @@ These recur across shapes:
 | `metadata` | object | `{key: value}` — lowercase-normalized string keys |
 | `priority` | int | 1 (highest) – 5 (lowest) |
 | `due_date` | int \| null | Unix epoch seconds |
+| `version` | int | Optimistic-lock counter. Starts at 0; incremented on every write to the row. Present on all mutable entities: Task, Group, Status, Workspace, Edge. Pass back as `expected_version` in service calls to get CAS semantics. |
+| `done` | bool | Sticky completion flag on **Task** and **Group**. Task: set when moved into (or created in) a terminal status, or via `stx task done`; cleared only by `stx task undone`. Group: read-only rollup — `true` iff every non-archived child task and subgroup is done and the group is non-empty. |
+| `is_terminal` | bool | On **Status** only. When `true`, tasks moved into this status auto-set `done=true`. Default `false`. |
 
 ---
 
 ## Task Commands
 
-### `task create` / `task edit` / `task mv` / `task archive`
+### `task create` / `task edit` / `task mv` / `task archive` / `task done` / `task undone`
 
 All mutation commands return a full **TaskDetail** object:
 
@@ -71,7 +75,9 @@ All mutation commands return a full **TaskDetail** object:
     "created_at": 1712700000,
     "description": null,
     "metadata": {},
-    "status": {"id": 2, "name": "In Progress", "archived": false, "workspace_id": 1},
+    "done": false,
+    "version": 3,
+    "status": {"id": 2, "name": "In Progress", "archived": false, "workspace_id": 1, "is_terminal": false, "version": 0},
     "group": null,
     "edge_sources": [],
     "edge_targets": [],
@@ -415,6 +421,44 @@ Array of **TaskEdgeListItem**:
 
 Same four-verb shapes as `task meta` (see above). The target edge is identified
 via `--source` + `--target`; no positional task.
+
+---
+
+## `stx next`
+
+Returns a **NextTasksView**:
+
+```json
+{
+  "ok": true,
+  "data": {
+    "workspace_id": 1,
+    "ready": [
+      {
+        "id": 1, "title": "Provision cloud account",
+        "priority": 9, "due_date": null, "done": false,
+        "status_id": 2, "group_id": 3, "archived": false,
+        "created_at": 1712700000, "metadata": {}
+      }
+    ],
+    "blocked": [
+      {
+        "task": {
+          "id": 5, "title": "Scaffold REST API",
+          "priority": 7, "done": false,
+          "status_id": 2, "group_id": 10, "archived": false,
+          "created_at": 1712700100, "metadata": {}
+        },
+        "blocked_by": [1, 3]
+      }
+    ]
+  }
+}
+```
+
+`ready` — **TaskListItem** objects for tasks on the actionable frontier (blockers all done).  
+`blocked` — **BlockedTask** objects: `task` is a TaskListItem; `blocked_by` is a non-empty array of not-yet-done blocker task IDs.  
+With `--include-blocked`: `ready` is the full topological order, `blocked` is `[]`.
 
 ---
 

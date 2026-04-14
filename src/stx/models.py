@@ -32,6 +32,7 @@ class TaskField(StrEnum):
     START_DATE = "start_date"
     FINISH_DATE = "finish_date"
     GROUP_ID = "group_id"
+    DONE = "done"
 
 
 class GroupField(StrEnum):
@@ -39,6 +40,7 @@ class GroupField(StrEnum):
     DESCRIPTION = "description"
     PARENT_ID = "parent_id"
     ARCHIVED = "archived"
+    DONE = "done"
 
 
 class WorkspaceField(StrEnum):
@@ -49,12 +51,24 @@ class WorkspaceField(StrEnum):
 class StatusField(StrEnum):
     NAME = "name"
     ARCHIVED = "archived"
+    IS_TERMINAL = "is_terminal"
 
 
 class EdgeField(StrEnum):
     ENDPOINT = "endpoint"
     KIND = "kind"
     ACYCLIC = "acyclic"
+
+
+# ---- Exceptions ----
+
+
+class ConflictError(ValueError):
+    """Raised when an optimistic-lock CAS fails.
+
+    The caller read a row at version N but another writer has since bumped it.
+    The typical response is to re-fetch the row and retry the operation.
+    """
 
 
 # ---- Pre-insert types (no id, no created_at) ----
@@ -69,6 +83,7 @@ class NewWorkspace:
 class NewStatus:
     workspace_id: int
     name: str
+    is_terminal: bool = False
 
 
 @dataclass(frozen=True)
@@ -82,6 +97,7 @@ class NewTask:
     start_date: int | None = None
     finish_date: int | None = None
     group_id: int | None = None
+    done: bool = False
 
 
 @dataclass(frozen=True)
@@ -90,6 +106,7 @@ class NewGroup:
     title: str
     description: str | None = None
     parent_id: int | None = None
+    done: bool = False
 
 
 @dataclass(frozen=True)
@@ -113,6 +130,7 @@ class Workspace:
     archived: bool
     created_at: int
     metadata: dict[str, str]
+    version: int = 0
 
 
 @dataclass(frozen=True)
@@ -122,6 +140,8 @@ class Status:
     name: str
     archived: bool
     created_at: int
+    is_terminal: bool = False
+    version: int = 0
 
 
 @dataclass(frozen=True)
@@ -139,6 +159,8 @@ class Task:
     finish_date: int | None
     group_id: int | None
     metadata: dict[str, str]
+    done: bool = False
+    version: int = 0
 
 
 @dataclass(frozen=True)
@@ -151,6 +173,8 @@ class Group:
     archived: bool
     created_at: int
     metadata: dict[str, str]
+    done: bool = False
+    version: int = 0
 
 
 @dataclass(frozen=True)

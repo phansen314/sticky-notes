@@ -36,6 +36,7 @@ def row_to_workspace(row: Row) -> Workspace:
         archived=bool(row["archived"]),
         created_at=row["created_at"],
         metadata=json.loads(row["metadata"]),
+        version=row["version"],
     )
 
 
@@ -46,6 +47,8 @@ def row_to_status(row: Row) -> Status:
         name=row["name"],
         archived=bool(row["archived"]),
         created_at=row["created_at"],
+        is_terminal=bool(row["is_terminal"]),
+        version=row["version"],
     )
 
 
@@ -64,6 +67,8 @@ def row_to_task(row: Row) -> Task:
         finish_date=row["finish_date"],
         group_id=row["group_id"],
         metadata=json.loads(row["metadata"]),
+        done=bool(row["done"]),
+        version=row["version"],
     )
 
 
@@ -77,6 +82,8 @@ def row_to_group(row: Row) -> Group:
         archived=bool(row["archived"]),
         created_at=row["created_at"],
         metadata=json.loads(row["metadata"]),
+        done=bool(row["done"]),
+        version=row["version"],
     )
 
 
@@ -144,7 +151,9 @@ def shallow_fields(instance: object, cls: type) -> dict[str, Any]:
 
 
 def task_to_list_item(task: Task) -> TaskListItem:
-    return TaskListItem(**shallow_fields(task, Task))
+    f = shallow_fields(task, Task)
+    f.pop("version")
+    return TaskListItem(**f)
 
 
 def group_to_ref(
@@ -153,8 +162,10 @@ def group_to_ref(
     task_ids: tuple[int, ...],
     child_ids: tuple[int, ...],
 ) -> GroupRef:
+    f = shallow_fields(group, Group)
+    f.pop("version")
     return GroupRef(
-        **shallow_fields(group, Group),
+        **f,
         task_ids=task_ids,
         child_ids=child_ids,
     )

@@ -2,14 +2,11 @@
 erDiagram
     workspaces ||--o{ statuses : ""
     workspaces ||--o{ groups : ""
-    groups ||--o{ groups : ""
+    groups ||--o{ groups : "parent_id"
     statuses ||--o{ tasks : ""
     workspaces ||--o{ tasks : ""
     groups ||--o{ tasks : ""
-    tasks ||--o{ task_edges : ""
-    tasks ||--o{ task_edges : ""
-    groups ||--o{ group_edges : ""
-    groups ||--o{ group_edges : ""
+    workspaces ||--o{ edges : ""
     workspaces ||--o{ journal : ""
 
     workspaces {
@@ -18,6 +15,7 @@ erDiagram
         INTEGER archived
         INTEGER created_at
         TEXT metadata
+        INTEGER version
     }
 
     statuses {
@@ -26,6 +24,8 @@ erDiagram
         TEXT name
         INTEGER archived
         INTEGER created_at
+        INTEGER is_terminal
+        INTEGER version
     }
 
     groups {
@@ -37,6 +37,8 @@ erDiagram
         INTEGER archived
         INTEGER created_at
         TEXT metadata
+        INTEGER done
+        INTEGER version
     }
 
     tasks {
@@ -53,24 +55,21 @@ erDiagram
         INTEGER finish_date
         INTEGER group_id FK
         TEXT metadata
+        INTEGER done
+        INTEGER version
     }
 
-    task_edges {
-        INTEGER source_id FK "PK"
-        INTEGER target_id FK "PK"
+    edges {
+        TEXT from_type PK "task|group|workspace|status"
+        INTEGER from_id PK
+        TEXT to_type PK "task|group|workspace|status"
+        INTEGER to_id PK
+        TEXT kind PK
         INTEGER workspace_id FK
-        INTEGER archived
-        TEXT kind
+        INTEGER acyclic
         TEXT metadata
-    }
-
-    group_edges {
-        INTEGER source_id FK "PK"
-        INTEGER target_id FK "PK"
-        INTEGER workspace_id FK
         INTEGER archived
-        TEXT kind
-        TEXT metadata
+        INTEGER version
     }
 
     journal {
@@ -84,5 +83,4 @@ erDiagram
         TEXT source
         INTEGER changed_at
     }
-
 ```

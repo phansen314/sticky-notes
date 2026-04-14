@@ -226,6 +226,8 @@ class TestShallowFields:
             "finish_date",
             "group_id",
             "metadata",
+            "done",
+            "version",
         }
 
     def test_rejects_non_dataclass(self) -> None:

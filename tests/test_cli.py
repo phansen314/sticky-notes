@@ -2646,3 +2646,162 @@ class TestConfigCommands:
         from stx.tui.config import load_config
 
         assert load_config(self.cfg_path).active_workspace is not None
+
+
+# ---- Done flag CLI commands ----
+
+
+class TestDoneCommands:
+    """task done/undone, group done/undone, status edit --terminal, stx next."""
+
+    def _bootstrap(self, cli) -> None:
+        cli("workspace", "create", "w", "--statuses", "todo,done")
+
+    def test_task_done_sets_flag(self, cli):
+        self._bootstrap(cli)
+        cli("task", "create", "t1", "-S", "todo")
+        out, _ = cli("task", "done", "task-0001")
+        assert "marked task-0001 done" in out
+        out, _ = cli("--json", "task", "show", "task-0001")
+        payload = json.loads(out)
+        assert payload["data"]["done"] is True
+
+    def test_task_done_idempotent(self, cli):
+        self._bootstrap(cli)
+        cli("task", "create", "t1", "-S", "todo")
+        cli("task", "done", "task-0001")
+        out, _ = cli("task", "done", "task-0001")
+        assert "already done" in out
+
+    def test_task_undone_requires_force_non_tty(
+        self, cli, monkeypatch: pytest.MonkeyPatch
+    ):
+        self._bootstrap(cli)
+        cli("task", "create", "t1", "-S", "todo")
+        cli("task", "done", "task-0001")
+        # Default fixture has stdin as the test runner's; stdin isatty is
+        # False. Without --force, the command should refuse.
+        monkeypatch.setattr("stx.cli._stdin_is_tty", lambda: False)
+        cli("task", "undone", "task-0001", expect_exit=4)
+
+    def test_task_undone_with_force(self, cli):
+        self._bootstrap(cli)
+        cli("task", "create", "t1", "-S", "todo")
+        cli("task", "done", "task-0001")
+        out, _ = cli("task", "undone", "task-0001", "--force")
+        assert "marked task-0001 not done" in out
+        out, _ = cli("--json", "task", "show", "task-0001")
+        assert json.loads(out)["data"]["done"] is False
+
+    def test_status_edit_terminal_flag(self, cli):
+        self._bootstrap(cli)
+        out, _ = cli("--json", "status", "edit", "done", "--terminal")
+        payload = json.loads(out)
+        assert payload["data"]["is_terminal"] is True
+
+    def test_terminal_status_auto_marks_done(self, cli):
+        self._bootstrap(cli)
+        cli("status", "edit", "done", "--terminal")
+        cli("task", "create", "t1", "-S", "todo")
+        cli("task", "mv", "task-0001", "-S", "done")
+        out, _ = cli("--json", "task", "show", "task-0001")
+        assert json.loads(out)["data"]["done"] is True
+
+    def test_create_into_terminal_status_sets_done(self, cli):
+        # Tasks created directly into a terminal status must start done=True.
+        self._bootstrap(cli)
+        cli("status", "edit", "done", "--terminal")
+        cli("task", "create", "t1", "-S", "done")
+        out, _ = cli("--json", "task", "show", "task-0001")
+        assert json.loads(out)["data"]["done"] is True
+
+    def test_terminal_status_move_out_retains_done(self, cli):
+        # done is sticky: moving back to a non-terminal status does not clear it.
+        self._bootstrap(cli)
+        cli("status", "edit", "done", "--terminal")
+        cli("task", "create", "t1", "-S", "todo")
+        cli("task", "mv", "task-0001", "-S", "done")
+        cli("task", "mv", "task-0001", "-S", "todo")
+        out, _ = cli("--json", "task", "show", "task-0001")
+        payload = json.loads(out)
+        assert payload["data"]["done"] is True
+        assert payload["data"]["status"]["name"] == "todo"
+
+    def test_next_text_lists_frontier(self, cli):
+        self._bootstrap(cli)
+        cli("task", "create", "A", "-S", "todo")
+        cli("task", "create", "B", "-S", "todo")
+        cli("edge", "create", "-s", "task-0001", "-t", "task-0002", "-k", "blocks")
+        out, _ = cli("next")
+        assert "Ready:" in out
+        assert "task-0001" in out
+        assert "Blocked:" in out
+        assert "task-0002" in out
+
+    def test_next_json_envelope(self, cli):
+        self._bootstrap(cli)
+        cli("task", "create", "A", "-S", "todo")
+        cli("task", "create", "B", "-S", "todo")
+        cli("edge", "create", "-s", "task-0001", "-t", "task-0002", "-k", "blocks")
+        out, _ = cli("--json", "next")
+        payload = json.loads(out)
+        assert payload["ok"] is True
+        assert [t["id"] for t in payload["data"]["ready"]] == [1]
+        blocked = payload["data"]["blocked"]
+        assert len(blocked) == 1
+        assert blocked[0]["task"]["id"] == 2
+        assert blocked[0]["blocked_by"] == [1]
+
+    def test_next_include_blocked_full_topo(self, cli):
+        self._bootstrap(cli)
+        cli("task", "create", "A", "-S", "todo")
+        cli("task", "create", "B", "-S", "todo")
+        cli("task", "create", "C", "-S", "todo")
+        cli("edge", "create", "-s", "task-0001", "-t", "task-0002", "-k", "blocks")
+        cli("edge", "create", "-s", "task-0002", "-t", "task-0003", "-k", "blocks")
+        out, _ = cli("--json", "next", "--include-blocked")
+        payload = json.loads(out)
+        assert [t["id"] for t in payload["data"]["ready"]] == [1, 2, 3]
+        assert payload["data"]["blocked"] == []
+
+    def test_next_limit_caps_ready_list(self, cli):
+        self._bootstrap(cli)
+        for title in ("A", "B", "C"):
+            cli("task", "create", title, "-S", "todo")
+        out, _ = cli("--json", "next", "--limit", "2")
+        payload = json.loads(out)
+        assert len(payload["data"]["ready"]) == 2
+
+    def test_task_ls_shows_done_marker(self, cli):
+        self._bootstrap(cli)
+        cli("task", "create", "A", "-S", "todo")
+        cli("task", "done", "task-0001")
+        out, _ = cli("task", "ls")
+        assert "[done]" in out
+
+    def test_exit_conflict_after_max_retries(self, cli, monkeypatch: pytest.MonkeyPatch):
+        # Patch _MAX_CAS_RETRIES to 0 and inject a ConflictError so the
+        # retry loop exhausts immediately and main() exits with EXIT_CONFLICT=6.
+        self._bootstrap(cli)
+        cli("task", "create", "T", "-S", "todo")
+        from stx.models import ConflictError
+        monkeypatch.setattr("stx.cli._MAX_CAS_RETRIES", 0)
+        monkeypatch.setattr(
+            "stx.service.mark_task_done",
+            lambda *a, **kw: (_ for _ in ()).throw(ConflictError("injected")),
+        )
+        cli("task", "done", "task-0001", expect_exit=6)
+
+    def test_status_ls_shows_terminal_marker(self, cli):
+        self._bootstrap(cli)
+        cli("status", "edit", "done", "--terminal")
+        out, _ = cli("status", "ls")
+        assert "[terminal]" in out
+
+    def test_status_show_shows_terminal_field(self, cli):
+        self._bootstrap(cli)
+        cli("status", "edit", "done", "--terminal")
+        out, _ = cli("status", "show", "done")
+        assert "Terminal:" in out
+        assert "True" in out
+

@@ -14,6 +14,26 @@ from stx.connection import (
     transaction,
 )
 
+# Minimal `edges` table stub used by several migration fixtures as a stand-in
+# so the full migration chain can run forward to the current SCHEMA_VERSION.
+# Update this if the edges schema changes in a way that breaks the chain.
+_EDGES_STUB_DDL = """
+            CREATE TABLE edges (
+                from_type TEXT NOT NULL CHECK (from_type IN ('workspace','group','task')),
+                from_id INTEGER NOT NULL,
+                to_type TEXT NOT NULL CHECK (to_type IN ('workspace','group','task')),
+                to_id INTEGER NOT NULL,
+                workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
+                kind TEXT NOT NULL DEFAULT 'blocks'
+                    CHECK (kind GLOB '[a-z0-9_.-]*' AND length(kind) BETWEEN 1 AND 64),
+                acyclic INTEGER NOT NULL DEFAULT 0 CHECK (acyclic IN (0, 1)),
+                metadata TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata)),
+                archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),
+                PRIMARY KEY (from_type, from_id, to_type, to_id, kind),
+                CHECK (from_type != to_type OR from_id != to_id)
+            );
+"""
+
 
 class TestGetConnection:
     def test_creates_parent_dirs(self, tmp_path: Path) -> None:
@@ -1237,6 +1257,25 @@ class TestMigrations:
             CREATE INDEX idx_tags_workspace_archived_name
                 ON tags(workspace_id, archived, name);
             CREATE INDEX idx_task_tags_tag_id ON task_tags(tag_id);
+            -- Downstream migrations 018 and 020 ALTER `groups`; 019 ALTERs
+            -- `edges`. These tables existed in v16 but the test only needs
+            -- the tag tables for its own assertions, so we add the FK
+            -- targets here as bare-minimum stand-ins so the migration chain
+            -- can run forward to current SCHEMA_VERSION.
+            CREATE TABLE groups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
+                parent_id INTEGER,
+                title TEXT NOT NULL COLLATE NOCASE,
+                description TEXT,
+                position INTEGER NOT NULL DEFAULT 0 CHECK (position >= 0),
+                archived INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                metadata TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata)),
+                UNIQUE (id, workspace_id),
+                FOREIGN KEY (parent_id, workspace_id) REFERENCES groups(id, workspace_id)
+            );
+        """ + _EDGES_STUB_DDL + """
             CREATE TABLE journal (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 entity_type TEXT NOT NULL,
@@ -1388,6 +1427,10 @@ class TestMigrations:
                 source TEXT NOT NULL,
                 changed_at INTEGER NOT NULL DEFAULT (unixepoch())
             );
+            -- Migration 019 ALTERs edges; 020 ALTERs groups (already seeded
+            -- above) and tasks. Add the unified edges table so the chain
+            -- runs forward to current SCHEMA_VERSION.
+        """ + _EDGES_STUB_DDL + """
             CREATE INDEX idx_tasks_status_archived_position
                 ON tasks(status_id, archived, position, id);
             CREATE INDEX idx_tasks_workspace_archived_position

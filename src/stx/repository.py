@@ -15,6 +15,7 @@ from .mappers import (
     row_to_workspace,
 )
 from .models import (
+    ConflictError,
     EntityType,
     Group,
     JournalEntry,
@@ -33,7 +34,7 @@ from .service_models import EdgeListItem
 # ---- Updatable-field allowlists ----
 
 _WORKSPACE_UPDATABLE: frozenset[str] = frozenset({"name", "archived"})
-_STATUS_UPDATABLE: frozenset[str] = frozenset({"name", "archived"})
+_STATUS_UPDATABLE: frozenset[str] = frozenset({"name", "archived", "is_terminal"})
 _TASK_UPDATABLE: frozenset[str] = frozenset(
     {
         "title",
@@ -45,6 +46,7 @@ _TASK_UPDATABLE: frozenset[str] = frozenset(
         "archived",
         "start_date",
         "finish_date",
+        "done",
     }
 )
 _GROUP_UPDATABLE: frozenset[str] = frozenset(
@@ -53,6 +55,7 @@ _GROUP_UPDATABLE: frozenset[str] = frozenset(
         "description",
         "parent_id",
         "archived",
+        "done",
     }
 )
 _EDGE_UPDATABLE: frozenset[str] = frozenset({"acyclic"})
@@ -69,6 +72,8 @@ def _build_update(
     row_id: int,
     changes: dict[str, Any],
     allowed: frozenset[str],
+    *,
+    expected_version: int | None = None,
 ) -> tuple[str, tuple[Any, ...]]:
     if not changes:
         raise ValueError("changes must not be empty")
@@ -78,13 +83,54 @@ def _build_update(
     for k in changes:
         if not _SAFE_COLUMN_RE.match(k):
             raise ValueError(f"invalid column name: {k!r}")
-    set_clause = ", ".join(f"{k} = ?" for k in changes)
+    set_parts = [f"{k} = ?" for k in changes]
+    set_parts.append("version = version + 1")
+    if expected_version is not None:
+        params = (*changes.values(), row_id, expected_version)
+        return (
+            f"UPDATE {table} SET {', '.join(set_parts)} WHERE id = ? AND version = ?",
+            params,
+        )
     params = (*changes.values(), row_id)
-    return f"UPDATE {table} SET {set_clause} WHERE id = ?", params
+    return f"UPDATE {table} SET {', '.join(set_parts)} WHERE id = ?", params
 
 
 def _asdict_for_insert(obj: object) -> dict[str, Any]:
     return {f.name: getattr(obj, f.name) for f in dataclasses.fields(obj)}  # type: ignore[arg-type]
+
+
+_ID_TABLES: frozenset[str] = frozenset({"workspaces", "statuses", "groups", "tasks"})
+
+
+def _raise_on_zero_rowcount(
+    conn: sqlite3.Connection,
+    table: str,
+    entity: str,
+    row_id: int,
+    expected_version: int | None,
+) -> None:
+    """Raise ConflictError or LookupError after a zero-rowcount UPDATE.
+
+    When `expected_version` is provided, rowcount-0 could mean either the row
+    was not found OR the version didn't match. We check existence to distinguish
+    them: exists → version conflict, not found → LookupError.
+    When `expected_version` is None the check is a simple not-found.
+
+    Assumes rows are never hard-deleted (only archived). A concurrent hard
+    delete would cause this function to fall through to LookupError instead
+    of ConflictError when `expected_version` is set.
+    """
+    if table not in _ID_TABLES:
+        raise ValueError(f"_raise_on_zero_rowcount: unknown table {table!r}")
+    exists = conn.execute(
+        f"SELECT 1 FROM {table} WHERE id = ?", (row_id,)  # noqa: S608
+    ).fetchone()
+    if exists and expected_version is not None:
+        raise ConflictError(
+            f"{entity} {row_id} modified concurrently "
+            f"(expected version {expected_version})"
+        )
+    raise LookupError(f"{entity} {row_id} not found")
 
 
 # ---- Workspace functions ----
@@ -129,11 +175,16 @@ def update_workspace(
     conn: sqlite3.Connection,
     workspace_id: int,
     changes: dict[str, Any],
+    *,
+    expected_version: int | None = None,
 ) -> Workspace:
-    sql, params = _build_update("workspaces", workspace_id, changes, _WORKSPACE_UPDATABLE)
+    sql, params = _build_update(
+        "workspaces", workspace_id, changes, _WORKSPACE_UPDATABLE,
+        expected_version=expected_version,
+    )
     cur = conn.execute(sql, params)
     if cur.rowcount == 0:
-        raise LookupError(f"workspace {workspace_id} not found")
+        _raise_on_zero_rowcount(conn, "workspaces", "workspace", workspace_id, expected_version)
     row = conn.execute("SELECT * FROM workspaces WHERE id = ?", (workspace_id,)).fetchone()
     return row_to_workspace(row)
 
@@ -144,7 +195,8 @@ def update_workspace(
 def insert_status(conn: sqlite3.Connection, new: NewStatus) -> Status:
     d = _asdict_for_insert(new)
     cur = conn.execute(
-        "INSERT INTO statuses (workspace_id, name) VALUES (:workspace_id, :name)",
+        "INSERT INTO statuses (workspace_id, name, is_terminal) "
+        "VALUES (:workspace_id, :name, :is_terminal)",
         d,
     )
     row = conn.execute("SELECT * FROM statuses WHERE id = ?", (cur.lastrowid,)).fetchone()
@@ -192,11 +244,16 @@ def update_status(
     conn: sqlite3.Connection,
     status_id: int,
     changes: dict[str, Any],
+    *,
+    expected_version: int | None = None,
 ) -> Status:
-    sql, params = _build_update("statuses", status_id, changes, _STATUS_UPDATABLE)
+    sql, params = _build_update(
+        "statuses", status_id, changes, _STATUS_UPDATABLE,
+        expected_version=expected_version,
+    )
     cur = conn.execute(sql, params)
     if cur.rowcount == 0:
-        raise LookupError(f"status {status_id} not found")
+        _raise_on_zero_rowcount(conn, "statuses", "status", status_id, expected_version)
     row = conn.execute("SELECT * FROM statuses WHERE id = ?", (status_id,)).fetchone()
     return row_to_status(row)
 
@@ -208,8 +265,8 @@ def insert_task(conn: sqlite3.Connection, new: NewTask) -> Task:
     d = _asdict_for_insert(new)
     cur = conn.execute(
         "INSERT INTO tasks "
-        "(workspace_id, title, status_id, description, priority, due_date, start_date, finish_date, group_id) "
-        "VALUES (:workspace_id, :title, :status_id, :description, :priority, :due_date, :start_date, :finish_date, :group_id)",
+        "(workspace_id, title, status_id, description, priority, due_date, start_date, finish_date, group_id, done) "
+        "VALUES (:workspace_id, :title, :status_id, :description, :priority, :due_date, :start_date, :finish_date, :group_id, :done)",
         d,
     )
     row = conn.execute("SELECT * FROM tasks WHERE id = ?", (cur.lastrowid,)).fetchone()
@@ -238,10 +295,15 @@ def list_tasks(
     workspace_id: int,
     *,
     include_archived: bool = False,
+    include_done: bool = True,
 ) -> tuple[Task, ...]:
-    archive_clause = "" if include_archived else " AND archived = 0"
+    clauses = ["workspace_id = ?"]
+    if not include_archived:
+        clauses.append("archived = 0")
+    if not include_done:
+        clauses.append("done = 0")
     rows = conn.execute(
-        f"SELECT * FROM tasks WHERE workspace_id = ?{archive_clause} ORDER BY id",
+        f"SELECT * FROM tasks WHERE {' AND '.join(clauses)} ORDER BY id",  # noqa: S608
         (workspace_id,),
     ).fetchall()
     return tuple(row_to_task(r) for r in rows)
@@ -298,11 +360,16 @@ def update_task(
     conn: sqlite3.Connection,
     task_id: int,
     changes: dict[str, Any],
+    *,
+    expected_version: int | None = None,
 ) -> Task:
-    sql, params = _build_update("tasks", task_id, changes, _TASK_UPDATABLE)
+    sql, params = _build_update(
+        "tasks", task_id, changes, _TASK_UPDATABLE,
+        expected_version=expected_version,
+    )
     cur = conn.execute(sql, params)
     if cur.rowcount == 0:
-        raise LookupError(f"task {task_id} not found")
+        _raise_on_zero_rowcount(conn, "tasks", "task", task_id, expected_version)
     row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
     return row_to_task(row)
 
@@ -819,6 +886,31 @@ def list_edge_sources_into_hydrated(
     return tuple((r["from_type"], r["from_id"], r["from_title"], r["kind"]) for r in rows)
 
 
+def list_workspace_dag_edges(
+    conn: sqlite3.Connection,
+    workspace_id: int,
+    kinds: frozenset[str],
+) -> tuple[tuple[str, int, str, int], ...]:
+    """Return active acyclic edges matching `kinds` in a workspace as
+    (from_type, from_id, to_type, to_id) tuples. Used by `compute_next_tasks`
+    to build the dependency adjacency. Acyclic-only because non-acyclic edges
+    could introduce cycles into the topo sort. Endpoint archival is *not*
+    checked here — `compute_next_tasks` already filters its task universe to
+    non-archived tasks, so an edge into an archived task has no effect.
+    """
+    assert kinds, "kinds must be non-empty; pass at least one edge kind to query"
+    placeholders = ", ".join("?" * len(kinds))
+    rows = conn.execute(
+        f"SELECT from_type, from_id, to_type, to_id FROM edges "  # noqa: S608
+        f"WHERE workspace_id = ? AND kind IN ({placeholders}) "
+        "AND acyclic = 1 AND archived = 0",
+        (workspace_id, *kinds),
+    ).fetchall()
+    return tuple(
+        (r["from_type"], r["from_id"], r["to_type"], r["to_id"]) for r in rows
+    )
+
+
 def list_all_edge_rows(
     conn: sqlite3.Connection,
 ) -> tuple[dict, ...]:
@@ -998,8 +1090,8 @@ def list_journal_for_edge(
 def insert_group(conn: sqlite3.Connection, new: NewGroup) -> Group:
     d = _asdict_for_insert(new)
     cur = conn.execute(
-        "INSERT INTO groups (workspace_id, title, description, parent_id) "
-        "VALUES (:workspace_id, :title, :description, :parent_id)",
+        "INSERT INTO groups (workspace_id, title, description, parent_id, done) "
+        "VALUES (:workspace_id, :title, :description, :parent_id, :done)",
         d,
     )
     row = conn.execute("SELECT * FROM groups WHERE id = ?", (cur.lastrowid,)).fetchone()
@@ -1076,13 +1168,42 @@ def update_group(
     conn: sqlite3.Connection,
     group_id: int,
     changes: dict[str, Any],
+    *,
+    expected_version: int | None = None,
 ) -> Group:
-    sql, params = _build_update("groups", group_id, changes, _GROUP_UPDATABLE)
+    sql, params = _build_update(
+        "groups", group_id, changes, _GROUP_UPDATABLE,
+        expected_version=expected_version,
+    )
     cur = conn.execute(sql, params)
     if cur.rowcount == 0:
-        raise LookupError(f"group {group_id} not found")
+        _raise_on_zero_rowcount(conn, "groups", "group", group_id, expected_version)
     row = conn.execute("SELECT * FROM groups WHERE id = ?", (group_id,)).fetchone()
     return row_to_group(row)
+
+
+def compute_group_done_state(conn: sqlite3.Connection, group_id: int) -> bool:
+    """Return True iff the group has at least one non-archived child (task or
+    subgroup) and *every* such child has done=1. Empty groups are not done.
+    Archived children are ignored entirely.
+    """
+    row = conn.execute(
+        """
+        SELECT
+            (
+                (SELECT COUNT(*) FROM tasks  WHERE group_id  = ? AND archived = 0) +
+                (SELECT COUNT(*) FROM groups WHERE parent_id = ? AND archived = 0)
+            ) > 0
+            AND NOT EXISTS (
+                SELECT 1 FROM tasks  WHERE group_id  = ? AND archived = 0 AND done = 0
+            )
+            AND NOT EXISTS (
+                SELECT 1 FROM groups WHERE parent_id = ? AND archived = 0 AND done = 0
+            ) AS done_state
+        """,
+        (group_id, group_id, group_id, group_id),
+    ).fetchone()
+    return bool(row["done_state"])
 
 
 # ---- Task-group functions ----
@@ -1123,14 +1244,19 @@ def batch_task_ids_by_group(
     group_ids: tuple[int, ...],
     *,
     include_archived: bool = False,
+    include_done: bool = True,
 ) -> dict[int, tuple[int, ...]]:
     """Return {group_id: (task_id, ...)} for a batch of group IDs."""
     if not group_ids:
         return {}
     placeholders = ",".join("?" * len(group_ids))
-    archive_clause = "" if include_archived else " AND archived = 0"
+    clauses = [f"group_id IN ({placeholders})"]
+    if not include_archived:
+        clauses.append("archived = 0")
+    if not include_done:
+        clauses.append("done = 0")
     rows = conn.execute(
-        f"SELECT group_id, id FROM tasks WHERE group_id IN ({placeholders}){archive_clause}",
+        f"SELECT group_id, id FROM tasks WHERE {' AND '.join(clauses)}",  # noqa: S608
         group_ids,
     ).fetchall()
     mapping: dict[int, list[int]] = {}
@@ -1221,6 +1347,14 @@ def get_subtree_group_ids(
     conn: sqlite3.Connection,
     group_id: int,
 ) -> tuple[int, ...]:
+    """Return all group IDs in the subtree rooted at `group_id`, inclusive.
+
+    Includes archived sub-groups. Callers that want task IDs should pass the
+    result to `batch_task_ids_by_group` (which filters archived/done tasks at
+    query time) so non-archived tasks inside archived sub-groups are still
+    accounted for — a state that can arise if a group was archived without
+    cascading to its tasks.
+    """
     rows = conn.execute(
         "WITH RECURSIVE subtree AS ("
         "  SELECT id FROM groups WHERE id = ? "
@@ -1240,12 +1374,12 @@ def get_group_ancestry(
     """Return groups from root to the given group, inclusive."""
     rows = conn.execute(
         "WITH RECURSIVE ancestry AS ("
-        "  SELECT id, workspace_id, title, description, metadata, parent_id, archived, created_at, 0 AS depth "
+        "  SELECT id, workspace_id, title, description, metadata, parent_id, archived, created_at, done, version, 0 AS depth "
         "  FROM groups WHERE id = ? "
         "  UNION ALL "
-        "  SELECT g.id, g.workspace_id, g.title, g.description, g.metadata, g.parent_id, g.archived, g.created_at, a.depth + 1 "
+        "  SELECT g.id, g.workspace_id, g.title, g.description, g.metadata, g.parent_id, g.archived, g.created_at, g.done, g.version, a.depth + 1 "
         "  FROM groups g JOIN ancestry a ON g.id = a.parent_id"
-        ") SELECT id, workspace_id, title, description, metadata, parent_id, archived, created_at "
+        ") SELECT id, workspace_id, title, description, metadata, parent_id, archived, created_at, done, version "
         "FROM ancestry ORDER BY depth DESC",
         (group_id,),
     ).fetchall()

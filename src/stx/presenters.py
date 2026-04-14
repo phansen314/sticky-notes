@@ -15,6 +15,7 @@ from .service_models import (
     GroupDetail,
     GroupRef,
     MoveToWorkspacePreview,
+    NextTasksView,
     TaskDetail,
     TaskMovePreview,
     WorkspaceContext,
@@ -66,14 +67,16 @@ def format_status_list(statuses: tuple[Status, ...]) -> str:
         return "no statuses"
     lines: list[str] = []
     for s in statuses:
+        terminal = " [terminal]" if s.is_terminal else ""
         archived = " (archived)" if s.archived else ""
-        lines.append(f"  {s.name}{archived}")
+        lines.append(f"  {s.name}{terminal}{archived}")
     return "\n".join(lines)
 
 
 def format_status_detail(status: Status, task_count: int) -> str:
     lines = [f"status  {status.name}"]
     lines.append(f"  ID:          {status.id}")
+    lines.append(f"  Terminal:    {status.is_terminal}")
     lines.append(f"  Archived:    {status.archived}")
     lines.append(f"  Tasks:       {task_count}")
     lines.append(f"  Created:     {format_timestamp(status.created_at)}")
@@ -81,7 +84,8 @@ def format_status_detail(status: Status, task_count: int) -> str:
 
 
 def format_task_detail(detail: TaskDetail) -> str:
-    lines = [f"{format_task_num(detail.id)}  {detail.title}"]
+    done_marker = " [done]" if detail.done else ""
+    lines = [f"{format_task_num(detail.id)}  {detail.title}{done_marker}"]
     lines.append(f"  Status:      {detail.status.name}")
     if detail.group is not None:
         lines.append(f"  Group:       {detail.group.title} ({format_group_num(detail.group.id)})")
@@ -123,8 +127,9 @@ def format_workspace_list_view(view: WorkspaceListView) -> str:
             lines.append("  (empty)")
             continue
         for item in col.tasks:
+            done_marker = " [done]" if item.done else ""
             lines.append(
-                f"  {format_task_num(item.id)}  {format_priority(item.priority)} {item.title}"
+                f"  {format_task_num(item.id)}  {format_priority(item.priority)} {item.title}{done_marker}"
             )
     return "\n".join(lines)
 
@@ -295,6 +300,36 @@ def format_edge_detail(detail: EdgeDetail) -> str:
         lines.append("\n  History:")
         for h in detail.history:
             lines.append(f"    {format_history_entry(h)}")
+    return "\n".join(lines)
+
+
+def format_next_tasks(view: NextTasksView) -> str:
+    """Render the result of `compute_next_tasks` as text.
+
+    Two sections — "Ready" lists actionable tasks (frontier or full topo
+    depending on caller flags), "Blocked" lists not-done tasks gated on
+    pending blocker task ids. Each section emits "(none)" when empty so the
+    output structure stays consistent across runs.
+    """
+    lines: list[str] = ["Ready:"]
+    if not view.ready:
+        lines.append("  (none)")
+    else:
+        for item in view.ready:
+            lines.append(
+                f"  {format_task_num(item.id)}  {format_priority(item.priority)} {item.title}"
+            )
+    lines.append("")
+    lines.append("Blocked:")
+    if not view.blocked:
+        lines.append("  (none)")
+    else:
+        for entry in view.blocked:
+            blockers = ", ".join(format_task_num(b) for b in entry.blocked_by)
+            lines.append(
+                f"  {format_task_num(entry.task.id)}  {format_priority(entry.task.priority)} "
+                f"{entry.task.title}  (blocked by: {blockers})"
+            )
     return "\n".join(lines)
 
 

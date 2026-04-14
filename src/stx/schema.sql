@@ -3,7 +3,8 @@ CREATE TABLE IF NOT EXISTS workspaces (
     name TEXT NOT NULL COLLATE NOCASE,
     archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),
     created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-    metadata TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata))
+    metadata TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata)),
+    version INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS statuses (
@@ -12,6 +13,8 @@ CREATE TABLE IF NOT EXISTS statuses (
     name TEXT NOT NULL COLLATE NOCASE,
     archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),
     created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    is_terminal INTEGER NOT NULL DEFAULT 0 CHECK (is_terminal IN (0, 1)),
+    version INTEGER NOT NULL DEFAULT 0,
     UNIQUE (id, workspace_id)
 );
 
@@ -24,6 +27,8 @@ CREATE TABLE IF NOT EXISTS groups (
     archived     INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),
     created_at   INTEGER NOT NULL DEFAULT (unixepoch()),
     metadata     TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata)),
+    done         INTEGER NOT NULL DEFAULT 0 CHECK (done IN (0, 1)),
+    version      INTEGER NOT NULL DEFAULT 0,
     UNIQUE (id, workspace_id),
     FOREIGN KEY (parent_id, workspace_id) REFERENCES groups(id, workspace_id) ON DELETE RESTRICT
 );
@@ -42,6 +47,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     finish_date INTEGER,
     group_id INTEGER,
     metadata TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata)),
+    done INTEGER NOT NULL DEFAULT 0 CHECK (done IN (0, 1)),
+    version INTEGER NOT NULL DEFAULT 0,
     CHECK (start_date IS NULL OR finish_date IS NULL OR finish_date >= start_date),
     FOREIGN KEY (status_id, workspace_id) REFERENCES statuses(id, workspace_id) ON DELETE RESTRICT,
     FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE RESTRICT,
@@ -63,6 +70,7 @@ CREATE TABLE IF NOT EXISTS edges (
     acyclic      INTEGER NOT NULL DEFAULT 0 CHECK (acyclic IN (0, 1)),
     metadata     TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata)),
     archived     INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),
+    version      INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (from_type, from_id, to_type, to_id, kind),
     CHECK (from_type != to_type OR from_id != to_id)
 );
@@ -121,3 +129,9 @@ CREATE INDEX IF NOT EXISTS idx_edges_acyclic_archived
 
 -- FK index for tasks.group_id (not covered by composites above)
 CREATE INDEX IF NOT EXISTS idx_tasks_group_id ON tasks(group_id);
+
+-- Done-flag indexes (for `stx next` and rollup queries)
+CREATE INDEX IF NOT EXISTS idx_tasks_workspace_done
+    ON tasks(workspace_id, done, archived);
+CREATE INDEX IF NOT EXISTS idx_groups_workspace_done
+    ON groups(workspace_id, done, archived);
