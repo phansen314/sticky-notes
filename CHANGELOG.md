@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **`task.done` sticky completion flag.** Tasks now carry an explicit `done` boolean independent of status. `done` defaults to `false` on creation; it becomes `true` when a task is moved into a terminal status, or when created directly into one. Once set, `done` is sticky — it is not cleared by a status move (even out of a terminal status). Only `stx task undone [--force]` clears it. The flag is reflected in `task show` output, the kanban `[done]` marker, and `stx next` computation.
+
+- **`status.is_terminal` flag.** Statuses can be marked terminal via `stx status edit <name> --terminal` / `--no-terminal`. When a task is moved into (or created in) a terminal status its `done` flag is auto-set to `true`. This is journaled with `source="auto"` so it is distinguishable from manual flips. Moving a task out of a terminal status does not clear `done` — it remains sticky.
+
+- **`stx task done <task>`** — explicitly mark a task done (independent of status). True no-op (no write, no version bump) if already done.
+
+- **`stx task undone <task> [--force]`** — clear the done flag. Gated: requires `--force` in non-interactive stdin; prompts y/N in a terminal. True no-op if already not done.
+
+- **`stx next` command** — compute the next actionable tasks by topological sort of the active acyclic `blocks` edge DAG. Flags:
+  - `--rank` — sort the ready list by (priority desc, due\_date asc, id asc)
+  - `--include-blocked` — return the full topological order of all not-done tasks instead of just the ready frontier; `blocked` is empty in this mode
+  - `--limit N` — cap the ready list to N items (applied after rank/topo sort)
+  - `--edge-kind KIND` — repeatable; default `blocks`. Controls which edge kinds build the dependency DAG; only acyclic edges participate.
+
+  Output has two sections: **Ready** (the frontier — tasks whose blockers are all done) and **Blocked** (not-done tasks with the task IDs of their pending blockers). Group endpoints in edges are expanded to their member task IDs, so a `group-A blocks group-B` edge means every not-done task in group-A must be done before any task in group-B becomes ready.
+
+- **`stx status edit --terminal` / `--no-terminal`** — mutually exclusive flags to mark or unmark a status as terminal. Text output (`stx status ls`, `stx status show`) now includes a `[terminal]` marker and a `Terminal:` field respectively.
+
+- **`group.done` read-only rollup.** A group's `done` field is automatically recomputed whenever a descendant task or group changes: it is `true` iff every non-archived child (direct task or subgroup) is done and the group is non-empty. The rollup fires post-commit in its own transaction so concurrent agents see the latest committed state. `group.done` is never set directly — it is a derived metric for display. `stx next` reads only `task.done`, never `group.done`.
+
+- **Optimistic locking (version columns + CAS retries).** Every mutable entity table (`workspaces`, `statuses`, `groups`, `tasks`, `edges`) gains a `version INTEGER NOT NULL DEFAULT 0` column, incremented on every write by `_build_update` in `repository.py`. Write functions accept an optional `expected_version`; a version mismatch raises `ConflictError` (subclass of `ValueError`). The CLI `_with_cas_retry` helper re-fetches the entity and retries up to 3 times on conflict. Exit code 6 (`conflict`) is returned when retries are exhausted.
+
+- **Task created into a terminal status starts as `done=True`.** Previously, a task created directly with `-S <terminal-status>` would show `done=false` even though it was in a completed status. Creation now checks `is_terminal` and sets the initial `done` flag accordingly.
+
+### Schema
+
+- **Migration 020** (`020_done_flags.sql`): `ALTER TABLE statuses ADD COLUMN is_terminal INTEGER NOT NULL DEFAULT 0 CHECK (is_terminal IN (0, 1))`. `ALTER TABLE tasks ADD COLUMN done INTEGER NOT NULL DEFAULT 0 CHECK (done IN (0, 1))`. `ALTER TABLE groups ADD COLUMN done INTEGER NOT NULL DEFAULT 0 CHECK (done IN (0, 1))`. Two new indexes: `idx_tasks_workspace_done ON tasks(workspace_id, done, archived)` and `idx_groups_workspace_done ON groups(workspace_id, done, archived)`.
+
+- **Migration 021** (`021_version_columns.sql`): `ALTER TABLE {workspaces,statuses,groups,tasks,edges} ADD COLUMN version INTEGER NOT NULL DEFAULT 0`. All five are simple `ALTER TABLE` statements — no table recreate. `SCHEMA_VERSION` advances from 19 → 21.
+
 ## [0.12.0] — 2026-04-13
 
 ### Added

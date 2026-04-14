@@ -35,6 +35,7 @@ See [`json-schema.md`](json-schema.md) for per-command `data` shapes.
 | `3` | `not_found` — entity doesn't exist |
 | `4` | `validation` — bad argument value, duplicate names, integrity violations |
 | `5` | `missing_active_workspace` — no active workspace set |
+| `6` | `conflict` — optimistic lock exhausted after max CAS retries |
 | `130` | interrupted (SIGINT) |
 
 ---
@@ -144,7 +145,38 @@ stx task mv task-0001 -S Done
 stx task mv task-0001 -S Done --dry-run
 ```
 
-**Note:** `stx task done` does not exist. To mark done: `stx task mv <task> -S Done` (requires a status literally named "Done").
+---
+
+### `stx task done <task>`
+
+Mark a task done independent of its status. True no-op (no write, no version bump) if already done. The `done` flag is sticky — it is not cleared by subsequent status moves. Use `stx task undone` to clear it.
+
+```sh
+stx task done task-0001
+stx task done "Write README"
+```
+
+Returns full TaskDetail. Text output: `"marked task-NNNN done"` or `"task-NNNN already done"`.
+
+---
+
+### `stx task undone <task> [--force]`
+
+Clear the done flag on a task. Gated to prevent accidental reverts:
+- **Non-interactive stdin** (pipe, CI): `--force` is required; the command exits with a validation error otherwise.
+- **Interactive terminal**: prompts `"proceed? [y/N]"` unless `--force` is passed.
+
+True no-op if already not done.
+
+| Flag | Description |
+|---|---|
+| `--force` | Skip confirmation prompt |
+
+```sh
+stx task undone task-0001 --force
+```
+
+Returns full TaskDetail. Text output: `"marked task-NNNN not done"` or `"task-NNNN already not done"`.
 
 ---
 
@@ -305,7 +337,7 @@ stx workspace archive work --force
 | `status create` | `name` | — | Create a status on the active workspace |
 | `status ls` | — | `--archived hide\|include\|only` | List statuses on active workspace; default hides archived |
 | `status show` | `name` | — | Show status detail (including task count) |
-| `status edit` | `name` | `--name NEW` | Edit status (rename via `--name`) |
+| `status edit` | `name` | `--name NEW`, `--terminal`, `--no-terminal` | Edit status. `--name` renames. `--terminal` / `--no-terminal` are mutually exclusive: mark/unmark the status as terminal. Tasks moved into (or created in) a terminal status auto-set `done=true`; leaving a terminal status does not clear `done`. |
 | `status order` | `status1 status2 ...` | — | Set the TUI display order for statuses on the active workspace (or `-w`). Writes `~/.config/stx/tui.toml`. Partial ordering allowed — unlisted statuses fall to the end. |
 | `status archive` | `name` | `--reassign-to STATUS`, `--force`, `--dry-run` | Archive status. `--dry-run` previews without executing. `--reassign-to` moves tasks to another status before archiving. `--force` cascade-archives all tasks in the status instead — when active tasks exist, a warning line is emitted to stderr before the archive runs (no prompt, pipe-friendly). Neither flag triggers a confirmation prompt. Without either flag the service layer blocks on active tasks and exits with an error. |
 
@@ -383,6 +415,62 @@ stx group ls
 stx group mv "Auth" --parent "Frontend"
 stx group mv "Backend" --to-top  # promote to root level
 stx edge create --source "group:Sprint 2" --target "group:Sprint 1" --kind blocks
+```
+
+---
+
+## `stx next` — Next Actionable Tasks
+
+Computes the ready frontier (and optionally the full topological order) by running Kahn's algorithm over the active acyclic edge DAG.
+
+**How it works:**
+- Loads all not-done, non-archived tasks for the active workspace.
+- Loads all active acyclic edges of the specified kind(s) (default: `blocks`).
+- Expands group endpoints to their member task IDs so a `group-A blocks group-B` edge means every not-done task in A must be done before any task in B becomes ready.
+- **Ready**: tasks whose blockers (expanded to individual task IDs) are all done.
+- **Blocked**: not-done tasks with the IDs of their pending blockers (always non-empty per entry).
+
+| Flag | Default | Description |
+|---|---|---|
+| `--rank` | off | Sort the ready list by (priority desc, due\_date asc, id asc). In `--include-blocked` mode applies the same key as a tiebreaker within each wave. |
+| `--include-blocked` | off | Return the full topological order of all not-done tasks (frontier first, then their dependents). `blocked` is empty in this mode. |
+| `--limit N` | — | Cap the ready list to N items after ranking/sorting. Does not limit the blocked list. |
+| `--edge-kind KIND` | `blocks` | Edge kind(s) to use when building the DAG. Repeatable: `--edge-kind blocks --edge-kind spawns`. Only acyclic edges of the given kinds are included. |
+
+**Text output:**
+
+```
+Ready:
+  task-0001  p9  Provision cloud account
+  task-0003  p7  Set up load balancer
+
+Blocked:
+  task-0005  p8  Scaffold REST API  (blocked by: task-0001, task-0003)
+```
+
+**JSON output** (`NextTasksView`):
+```json
+{
+  "ok": true,
+  "data": {
+    "workspace_id": 1,
+    "ready": [<TaskListItem>, ...],
+    "blocked": [
+      {"task": <TaskListItem>, "blocked_by": [1, 3]},
+      ...
+    ]
+  }
+}
+```
+
+`blocked_by` is always a non-empty array of task IDs (tasks that are not yet done and gate this task).
+
+```sh
+stx next
+stx next --rank
+stx next --rank --limit 3
+stx next --include-blocked
+stx --json next --rank --edge-kind blocks --edge-kind spawns
 ```
 
 ---
@@ -483,6 +571,8 @@ Every task-referencing command auto-detects whether the argument is an ID or a t
 |---|---|
 | `task create` | full TaskDetail (with `status`, `group`, `edge_sources`, `edge_targets`, `history`, `metadata`). `edge_sources`/`edge_targets` each is a list of `{task: Task, kind: str}`. |
 | `task edit`, `task archive`, `task mv` | full TaskDetail (same shape as `task show`) |
+| `task done`, `task undone` | full TaskDetail |
+| `next` | `NextTasksView`: `{workspace_id, ready: [TaskListItem], blocked: [{task: TaskListItem, blocked_by: [int]}]}` |
 | `task edit --dry-run`, `group edit/rename/mv --dry-run` | `EntityUpdatePreview`: `{entity_type, entity_id, label, before, after}` |
 | `task mv --dry-run` | `TaskMovePreview`: `{task_id, title, from_status, to_status}` |
 | `workspace create/rename` | full Workspace object |

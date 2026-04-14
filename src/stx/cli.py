@@ -21,13 +21,14 @@ from .active_workspace import (
 from .connection import DEFAULT_DB_PATH, get_connection, init_db
 from .export import export_full_json, export_markdown
 from .formatting import format_group_num, format_task_num, parse_date
-from .models import Workspace
+from .models import ConflictError, Workspace
 from .service_models import ArchivePreview
 
 EXIT_DB_ERROR = 2
 EXIT_NOT_FOUND = 3
 EXIT_VALIDATION = 4
 EXIT_NO_ACTIVE_WS = 5
+EXIT_CONFLICT = 6
 
 
 # ---- Result type ----
@@ -111,6 +112,36 @@ def _resolve_task(
     raw: str,
 ) -> int:
     return service.resolve_task_id(conn, workspace.id, raw)
+
+
+# ---- CAS retry helper ----
+
+_MAX_CAS_RETRIES = 3
+
+
+def _with_cas_retry(
+    fetch: Callable[[], Any],
+    already: Callable[[Any], CmdResult | None],
+    action: Callable[[Any], CmdResult],
+) -> CmdResult:
+    """Fetch an entity, attempt `action`. On ConflictError, re-fetch and retry.
+
+    `already(entity)` — return a CmdResult if the entity is already in the
+    desired state (idempotency short-circuit), or None to proceed with action.
+    Retries up to _MAX_CAS_RETRIES times; re-raises ConflictError on exhaustion
+    (caught by main() → EXIT_CONFLICT).
+    """
+    for attempt in range(_MAX_CAS_RETRIES + 1):
+        entity = fetch()
+        result = already(entity)
+        if result is not None:
+            return result
+        try:
+            return action(entity)
+        except ConflictError:
+            if attempt == _MAX_CAS_RETRIES:
+                raise
+    assert False, "unreachable"  # noqa: B011
 
 
 # ---- JSON/text output ----
@@ -315,6 +346,63 @@ def cmd_task_log(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunCon
     return Ok(data=history, text=presenters.format_journal_entries(history))
 
 
+def cmd_task_done(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
+    workspace = _resolve_workspace(conn, args, ctx)
+    task_id = _resolve_task(conn, workspace, args.task)
+
+    def fetch() -> Any:
+        return service.get_task(conn, task_id)
+
+    def already(pre: Any) -> CmdResult | None:
+        if pre.done:
+            return Ok(data=pre, text=f"{format_task_num(task_id)} already done")
+        return None
+
+    def action(pre: Any) -> CmdResult:
+        service.mark_task_done(conn, task_id, source="cli",
+                               expected_version=pre.version)
+        detail = service.get_task_detail(conn, task_id)
+        return Ok(data=detail, text=f"marked {format_task_num(task_id)} done")
+
+    return _with_cas_retry(fetch, already, action)
+
+
+def cmd_task_undone(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
+    workspace = _resolve_workspace(conn, args, ctx)
+    task_id = _resolve_task(conn, workspace, args.task)
+    if not args.force:
+        # Un-done is gated to prevent fat-finger reverts on a completed task.
+        # Require --force for non-interactive callers, otherwise prompt.
+        if not _stdin_is_tty():
+            raise ValueError(
+                f"refusing to flip {format_task_num(task_id)} from done to not-done "
+                f"without --force (non-interactive stdin)"
+            )
+        print(
+            f"warning: flipping {format_task_num(task_id)} from done back to not-done",
+            file=sys.stderr,
+        )
+        answer = input("proceed? [y/N] ")
+        if answer.strip().lower() not in ("y", "yes"):
+            return Ok(data=None, text="aborted")
+
+    def fetch() -> Any:
+        return service.get_task(conn, task_id)
+
+    def already(pre: Any) -> CmdResult | None:
+        if not pre.done:
+            return Ok(data=pre, text=f"{format_task_num(task_id)} already not done")
+        return None
+
+    def action(pre: Any) -> CmdResult:
+        service.mark_task_undone(conn, task_id, source="cli",
+                                 expected_version=pre.version)
+        detail = service.get_task_detail(conn, task_id)
+        return Ok(data=detail, text=f"marked {format_task_num(task_id)} not done")
+
+    return _with_cas_retry(fetch, already, action)
+
+
 # ---- Workspace subcommands ----
 
 
@@ -451,6 +539,8 @@ def cmd_status_edit(
     changes: dict[str, Any] = {}
     if args.new_name is not None:
         changes["name"] = args.new_name
+    if args.terminal is not None:
+        changes["is_terminal"] = args.terminal
     if not changes:
         return Ok(data=col, text="nothing to update")
     old_name = col.name
@@ -1000,6 +1090,29 @@ def cmd_backup(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunConte
     )
 
 
+# ---- Next ----
+
+
+def cmd_next(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
+    workspace = _resolve_workspace(conn, args, ctx)
+    edge_kinds = frozenset(args.edge_kind) if args.edge_kind else None
+    view = service.compute_next_tasks(
+        conn,
+        workspace.id,
+        rank=args.rank,
+        include_blocked=args.include_blocked,
+        edge_kinds=edge_kinds,
+    )
+    ready = view.ready
+    if args.limit is not None and args.limit >= 0:
+        ready = ready[: args.limit]
+    payload_view = (
+        view if args.limit is None else dataclasses.replace(view, ready=ready)
+    )
+    text = presenters.format_next_tasks(payload_view)
+    return Ok(data=payload_view, text=text)
+
+
 # ---- Info ----
 
 
@@ -1290,6 +1403,8 @@ HANDLERS: dict[str, CommandHandler] = {
     "task_transfer": cmd_task_transfer,
     "task_archive": cmd_task_archive,
     "task_log": cmd_task_log,
+    "task_done": cmd_task_done,
+    "task_undone": cmd_task_undone,
     "task_meta_ls": cmd_task_meta_ls,
     "task_meta_get": cmd_task_meta_get,
     "task_meta_set": cmd_task_meta_set,
@@ -1341,6 +1456,7 @@ HANDLERS: dict[str, CommandHandler] = {
     "export": cmd_export,
     "backup": cmd_backup,
     "info": cmd_info,
+    "next": cmd_next,
     "tui": cmd_tui,
 }
 
@@ -1432,6 +1548,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_log = task_sub.add_parser("log", help="show task change log")
     p_log.set_defaults(command="task_log")
     p_log.add_argument("task", help="task number (task-NNNN/N/#N) or title")
+
+    p_tdone = task_sub.add_parser("done", help="mark task done (independent of status)")
+    p_tdone.set_defaults(command="task_done")
+    p_tdone.add_argument("task", help="task number (task-NNNN/N/#N) or title")
+
+    p_tundone = task_sub.add_parser("undone", help="flip a task back to not-done")
+    p_tundone.set_defaults(command="task_undone")
+    p_tundone.add_argument("task", help="task number (task-NNNN/N/#N) or title")
+    p_tundone.add_argument(
+        "--force", action="store_true", help="skip confirmation prompt"
+    )
 
     p_meta = task_sub.add_parser("meta", help="task metadata key/value management")
     meta_sub = p_meta.add_subparsers()
@@ -1558,6 +1685,22 @@ def build_parser() -> argparse.ArgumentParser:
         dest="new_name",
         default=None,
         help="new status name (renames the status)",
+    )
+    p_cedit_term = p_cedit.add_mutually_exclusive_group()
+    p_cedit_term.add_argument(
+        "--terminal",
+        dest="terminal",
+        action="store_const",
+        const=True,
+        default=None,
+        help="mark status terminal: tasks moved into it auto-set done=1",
+    )
+    p_cedit_term.add_argument(
+        "--no-terminal",
+        dest="terminal",
+        action="store_const",
+        const=False,
+        help="unmark terminal: tasks moved into it auto-set done=0",
     )
 
     p_corder = status_sub.add_parser(
@@ -1812,6 +1955,40 @@ def build_parser() -> argparse.ArgumentParser:
         "--overwrite", action="store_true", help="overwrite destination if it exists"
     )
 
+    # ---- Next ----
+
+    p_next = sub.add_parser(
+        "next",
+        help="compute next actionable tasks via topo sort of an acyclic edge DAG",
+    )
+    p_next.set_defaults(command="next")
+    p_next.add_argument(
+        "--rank",
+        action="store_true",
+        help="sort the ready list by priority desc, due_date asc, id asc",
+    )
+    p_next.add_argument(
+        "--include-blocked",
+        action="store_true",
+        help="return the full topological order of all not-done tasks instead of just the ready frontier",
+    )
+    p_next.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="cap the ready list to N items (applied after ranking/topo sort)",
+    )
+    p_next.add_argument(
+        "--edge-kind",
+        action="append",
+        metavar="KIND",
+        default=None,
+        help=(
+            "edge kind(s) to use when building the dependency DAG "
+            "(default: blocks). Repeatable: --edge-kind blocks --edge-kind spawns"
+        ),
+    )
+
     # ---- Info ----
 
     p_info = sub.add_parser("info", help="show stx file locations")
@@ -1873,6 +2050,13 @@ def main(argv: list[str] | None = None) -> None:
         else:
             _text_err(str(exc), code)
         raise SystemExit(EXIT_NOT_FOUND)
+    except ConflictError as exc:
+        code = "conflict"
+        if json_mode:
+            _json_err(str(exc), code)
+        else:
+            _text_err(str(exc), code)
+        raise SystemExit(EXIT_CONFLICT)
     except ValueError as exc:
         code = "validation"
         if json_mode:

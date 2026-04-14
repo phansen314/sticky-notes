@@ -101,6 +101,30 @@ NOT carried over:
 - **group_id** — groups are workspace-scoped and the target workspace has its own group hierarchy; the new task starts ungrouped.
 - **History** — the original task retains its history; the new task starts fresh.
 
+## Optimistic Locking (service-only)
+
+Write functions that accept `expected_version` pass it through to `_build_update` in `repository.py`, which adds `AND version = ?` to the WHERE clause. A zero rowcount after the UPDATE means either the row was not found or the version was stale; `_raise_on_zero_rowcount` distinguishes the two by checking row existence.
+
+- **`ConflictError`** (subclass of `ValueError`) is raised on a version mismatch. The CLI surfaces it as exit code 6 (`conflict`).
+- **`_with_cas_retry(fetch, already, action)`** — CLI helper that re-fetches the entity and retries `action` up to `_MAX_CAS_RETRIES = 3` times on `ConflictError`. `already(entity)` provides an idempotency short-circuit (returns a `CmdResult` if the desired state is already achieved).
+- **Only task writes currently use CAS at the CLI layer** (`stx task done` / `stx task undone`). The `expected_version` parameter is available on `update_task`, `update_group`, `update_status`, `update_workspace` at the service layer for callers that need it.
+
+## Done Flag Semantics (service-only)
+
+- **`task.done` is sticky.** `_update_task_body` auto-sets `done=True` when a task is moved into a terminal status (`is_terminal=1`), but does **not** auto-clear it when leaving. Only `mark_task_undone` (which calls `update_task({done: False})`) clears it.
+- **`mark_task_done` / `mark_task_undone`** are true no-ops when the task is already in the target state — they read the task first and return early without writing if done state matches, preventing unnecessary version bumps.
+- **`create_task` respects `is_terminal`.** When creating a task directly into a terminal status, the initial `done` value in `NewTask` is set to `True` so the task starts done rather than appearing in `stx next`.
+- **Auto-flips are journaled with `source="auto"`** so they are distinguishable from manual flips (`source="cli"` or `source="tui"`) in the audit trail.
+
+## Group Done Rollup (service-only)
+
+`group.done` is a cached derived value, not a canonical signal. It is never set directly; only `_propagate_done_upward` writes it.
+
+- **`_propagate_done_upward(conn, group_id, source)`** walks from `group_id` up the parent chain, recomputing each group's done state via `repo.compute_group_done_state`. It stops when a recompute makes no change (the early-exit is correct: if a group's done state didn't flip, its parent's child set is unchanged so the parent can't have flipped either).
+- **Must run post-commit.** Called in a separate `with transaction(conn)` block after the entity write transaction commits, so its reads see all committed state including concurrent agents' writes. Running inside the write transaction would cause snapshot isolation to hide concurrent task updates.
+- **All write paths propagate.** `update_task`, `update_group`, `archive_task`, `cascade_archive_group`, and `assign_task_to_group` collect affected parent group IDs during the write transaction and call `_propagate_done_upward` for each after commit.
+- **`compute_next_tasks` does not use `group.done`.** It expands group endpoints to individual task IDs and reads `task.done` directly, so the rollup lag does not affect frontier correctness.
+
 ## Automatic Behaviors (service-only)
 
 - **`assign_task_to_group` validates same-workspace** and writes `group_id`. `update_task` accepts `group_id` directly; `assign_task_to_group` and `unassign_task_from_group` are thin wrappers over `update_task` (via `_update_task_body` so they can hold their own outer transaction without tripping the nesting guard).

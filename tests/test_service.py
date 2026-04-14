@@ -2574,3 +2574,384 @@ class TestJournalRecordingMetadata:
             (tid,),
         ).fetchone()[0]
         assert after == before + 2  # 'a' changed, 'b' added
+
+
+# ---- Done flag, terminal status, group rollup propagation ----
+
+
+class TestDoneFlag:
+    """Phase 2 of the `stx next` work.
+
+    Covers:
+      - is_terminal toggle on a status does NOT retro-mark existing tasks
+      - moving a task into / out of a terminal status auto-flips task.done
+      - manual mark_task_done / mark_task_undone overrides
+      - group rollup: parent flips to done iff all non-archived children done
+      - cascade un-done when a previously-done descendant flips back
+      - archived siblings excluded from rollup
+      - journal source distinguishes auto vs manual flips
+    """
+
+    def _seed(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        terminal_done: bool = True,
+    ) -> dict[str, int]:
+        """Workspace with a `todo` (non-terminal) and `done` (terminal) status,
+        plus a parent group `g_root` containing two tasks. The terminal flag
+        on `done` can be flipped via `terminal_done=False` to test the
+        non-terminal path.
+        """
+        wid = insert_workspace(conn, "w")
+        todo_id = insert_status(conn, wid, "todo")
+        done_id = insert_status(conn, wid, "done")
+        if terminal_done:
+            service.update_status(conn, done_id, {"is_terminal": True}, source="test")
+        gid = insert_group(conn, wid, "g_root")
+        t1 = insert_task(conn, wid, "t1", todo_id)
+        t2 = insert_task(conn, wid, "t2", todo_id)
+        # Assign via the service (not raw SQL) so _propagate_done_upward is
+        # exercised on the group from the start, matching the real write path.
+        service.assign_task_to_group(conn, t1, gid, source="test")
+        service.assign_task_to_group(conn, t2, gid, source="test")
+        return {
+            "wid": wid,
+            "todo": todo_id,
+            "done": done_id,
+            "gid": gid,
+            "t1": t1,
+            "t2": t2,
+        }
+
+    def test_create_into_terminal_status_sets_done(self, conn: sqlite3.Connection) -> None:
+        # Tasks created directly into a terminal status must start as done=True.
+        ids = self._seed(conn)
+        tid = service.create_task(conn, ids["wid"], "pre-done task", ids["done"])
+        assert service.get_task(conn, tid).done is True
+
+    def test_create_into_non_terminal_status_leaves_done_false(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        ids = self._seed(conn)
+        tid = service.create_task(conn, ids["wid"], "not done task", ids["todo"])
+        assert service.get_task(conn, tid).done is False
+
+    def test_is_terminal_toggle_does_not_retro_mark(self, conn: sqlite3.Connection) -> None:
+        # Seed without terminal flag. Tasks already in `done` status before
+        # the flag flips should not be retroactively marked done.
+        ids = self._seed(conn, terminal_done=False)
+        service.update_task(conn, ids["t1"], {"status_id": ids["done"]}, source="test")
+        assert service.get_task(conn, ids["t1"]).done is False
+        # Now flip the flag — t1 should still be not-done.
+        service.update_status(conn, ids["done"], {"is_terminal": True}, source="test")
+        assert service.get_task(conn, ids["t1"]).done is False
+
+    def test_move_into_terminal_status_auto_marks_done(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        ids = self._seed(conn)
+        service.update_task(conn, ids["t1"], {"status_id": ids["done"]}, source="cli")
+        t1 = service.get_task(conn, ids["t1"])
+        assert t1.done is True
+        # Auto flip is journaled with source="auto", separate from the
+        # status_id change which kept its caller-supplied source.
+        rows = conn.execute(
+            "SELECT field, source FROM journal WHERE entity_type='task' AND entity_id=? "
+            "ORDER BY id",
+            (ids["t1"],),
+        ).fetchall()
+        fields_sources = [(r["field"], r["source"]) for r in rows]
+        assert ("status_id", "cli") in fields_sources
+        assert ("done", "auto") in fields_sources
+
+    def test_move_out_of_terminal_status_retains_done(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        # done is sticky: moving OUT of a terminal status does NOT clear it.
+        # Only explicit mark_task_undone can clear done.
+        ids = self._seed(conn)
+        service.update_task(conn, ids["t1"], {"status_id": ids["done"]}, source="cli")
+        assert service.get_task(conn, ids["t1"]).done is True
+        service.update_task(conn, ids["t1"], {"status_id": ids["todo"]}, source="cli")
+        assert service.get_task(conn, ids["t1"]).done is True
+
+    def test_mark_task_done_manual(self, conn: sqlite3.Connection) -> None:
+        ids = self._seed(conn)
+        service.mark_task_done(conn, ids["t1"], source="cli")
+        assert service.get_task(conn, ids["t1"]).done is True
+        rows = conn.execute(
+            "SELECT source FROM journal WHERE entity_type='task' AND entity_id=? "
+            "AND field='done'",
+            (ids["t1"],),
+        ).fetchall()
+        assert any(r["source"] == "cli" for r in rows)
+
+    def test_mark_task_undone_manual(self, conn: sqlite3.Connection) -> None:
+        ids = self._seed(conn)
+        service.mark_task_done(conn, ids["t1"], source="cli")
+        service.mark_task_undone(conn, ids["t1"], source="cli")
+        assert service.get_task(conn, ids["t1"]).done is False
+
+    def test_mark_task_done_is_true_noop(self, conn: sqlite3.Connection) -> None:
+        # mark_task_done on an already-done task must not write (version unchanged).
+        ids = self._seed(conn)
+        service.mark_task_done(conn, ids["t1"], source="cli")
+        v_after_first = service.get_task(conn, ids["t1"]).version
+        service.mark_task_done(conn, ids["t1"], source="cli")
+        v_after_second = service.get_task(conn, ids["t1"]).version
+        assert v_after_first == v_after_second
+
+    def test_mark_task_undone_is_true_noop(self, conn: sqlite3.Connection) -> None:
+        # mark_task_undone on an already-not-done task must not write.
+        ids = self._seed(conn)
+        v_before = service.get_task(conn, ids["t1"]).version
+        service.mark_task_undone(conn, ids["t1"], source="cli")
+        v_after = service.get_task(conn, ids["t1"]).version
+        assert v_before == v_after
+
+    def test_group_rollup_all_done_flips_parent(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        ids = self._seed(conn)
+        # Marking only one task done is not enough.
+        service.mark_task_done(conn, ids["t1"], source="cli")
+        assert service.get_group(conn, ids["gid"]).done is False
+        # Marking the second task done flips the parent.
+        service.mark_task_done(conn, ids["t2"], source="cli")
+        assert service.get_group(conn, ids["gid"]).done is True
+
+    def test_group_rollup_two_levels_deep(self, conn: sqlite3.Connection) -> None:
+        ids = self._seed(conn)
+        # Add a nested grandparent → parent (gid) chain.
+        gp = insert_group(conn, ids["wid"], "grandparent")
+        service.update_group(conn, ids["gid"], {"parent_id": gp}, source="test")
+        service.mark_task_done(conn, ids["t1"], source="cli")
+        service.mark_task_done(conn, ids["t2"], source="cli")
+        assert service.get_group(conn, ids["gid"]).done is True
+        assert service.get_group(conn, gp).done is True
+
+    def test_cascade_undone_two_level(self, conn: sqlite3.Connection) -> None:
+        ids = self._seed(conn)
+        gp = insert_group(conn, ids["wid"], "grandparent")
+        service.update_group(conn, ids["gid"], {"parent_id": gp}, source="test")
+        # Mark both tasks done via the terminal status → both groups roll up.
+        service.update_task(conn, ids["t1"], {"status_id": ids["done"]}, source="cli")
+        service.update_task(conn, ids["t2"], {"status_id": ids["done"]}, source="cli")
+        assert service.get_group(conn, ids["gid"]).done is True
+        assert service.get_group(conn, gp).done is True
+        # Move t1 back to non-terminal: parent + grandparent both flip back.
+        service.update_task(conn, ids["t1"], {"status_id": ids["todo"]}, source="cli")
+        assert service.get_group(conn, ids["gid"]).done is False
+        assert service.get_group(conn, gp).done is False
+        # The cascade flips are journaled with source="auto" on each ancestor.
+        cascade_rows = conn.execute(
+            "SELECT entity_id, source FROM journal "
+            "WHERE entity_type='group' AND field='done' ORDER BY id"
+        ).fetchall()
+        assert any(
+            r["entity_id"] == ids["gid"] and r["source"] == "auto" for r in cascade_rows
+        )
+        assert any(
+            r["entity_id"] == gp and r["source"] == "auto" for r in cascade_rows
+        )
+
+    def test_archived_siblings_ignored_in_rollup(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        ids = self._seed(conn)
+        # Mark t1 done. Archive t2. The group should now flip to done since
+        # the only remaining non-archived child (t1) is done.
+        service.mark_task_done(conn, ids["t1"], source="cli")
+        assert service.get_group(conn, ids["gid"]).done is False
+        service.archive_task(conn, ids["t2"], source="cli")
+        assert service.get_group(conn, ids["gid"]).done is True
+
+    def test_empty_group_is_not_done(self, conn: sqlite3.Connection) -> None:
+        wid = insert_workspace(conn, "w")
+        gid = insert_group(conn, wid, "empty")
+        # The repo helper uses raw SQL; trigger one rollup recompute by
+        # touching the group via a no-op service update so the propagation
+        # path is exercised. Even after recompute, an empty group must NOT
+        # be reported as done.
+        from stx import repository as repo
+
+        assert repo.compute_group_done_state(conn, gid) is False
+
+    def test_archive_group_propagates_to_parent(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        ids = self._seed(conn)
+        gp = insert_group(conn, ids["wid"], "grandparent")
+        service.update_group(conn, ids["gid"], {"parent_id": gp}, source="test")
+        # Both tasks done → parent rolled up to done.
+        service.mark_task_done(conn, ids["t1"], source="cli")
+        service.mark_task_done(conn, ids["t2"], source="cli")
+        assert service.get_group(conn, gp).done is True
+        # Add a sibling un-done group under the grandparent. Grandparent
+        # should now be not-done (rollup recomputes when the new group is
+        # created — actually creation doesn't touch parents, so we have to
+        # nudge it via an update). Update the new sibling to confirm
+        # rollup behaves on subsequent mutations.
+        sibling = insert_group(conn, ids["wid"], "sibling")
+        service.update_group(conn, sibling, {"parent_id": gp}, source="test")
+        # Sibling has zero children so it is not-done; grandparent should
+        # have flipped back to not-done via the propagation triggered by the
+        # parent_id update on `sibling`.
+        assert service.get_group(conn, gp).done is False
+        # Archiving the sibling restores grandparent done.
+        service.cascade_archive_group(conn, sibling, source="cli")
+        assert service.get_group(conn, gp).done is True
+
+
+class TestComputeNextTasks:
+    """Phase 3: `compute_next_tasks` topo-sorts the active `blocks` edge DAG."""
+
+    def _seed_chain(self, conn: sqlite3.Connection) -> dict[str, int]:
+        """Three tasks A → B → C connected by `blocks` edges. None are done.
+        A is the only frontier item; B blocked by A; C blocked by B.
+        """
+        wid = insert_workspace(conn, "w")
+        todo = insert_status(conn, wid, "todo")
+        a = insert_task(conn, wid, "A", todo, priority=1)
+        b = insert_task(conn, wid, "B", todo, priority=5)
+        c = insert_task(conn, wid, "C", todo, priority=3)
+        # A blocks B, B blocks C — A must finish before B, B before C.
+        service.add_edge(
+            conn,
+            src=("task", a),
+            dst=("task", b),
+            kind="blocks",
+            source="test",
+        )
+        service.add_edge(
+            conn,
+            src=("task", b),
+            dst=("task", c),
+            kind="blocks",
+            source="test",
+        )
+        return {"wid": wid, "todo": todo, "a": a, "b": b, "c": c}
+
+    def test_chain_frontier_progresses_as_tasks_complete(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        ids = self._seed_chain(conn)
+        view = service.compute_next_tasks(conn, ids["wid"])
+        assert tuple(t.id for t in view.ready) == (ids["a"],)
+        # B and C are blocked.
+        blocked_ids = {b.task.id for b in view.blocked}
+        assert blocked_ids == {ids["b"], ids["c"]}
+
+        service.mark_task_done(conn, ids["a"], source="cli")
+        view = service.compute_next_tasks(conn, ids["wid"])
+        assert tuple(t.id for t in view.ready) == (ids["b"],)
+
+        service.mark_task_done(conn, ids["b"], source="cli")
+        view = service.compute_next_tasks(conn, ids["wid"])
+        assert tuple(t.id for t in view.ready) == (ids["c"],)
+
+    def test_blocked_by_lists_pending_blockers(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        ids = self._seed_chain(conn)
+        view = service.compute_next_tasks(conn, ids["wid"])
+        b_entry = next(b for b in view.blocked if b.task.id == ids["b"])
+        assert b_entry.blocked_by == (ids["a"],)
+        c_entry = next(b for b in view.blocked if b.task.id == ids["c"])
+        assert c_entry.blocked_by == (ids["b"],)
+
+    def test_include_blocked_returns_full_topo(self, conn: sqlite3.Connection) -> None:
+        ids = self._seed_chain(conn)
+        view = service.compute_next_tasks(conn, ids["wid"], include_blocked=True)
+        assert tuple(t.id for t in view.ready) == (ids["a"], ids["b"], ids["c"])
+        assert view.blocked == ()
+
+    def test_rank_orders_frontier_by_priority(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        wid = insert_workspace(conn, "w")
+        todo = insert_status(conn, wid, "todo")
+        # Three independent tasks, all in the frontier. Different priorities.
+        low = insert_task(conn, wid, "low", todo, priority=1)
+        high = insert_task(conn, wid, "high", todo, priority=9)
+        mid = insert_task(conn, wid, "mid", todo, priority=5)
+        unranked = service.compute_next_tasks(conn, wid)
+        # Default order: by id.
+        assert tuple(t.id for t in unranked.ready) == (low, high, mid)
+        ranked = service.compute_next_tasks(conn, wid, rank=True)
+        # Ranked order: by priority desc.
+        assert tuple(t.id for t in ranked.ready) == (high, mid, low)
+
+    def test_group_endpoint_expands_to_member_tasks(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        wid = insert_workspace(conn, "w")
+        todo = insert_status(conn, wid, "todo")
+        gid = insert_group(conn, wid, "g")
+        member1 = insert_task(conn, wid, "m1", todo)
+        member2 = insert_task(conn, wid, "m2", todo)
+        service.assign_task_to_group(conn, member1, gid, source="test")
+        service.assign_task_to_group(conn, member2, gid, source="test")
+        target = insert_task(conn, wid, "target", todo)
+        # Group `g` blocks `target` — every member of g must finish first.
+        service.add_edge(
+            conn,
+            src=("group", gid),
+            dst=("task", target),
+            kind="blocks",
+            source="test",
+        )
+        view = service.compute_next_tasks(conn, wid)
+        # Frontier is the two group members — target is blocked by both.
+        ready_ids = {t.id for t in view.ready}
+        assert ready_ids == {member1, member2}
+        target_entry = next(b for b in view.blocked if b.task.id == target)
+        assert set(target_entry.blocked_by) == {member1, member2}
+
+        # Finishing only one member is not enough.
+        service.mark_task_done(conn, member1, source="cli")
+        view = service.compute_next_tasks(conn, wid)
+        assert {t.id for t in view.ready} == {member2}
+
+        service.mark_task_done(conn, member2, source="cli")
+        view = service.compute_next_tasks(conn, wid)
+        assert {t.id for t in view.ready} == {target}
+
+    def test_archived_blocker_is_ignored(self, conn: sqlite3.Connection) -> None:
+        ids = self._seed_chain(conn)
+        # Archive A — B should become unblocked even though A is not done.
+        # This relies on the archived-task universe filter in compute_next_tasks.
+        service.archive_task(conn, ids["a"], source="cli")
+        view = service.compute_next_tasks(conn, ids["wid"])
+        ready_ids = {t.id for t in view.ready}
+        assert ids["b"] in ready_ids
+        # C is still blocked by B.
+        assert any(b.task.id == ids["c"] for b in view.blocked)
+
+    def test_empty_workspace_returns_empty_view(self, conn: sqlite3.Connection) -> None:
+        wid = insert_workspace(conn, "w")
+        view = service.compute_next_tasks(conn, wid)
+        assert view.ready == ()
+        assert view.blocked == ()
+
+    def test_cycle_detection_raises(self, conn: sqlite3.Connection) -> None:
+        # Bypass the service-layer cycle check by inserting a cycle directly
+        # via raw SQL, then confirm compute_next_tasks surfaces it as RuntimeError.
+        wid = insert_workspace(conn, "w")
+        todo = insert_status(conn, wid, "todo")
+        a = insert_task(conn, wid, "A", todo)
+        b = insert_task(conn, wid, "B", todo)
+        # A blocks B and B blocks A — a cycle.
+        service.add_edge(conn, src=("task", a), dst=("task", b),
+                         kind="blocks", source="test")
+        # Bypass the acyclic check for the return edge.
+        conn.execute(
+            "INSERT INTO edges (from_type, from_id, to_type, to_id, workspace_id, kind, acyclic) "
+            "VALUES ('task', ?, 'task', ?, ?, 'blocks', 1)",
+            (b, a, wid),
+        )
+        conn.commit()
+        with pytest.raises(RuntimeError, match="cycle detected"):
+            service.compute_next_tasks(conn, wid, include_blocked=True)
+

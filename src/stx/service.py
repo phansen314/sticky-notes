@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import dataclasses
+import heapq
 import json
 import re
 import sqlite3
+from collections import deque
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from typing import Any
@@ -19,6 +21,7 @@ from .mappers import (
     task_to_list_item,
 )
 from .models import (
+    ConflictError,
     EdgeField,
     EntityType,
     Group,
@@ -35,6 +38,7 @@ from .models import (
 )
 from .service_models import (
     ArchivePreview,
+    BlockedTask,
     EdgeDetail,
     EdgeListItem,
     EdgeRef,
@@ -42,6 +46,7 @@ from .service_models import (
     GroupDetail,
     GroupRef,
     MoveToWorkspacePreview,
+    NextTasksView,
     TaskDetail,
     TaskMovePreview,
     WorkspaceContext,
@@ -437,6 +442,11 @@ def create_task(
         fields["group_id"] = group_id
     _validate_task_fields(fields, workspace_id=workspace_id, conn=conn)
     with transaction(conn), _friendly_errors():
+        # Mirror the status-driven done auto-set from _update_task_body: a task
+        # created directly into a terminal status starts as done=True so it
+        # doesn't linger on the `stx next` frontier.
+        status = repo.get_status(conn, status_id)
+        initial_done = bool(status.is_terminal) if status is not None else False
         return repo.insert_task(
             conn,
             NewTask(
@@ -449,6 +459,7 @@ def create_task(
                 start_date=start_date,
                 finish_date=finish_date,
                 group_id=group_id,
+                done=initial_done,
             ),
         )
 
@@ -584,11 +595,23 @@ def update_task(
     task_id: int,
     changes: dict[str, Any],
     source: str,
+    *,
+    expected_version: int | None = None,
 ) -> Task:
     if not changes:
         return get_task(conn, task_id)
+    parents: set[int] = set()
     with transaction(conn), _friendly_errors():
-        return _update_task_body(conn, task_id, changes, source)
+        result = _update_task_body(conn, task_id, changes, source,
+                                   expected_version=expected_version,
+                                   _parents_out=parents)
+    # Post-commit propagation: each rollup runs in its own fresh transaction
+    # so it reads the fully-committed state (including concurrent agents'
+    # task writes that committed while this transaction was open).
+    for gid in parents:
+        with transaction(conn):
+            _propagate_done_upward(conn, gid, "auto")
+    return result
 
 
 def _validate_task_update(
@@ -616,22 +639,118 @@ def _update_task_body(
     task_id: int,
     changes: dict[str, Any],
     source: str,
+    *,
+    expected_version: int | None = None,
+    _parents_out: set[int] | None = None,
 ) -> Task:
     """Inner body of update_task. Assumes the caller holds a transaction.
 
     Split out so service functions that already hold a transaction (e.g. the
     `assign_task_to_group` wrapper) can call into update_task's logic without
     triggering the transaction manager's anti-nesting guard.
+
+    `expected_version` — when provided, the first DB write uses CAS
+    (``WHERE version = expected_version``). Subsequent writes within the same
+    body (auto-done flip, propagation) do NOT use CAS; the first write already
+    bumped the version, and those are unconditional follow-ups in the same
+    transaction.
+
+    `_parents_out` — when provided, affected parent group IDs are added to
+    this set instead of propagating inline. The caller must propagate in a
+    separate post-commit transaction so the rollup reads see committed state
+    from concurrent agents. When None, falls back to inline propagation
+    (snapshot-isolated — correct for single-agent use, stale under concurrency).
     """
     old = get_task(conn, task_id)
     _validate_task_update(conn, old, changes)
     if not changes:
         return old
-    updated = repo.update_task(conn, task_id, changes)
+    updated = repo.update_task(conn, task_id, changes,
+                               expected_version=expected_version)
     _record_entity_changes(
         conn, EntityType.TASK, task_id, old.workspace_id, old, changes, source
     )
+    # Status-driven done auto-set: moving a task INTO a terminal status
+    # sets done=True. Moving OUT of a terminal status does NOT clear done —
+    # done is sticky and can only be cleared explicitly via mark_task_undone
+    # (which requires --force from the CLI). If the caller already passed
+    # `done` explicitly, that wins — no override.
+    if "status_id" in changes and "done" not in changes:
+        # _validate_task_fields already verified the status exists; get_status
+        # cannot return None here.
+        new_status = repo.get_status(conn, changes["status_id"])
+        if bool(new_status.is_terminal) and not updated.done:  # type: ignore[union-attr]
+            updated = repo.update_task(conn, task_id, {"done": True})
+            repo.insert_journal_entry(
+                conn,
+                NewJournalEntry(
+                    entity_type=EntityType.TASK,
+                    entity_id=task_id,
+                    workspace_id=old.workspace_id,
+                    field="done",
+                    old_value=str(False),
+                    new_value=str(True),
+                    source="auto",
+                ),
+            )
+    # Propagate done up to parent groups whenever something that affects the
+    # parent rollup changed: done itself, archived (changes child count),
+    # group_id (moved between parents — both parents need recompute).
+    if updated.done != old.done or updated.archived != old.archived or updated.group_id != old.group_id:
+        if old.group_id is not None:
+            if _parents_out is not None:
+                _parents_out.add(old.group_id)
+            else:
+                _propagate_done_upward(conn, old.group_id, "auto")
+        if updated.group_id is not None and updated.group_id != old.group_id:
+            if _parents_out is not None:
+                _parents_out.add(updated.group_id)
+            else:
+                _propagate_done_upward(conn, updated.group_id, "auto")
     return updated
+
+
+def _propagate_done_upward(
+    conn: sqlite3.Connection,
+    group_id: int,
+    source: str,
+) -> None:
+    """Walk from `group_id` up the parent chain, recomputing each group's
+    `done` rollup. Stops once a recompute makes no change or the root is
+    reached. Archived groups are skipped.
+
+    **Must be called in a separate transaction from the entity write that
+    triggered the rollup.** Running inside the same transaction causes
+    SQLite's snapshot isolation to hide concurrent agents' committed task
+    writes, producing a stale rollup result. Post-commit callers see the
+    fully-committed state from all connections.
+
+    The early-exit on no-change is correct: if a group's done state didn't
+    flip, its parent's child set is unchanged so the parent can't have flipped
+    either.
+    """
+    current_id: int | None = group_id
+    while current_id is not None:
+        group = repo.get_group(conn, current_id)
+        if group is None or group.archived:
+            return
+        new_done = repo.compute_group_done_state(conn, current_id)
+        if new_done == group.done:
+            return
+        repo.update_group(conn, current_id, {"done": new_done})
+        repo.insert_journal_entry(
+            conn,
+            NewJournalEntry(
+                entity_type=EntityType.GROUP,
+                entity_id=current_id,
+                workspace_id=group.workspace_id,
+                field="done",
+                old_value=str(group.done),
+                new_value=str(new_done),
+                source=source,
+            ),
+        )
+        current_id = group.parent_id
 
 
 def move_task(
@@ -642,6 +761,222 @@ def move_task(
 ) -> Task:
     """Move a task to a new status."""
     return update_task(conn, task_id, {"status_id": status_id}, source)
+
+
+def mark_task_done(
+    conn: sqlite3.Connection,
+    task_id: int,
+    *,
+    source: str,
+    expected_version: int | None = None,
+) -> Task:
+    """Flip a task's `done` flag to True. True no-op (no write) if already done.
+
+    Independent of status. Caller-supplied source is recorded in the journal
+    so manual flips ("cli", "tui") can be told apart from status-driven auto
+    flips. Triggers parent-group rollup recompute via `_update_task_body`.
+
+    Pass `expected_version` for CAS semantics: raises `ConflictError` if
+    another writer has modified the task since it was read.
+    """
+    task = get_task(conn, task_id)
+    if task.done:
+        return task
+    return update_task(conn, task_id, {"done": True}, source,
+                       expected_version=expected_version)
+
+
+def mark_task_undone(
+    conn: sqlite3.Connection,
+    task_id: int,
+    *,
+    source: str,
+    expected_version: int | None = None,
+) -> Task:
+    """Flip a task's `done` flag to False. True no-op (no write) if already not done.
+
+    The CLI gates this behind `--force` (with a warning) since users may flip
+    accidentally; the service layer itself does not warn — that is a UI
+    concern. Triggers parent-group rollup recompute via `_update_task_body`.
+
+    Pass `expected_version` for CAS semantics.
+    """
+    task = get_task(conn, task_id)
+    if not task.done:
+        return task
+    return update_task(conn, task_id, {"done": False}, source,
+                       expected_version=expected_version)
+
+
+# ---- Next-task computation (topological sort of `blocks` DAG) ----
+
+
+def _expand_endpoint_to_tasks(
+    conn: sqlite3.Connection,
+    node_type: str,
+    node_id: int,
+    cache: dict[tuple[str, int], frozenset[int]],
+) -> frozenset[int]:
+    """Resolve a polymorphic edge endpoint to the set of not-done task ids it covers.
+
+    - ``task`` → just that task id (caller intersects with not_done_ids).
+    - ``group`` → every non-archived, not-done task recursively under the
+      group's subtree. Only not-done tasks are returned so the caller's
+      blocker map is already filtered: done tasks in a group contribute no
+      active blockers and are excluded at query time rather than post-hoc.
+    - ``workspace`` / ``status`` → empty: annotation nodes don't participate
+      in `stx next` computation.
+
+    Memoized via ``cache`` so each endpoint is only expanded once per
+    ``compute_next_tasks`` call.
+    """
+    key = (node_type, node_id)
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+    if node_type == "task":
+        result: frozenset[int] = frozenset({node_id})
+    elif node_type == "group":
+        subtree = repo.get_subtree_group_ids(conn, node_id)
+        if not subtree:
+            result = frozenset()
+        else:
+            id_map = repo.batch_task_ids_by_group(conn, subtree, include_done=False)
+            collected: set[int] = set()
+            for tids in id_map.values():
+                collected.update(tids)
+            result = frozenset(collected)
+    else:
+        result = frozenset()
+    cache[key] = result
+    return result
+
+
+def compute_next_tasks(
+    conn: sqlite3.Connection,
+    workspace_id: int,
+    *,
+    rank: bool = False,
+    include_blocked: bool = False,
+    edge_kinds: frozenset[str] | None = None,
+) -> NextTasksView:
+    """Compute the next actionable tasks via topological sort of an acyclic
+    edge DAG. Default edge kind is ``blocks``; pass ``edge_kinds`` to use a
+    different set (e.g. ``frozenset({"spawns"})`` or multiple kinds).
+
+    Default (frontier) mode: `ready` lists every non-done, non-archived task
+    whose blocking predecessors (recursively expanded across group endpoints)
+    are all done. `blocked` lists the remaining not-done tasks with the task
+    ids of their not-yet-done blockers.
+
+    `include_blocked=True`: `ready` is the full topological order of all
+    not-done tasks (Kahn's algorithm), starting with the frontier and
+    extending through their dependents. `blocked` is empty.
+
+    `rank=True`: in frontier mode, sorts `ready` by (priority desc, due_date
+    asc, id asc). In include-blocked mode, the topo sort uses the same key
+    as a tiebreaker so higher-priority items come out first within each
+    in-degree-zero wave.
+    """
+    # Load only not-done, non-archived tasks. Done tasks are not candidates
+    # for the frontier and contribute no active blocking edges, so there is
+    # no reason to load them. This makes the computation scale with the
+    # number of remaining tasks rather than the total task history.
+    tasks = repo.list_tasks(conn, workspace_id, include_archived=False, include_done=False)
+    not_done_ids = frozenset(t.id for t in tasks)
+    task_by_id: dict[int, Task] = {t.id: t for t in tasks}
+
+    edges = repo.list_workspace_dag_edges(
+        conn, workspace_id, edge_kinds if edge_kinds is not None else frozenset({"blocks"})
+    )
+    cache: dict[tuple[str, int], frozenset[int]] = {}
+    blockers: dict[int, set[int]] = {tid: set() for tid in not_done_ids}
+    # _expand_endpoint_to_tasks returns only not-done, non-archived task IDs.
+    # Intersect with not_done_ids to handle the single-task case (task endpoints
+    # are returned as-is; the intersection drops them if they are done).
+    for from_t, from_id, to_t, to_id in edges:
+        srcs = _expand_endpoint_to_tasks(conn, from_t, from_id, cache) & not_done_ids
+        dsts = _expand_endpoint_to_tasks(conn, to_t, to_id, cache) & not_done_ids
+        for d in dsts:
+            for s in srcs:
+                if s == d:
+                    continue
+                blockers[d].add(s)
+
+    def rank_key(task: Task) -> tuple[int, int, int]:
+        # Higher priority first; missing due_date sorts last (effectively +inf);
+        # id is the final tiebreaker for determinism.
+        return (
+            -task.priority,
+            task.due_date if task.due_date is not None else (1 << 62),
+            task.id,
+        )
+
+    if include_blocked:
+        # Kahn's algorithm over the not-done task universe. All entries in
+        # blockers[tid] are already not-done (filtered at expansion time),
+        # so every blocker counts toward in-degree unconditionally.
+        in_degree: dict[int, int] = {tid: 0 for tid in not_done_ids}
+        forward: dict[int, list[int]] = {tid: [] for tid in not_done_ids}
+        for tid in not_done_ids:
+            for src in blockers[tid]:
+                in_degree[tid] += 1
+                forward[src].append(tid)
+        if rank:
+            heap: list[tuple[tuple[int, int, int], int]] = []
+            for tid, deg in in_degree.items():
+                if deg == 0:
+                    heapq.heappush(heap, (rank_key(task_by_id[tid]), tid))
+            ordered: list[int] = []
+            while heap:
+                _, tid = heapq.heappop(heap)
+                ordered.append(tid)
+                for nxt in forward[tid]:
+                    in_degree[nxt] -= 1
+                    if in_degree[nxt] == 0:
+                        heapq.heappush(heap, (rank_key(task_by_id[nxt]), nxt))
+        else:
+            queue = deque(sorted(tid for tid, d in in_degree.items() if d == 0))
+            ordered = []
+            while queue:
+                tid = queue.popleft()
+                ordered.append(tid)
+                for nxt in forward[tid]:
+                    in_degree[nxt] -= 1
+                    if in_degree[nxt] == 0:
+                        queue.append(nxt)
+        # Any task missing from `ordered` would mean a residual cycle in
+        # supposedly-acyclic blocks edges — surface explicitly rather than
+        # silently dropping.
+        if len(ordered) != len(not_done_ids):
+            missing = sorted(set(not_done_ids) - set(ordered))
+            raise RuntimeError(
+                f"compute_next_tasks: cycle detected among blocks edges, "
+                f"unresolved tasks: {missing}"
+            )
+        ready = tuple(task_to_list_item(task_by_id[tid]) for tid in ordered)
+        return NextTasksView(workspace_id=workspace_id, ready=ready, blocked=())
+
+    # All blocker sets contain only not-done tasks (filtered at expansion time),
+    # so no further subtraction is needed for the frontier or blocked list.
+    frontier = [t for t in tasks if not blockers[t.id]]
+    if rank:
+        frontier.sort(key=rank_key)
+    else:
+        frontier.sort(key=lambda t: t.id)
+    ready = tuple(task_to_list_item(t) for t in frontier)
+    blocked_list: list[BlockedTask] = []
+    for t in tasks:
+        active = tuple(sorted(blockers[t.id]))
+        if not active:
+            continue
+        blocked_list.append(BlockedTask(task=task_to_list_item(t), blocked_by=active))
+    blocked_list.sort(key=lambda b: b.task.id)
+    return NextTasksView(
+        workspace_id=workspace_id,
+        ready=ready,
+        blocked=tuple(blocked_list),
+    )
 
 
 def _validate_move_to_workspace(
@@ -1938,19 +2273,37 @@ def update_group(
     group_id: int,
     changes: dict[str, Any],
     source: str = "cli",
+    *,
+    expected_version: int | None = None,
 ) -> Group:
+    parents: set[int] = set()
     with transaction(conn), _friendly_errors():
         if "parent_id" in changes:
             new_parent = changes["parent_id"]
             if new_parent is not None and _would_create_cycle(conn, group_id, new_parent):
                 raise ValueError("reparenting would create a cycle")
         old = repo.get_group(conn, group_id)
-        result = repo.update_group(conn, group_id, changes)
+        result = repo.update_group(conn, group_id, changes,
+                                   expected_version=expected_version)
         if old is not None:
             _record_entity_changes(
                 conn, EntityType.GROUP, group_id, old.workspace_id, old, changes, source
             )
-        return result
+            # Collect parents needing rollup after commit so the propagation
+            # reads fresh committed state from concurrent agents.
+            if (
+                result.done != old.done
+                or result.archived != old.archived
+                or result.parent_id != old.parent_id
+            ):
+                if old.parent_id is not None:
+                    parents.add(old.parent_id)
+                if result.parent_id is not None:
+                    parents.add(result.parent_id)
+    for gid in parents:
+        with transaction(conn):
+            _propagate_done_upward(conn, gid, "auto")
+    return result
 
 
 # ---- Task-group assignment ----
@@ -1966,11 +2319,16 @@ def assign_task_to_group(
     """Assign a group to a task. The group must belong to the same workspace
     as the task; validation inside `_update_task_body` enforces this.
     """
+    parents: set[int] = set()
     with transaction(conn), _friendly_errors():
         get_task(conn, task_id)
         get_group(conn, group_id)  # raises LookupError on miss
         changes: dict[str, Any] = {"group_id": group_id}
-        return _update_task_body(conn, task_id, changes, source)
+        result = _update_task_body(conn, task_id, changes, source, _parents_out=parents)
+    for gid in parents:
+        with transaction(conn):
+            _propagate_done_upward(conn, gid, "auto")
+    return result
 
 
 def unassign_task_from_group(
@@ -2198,13 +2556,20 @@ def archive_task(
     *,
     source: str,
 ) -> Task:
+    parent_group: int | None = None
     with transaction(conn), _friendly_errors():
         old = get_task(conn, task_id)
         updated = repo.update_task(conn, task_id, {"archived": True})
         _record_entity_changes(
             conn, EntityType.TASK, task_id, old.workspace_id, old, {"archived": True}, source
         )
-        return updated
+        parent_group = old.group_id
+    # Post-commit: archiving removes this task from the rollup count; a fresh
+    # transaction sees the correct child set including concurrent agents' writes.
+    if parent_group is not None:
+        with transaction(conn):
+            _propagate_done_upward(conn, parent_group, "auto")
+    return updated
 
 
 def _record_bulk_archive(
@@ -2236,6 +2601,7 @@ def cascade_archive_group(
     *,
     source: str,
 ) -> Group:
+    parent_group: int | None = None
     with transaction(conn), _friendly_errors():
         group = get_group(conn, group_id)
         task_ids = repo.list_active_task_ids_in_group_subtree(conn, group_id)
@@ -2247,7 +2613,14 @@ def cascade_archive_group(
             conn, EntityType.GROUP, descendant_group_ids, group.workspace_id, source
         )
         # parent group itself is journaled via update_group below
-        return repo.update_group(conn, group_id, {"archived": True})
+        result = repo.update_group(conn, group_id, {"archived": True})
+        parent_group = group.parent_id
+    # Post-commit: the just-archived root's child slot is freed; propagate in a
+    # fresh transaction so the rollup sees the correct sibling state.
+    if parent_group is not None:
+        with transaction(conn):
+            _propagate_done_upward(conn, parent_group, "auto")
+    return result
 
 
 def cascade_archive_workspace(

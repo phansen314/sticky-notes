@@ -55,3 +55,17 @@ interface (CLI, TUI) or code path is used.
 
 - **Creation timestamps are set automatically by the database** (Unix epoch). Application code does not provide them.
 - **History change timestamps are also set automatically.**
+
+## Optimistic Locking
+
+- **All mutable entity tables carry a `version INTEGER NOT NULL DEFAULT 0` column:** `workspaces`, `statuses`, `groups`, `tasks`, `edges`.
+- **The version is incremented unconditionally on every write** — `_build_update` in `repository.py` always appends `version = version + 1` to the SET clause, regardless of which other fields are changing.
+- **CAS semantics are opt-in.** Pass `expected_version` to a write function to get `WHERE id = ? AND version = ?` semantics. If the row has been updated since the version was read, the UPDATE matches zero rows — the caller receives `ConflictError` (exit code 6) and can retry after re-fetching.
+- **The `journal` table has no `version` column** — it is append-only and never updated.
+
+## Done Flags
+
+- **`task.done` — sticky boolean, defaults 0.** Set to 1 when a task is moved into (or created in) a terminal status (`status.is_terminal = 1`). Not cleared by subsequent status moves — only an explicit undone operation clears it. Enforced by a `CHECK (done IN (0, 1))` constraint.
+- **`group.done` — derived read-only rollup, defaults 0.** Recomputed by the service layer after any descendant write. A group is done iff it has at least one non-archived child (task or subgroup) and every such child has `done = 1`. Empty groups are not done. The column is not `GENERATED ALWAYS` — the service layer writes it explicitly; no DB trigger fires.
+- **`status.is_terminal` — boolean, defaults 0.** When 1, tasks moved into this status auto-set `done = 1` via the service layer. Enforced by `CHECK (is_terminal IN (0, 1))`.
+- Two indexes support efficient `stx next` computation: `idx_tasks_workspace_done ON tasks(workspace_id, done, archived)` and `idx_groups_workspace_done ON groups(workspace_id, done, archived)`.

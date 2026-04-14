@@ -61,6 +61,7 @@ class TaskListItem:
     finish_date: int | None
     group_id: int | None
     metadata: dict[str, str]
+    done: bool = False
 
 
 @dataclass(frozen=True)
@@ -76,6 +77,7 @@ class GroupRef:
     archived: bool
     created_at: int
     metadata: dict[str, str]
+    done: bool = False
     task_ids: tuple[int, ...] = ()
     child_ids: tuple[int, ...] = ()
 
@@ -134,6 +136,8 @@ class TaskDetail:
     edge_sources: tuple[EdgeRef, ...]
     edge_targets: tuple[EdgeRef, ...]
     history: tuple[JournalEntry, ...]
+    done: bool = False
+    version: int = 0
 
 
 @dataclass(frozen=True)
@@ -181,6 +185,8 @@ class GroupDetail:
     metadata: dict[str, str]
     edge_sources: tuple[EdgeRef, ...]
     edge_targets: tuple[EdgeRef, ...]
+    done: bool = False
+    version: int = 0
 
 
 # ---- Preview types ----
@@ -239,3 +245,40 @@ class TaskMovePreview:
     title: str
     from_status: str
     to_status: str
+
+
+# ---- Next-task view (topological sort of `blocks` DAG) ----
+
+
+@dataclass(frozen=True)
+class BlockedTask:
+    """A not-done task whose `blocks`-predecessors are not all done.
+
+    `blocked_by` is guaranteed non-empty — a BlockedTask with no blockers
+    is a contradiction and indicates a bug in the caller.
+    """
+
+    task: TaskListItem
+    blocked_by: tuple[int, ...]  # task ids that are not yet done; always non-empty
+
+    def __post_init__(self) -> None:
+        if not self.blocked_by:
+            raise ValueError("BlockedTask.blocked_by must be non-empty")
+
+
+@dataclass(frozen=True)
+class NextTasksView:
+    """Result of `compute_next_tasks`.
+
+    In default (frontier) mode, `ready` is the set of not-done tasks whose
+    blockers are all done, and `blocked` lists the rest with their pending
+    blocker task ids.
+
+    In `include_blocked` mode, `ready` is the full topological order of all
+    not-done tasks (frontier first) and `blocked` is empty — callers that
+    want the gating breakdown should request frontier mode.
+    """
+
+    workspace_id: int
+    ready: tuple[TaskListItem, ...]
+    blocked: tuple[BlockedTask, ...]
