@@ -72,7 +72,9 @@ Present everything collected in Steps 1–4 as a single output:
   Group:     workspace → group → subgroup   (omit if no group)
   Due:       <date or —>
 
-  <description rendered as Markdown, if set>
+  <first 10 lines of description rendered as Markdown — if longer, show
+   "… (N more lines)" and offer to display the rest on request.
+   User can ask for more or fewer lines.>
 
   Metadata:  branch=feat/x  jira=PROJ-42    (omit if empty)
 
