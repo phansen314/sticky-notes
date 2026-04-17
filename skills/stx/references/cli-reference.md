@@ -393,7 +393,7 @@ stx status archive "Old Status" --force
 
 ## `stx edge` Subcommands
 
-Edges are polymorphic directional links with a free-form `kind` label and their own metadata blob. Endpoints are typed refs: `task-NNNN` / `#NNNN` / `<task ref>` for tasks, `group:<title-or-path>` for groups, `task:<task-path>` for tasks, `workspace:<name>` for workspaces, `status:<name>` for statuses. Group and task suffixes accept full path syntax (`group:A/B/C`, `task:A/B:leaf`). Cross-type edges are allowed (task→group, group→workspace, status→status, etc.); status edges are pure annotation and carry no write-path semantics. Flags are explicit: `--source X --target Y --kind blocks` means **X points to Y with kind `blocks`**. The PK is `(from_type, from_id, to_type, to_id, kind)` — multiple kinds between the same node pair coexist; re-adding the same `(source, target, kind)` tuple clears the metadata blob and flips `archived = 0`. Self-loops are rejected by a DB CHECK. Cross-workspace edges are rejected at the service layer.
+Edges are polymorphic directional links with a free-form `kind` label and their own metadata blob. Endpoints are typed refs: `task-NNNN` / `#NNNN` / `<task ref>` for tasks, `group:<title-or-path>` for groups, `task:<task-path>` for tasks, `workspace:<name>` for workspaces, `status:<name>` for statuses. Group and task suffixes accept full path syntax (`group:A/B/C`, `task:A/B:leaf`). Cross-type edges are allowed (task→group, group→workspace, status→status, etc.); status edges are pure annotation and carry no write-path semantics. Flags are explicit: `--source X --target Y --kind blocks` means **X points to Y with kind `blocks`**. Every edge subcommand accepts `-s` / `-t` / `-k` as short forms for `--source` / `--target` / `--kind`. The PK is `(from_type, from_id, to_type, to_id, kind)` — multiple kinds between the same node pair coexist; re-adding the same `(source, target, kind)` tuple clears the metadata blob and flips `archived = 0`. Self-loops are rejected by a DB CHECK. Cross-workspace edges are rejected at the service layer.
 
 **Kind constraint:** lowercase `[a-z0-9_.-]+`, 1-64 characters. Enforced by the service layer's `_normalize_edge_kind` and a DB `CHECK (kind GLOB '[a-z0-9_.-]*' AND length(kind) BETWEEN 1 AND 64)`.
 
@@ -417,6 +417,7 @@ Edges are polymorphic directional links with a free-form `kind` label and their 
 ```sh
 stx edge create --source task-0003 --target task-0001 --kind blocks
 stx edge create --source task-0002 --target "group:Auth" --kind informs
+stx edge create -s /A/B -t D:task0 -k blocks      # short forms work everywhere
 stx edge show --source task-0003 --target task-0001 --kind blocks
 stx edge edit --source task-0003 --target task-0001 --kind blocks --no-acyclic
 stx edge log --source task-0003 --target task-0001 --kind blocks
@@ -444,7 +445,7 @@ Groups are workspace-scoped hierarchical collections of tasks. Root groups have 
 | `group edit` | `title-or-path` | `--title NEW`, `--desc/-d`, `--dry-run` | Edit group fields; `--title` renames the group; `--dry-run` previews the diff |
 | `group log` | `title-or-path` | — | Show journal / change history for the group. |
 | `group archive` | `title-or-path` | `--force`, `--dry-run` | Cascade-archive group and all descendant groups/tasks. Prompts y/N unless `--force`. |
-| `group mv` | `title-or-path` | `--parent TITLE-OR-PATH` **or** `--to-top` (required), `--dry-run` | Reparent under another group, or `--to-top` to promote to root level; `--dry-run` previews the diff |
+| `group mv` | `title-or-path` | `--parent TITLE-OR-PATH` (required), `--dry-run` | Reparent. Pass `--parent /` to promote to root level; otherwise resolve the new parent. `--dry-run` previews the diff. |
 | `group assign` | `task title-or-path` | — | Assign task to group |
 | `group unassign` | `task` | — | Unassign task from its group |
 Edges between groups (and any other node types) live under the top-level `stx edge` command — see the `stx edge` section. Use the typed ref form `group:<title-or-path>` (e.g. `group:Backend/Auth`) when group titles collide under different parents.
@@ -456,8 +457,8 @@ stx group create "OAuth" --parent "Backend/Auth"
 stx group assign task-0005 "Backend/Auth"
 stx group ls
 stx group show "Backend/Auth"               # path ref disambiguates collisions
-stx group mv "Backend/Auth" --parent "Frontend"
-stx group mv "Backend" --to-top             # promote to root level
+stx group mv "Backend/Auth" --parent "/Frontend"
+stx group mv "Backend" --parent /           # promote to root level
 stx edge create --source "group:Backend/Auth" --target "group:Frontend/Login" --kind blocks
 stx edge create --source "task:Backend:apply-migrations" --target "task:Frontend:render-form" --kind blocks
 ```

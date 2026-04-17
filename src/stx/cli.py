@@ -993,7 +993,8 @@ def cmd_group_archive(
 def cmd_group_mv(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
     workspace = _resolve_workspace(conn, args, ctx)
     grp = service.resolve_group(conn, workspace.id, args.title)
-    if args.to_top:
+    promote = args.parent == "/"
+    if promote:
         changes: dict[str, Any] = {"parent_id": None}
     else:
         parent = service.resolve_group(conn, workspace.id, args.parent)
@@ -1002,13 +1003,9 @@ def cmd_group_mv(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunCon
         preview = service.preview_update_group(conn, grp.id, changes)
         return Ok(data=preview, text=presenters.format_entity_update_preview(preview))
     updated = service.update_group(conn, grp.id, changes)
-    if args.to_top:
+    if promote:
         return Ok(data=updated, text=f"promoted group '{grp.title}' to top-level")
-    parent_title = (
-        service.get_group(conn, changes["parent_id"]).title
-        if changes["parent_id"] is not None
-        else None
-    )
+    parent_title = service.get_group(conn, changes["parent_id"]).title
     return Ok(data=updated, text=f"moved group '{grp.title}' under '{parent_title}'")
 
 
@@ -1883,10 +1880,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_gmv = grp_sub.add_parser("mv", help="reparent a group")
     p_gmv.set_defaults(command="group_mv")
     p_gmv.add_argument("title")
-    p_gmv_parent = p_gmv.add_mutually_exclusive_group(required=True)
-    p_gmv_parent.add_argument("--parent", help="new parent group title")
-    p_gmv_parent.add_argument(
-        "--to-top", action="store_true", help="promote to top-level (no parent)"
+    p_gmv.add_argument(
+        "--parent",
+        required=True,
+        help="new parent group ref ('/' for root, or a path like '/Backend' or 'A/B')",
     )
     p_gmv.add_argument("--dry-run", action="store_true", help="preview reparent without writing")
 

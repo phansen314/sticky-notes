@@ -936,7 +936,7 @@ class TestGroupCLI:
     def test_mv_promote_to_top(self):
         self.cli("group", "create", "Frontend")
         self.cli("group", "create", "Child", "--parent", "Frontend")
-        out, _ = self.cli("group", "mv", "Child", "--to-top")
+        out, _ = self.cli("group", "mv", "Child", "--parent", "/")
         assert "promoted" in out
 
     def test_assign_task(self):
@@ -1673,7 +1673,7 @@ class TestEditDryRun:
         assert "top-renamed" not in show
 
     def test_group_mv_dry_run_to_top(self):
-        out, _ = self.cli("group", "mv", "child", "--to-top", "--dry-run")
+        out, _ = self.cli("group", "mv", "child", "--parent", "/", "--dry-run")
         assert "dry-run" in out
         assert "parent" in out
 

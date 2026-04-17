@@ -38,12 +38,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   Going forward the service layer rejects offending titles before any
   write; fresh databases also enforce the rule via a `CHECK` constraint
   in `schema.sql`.
+- `stx group mv --parent /` promotes a group to root level (replaces the
+  removed `--to-top` flag). Harmonizes with the new Unix-style anchor
+  convention.
 
 ### Removed
 
 - **Breaking:** `stx edge` `--source-parent` and `--target-parent` flags
   are gone. Use a path ref in the suffix instead — e.g.
   `--source group:A/B` rather than `--source group:B --source-parent A`.
+- **Breaking:** `stx group mv --to-top` flag removed. Use
+  `--parent /` instead.
 - **Breaking:** `service.resolve_group()` no longer accepts
   `parent_title=` / `parent_root=` keyword arguments. Pass a path ref as
   the positional argument.
