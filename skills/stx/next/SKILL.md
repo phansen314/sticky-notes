@@ -1,6 +1,6 @@
 ---
 name: next
-description: Use when the user wants to pick up the next actionable task from an stx workspace — surfaces the highest-priority ready task from the dependency DAG (default edge kind `blocks`, configurable per workspace), shows its full context (description, group, edges, metadata, history), and optionally offers to move it to an in-progress status. Trigger on: "what should I work on", "pick up next task", "what's next", "next task".
+description: Use when the user wants to pick up the next actionable task from an stx workspace — surfaces the highest-priority ready task from the dependency DAG (default edge kind `blocks`, configurable per workspace), shows its full context (description, group, edges, history), and optionally offers to move it to an in-progress status. Trigger on: "what should I work on", "pick up next task", "what's next", "next task".
 ---
 
 Pick up the next actionable task from the active stx workspace.
@@ -50,8 +50,11 @@ Collect:
   can start
 - `edge_sources`: incoming edges — tasks/groups that must complete before this one
   (should be empty on the frontier; note any non-empty ones as unexpected blockers)
-- Metadata key/value pairs (branch, jira, owner, etc.)
 - Last 3 history entries (ask user for more if relevant)
+
+Do not collect or render the task's `metadata` blob — it can be arbitrarily large
+(keys + 500-char values each). If the user asks for it, run
+`stx --json task meta ls <task-id>` on demand.
 
 ## Step 3 — Group context (data only, no output yet; skip if no group)
 
@@ -86,8 +89,6 @@ Present everything collected in Steps 1–4 as a single output:
   Due:       <date or —>
 
   <description>                              (omit if empty; see truncation note)
-
-  Metadata:  branch=feat/x  jira=PROJ-42    (omit if empty)
 
   Unlocks downstream:
     task-MMMM  (title if available, else just the id)
