@@ -16,9 +16,11 @@ from textual.widgets import Footer, Header
 from stx.active_workspace import clear_active_workspace_id, get_active_workspace_id
 from stx.connection import DEFAULT_DB_PATH, get_connection, init_db
 from stx.formatting import format_task_num
+from stx.graph import GraphFormat, write_graph
 from stx.models import Group, Status, Task, Workspace
 from stx.presenters import format_archive_preview
 from stx.service import (
+    list_edges,
     archive_task,
     cascade_archive_group,
     cascade_archive_workspace,
@@ -93,6 +95,7 @@ class StxApp(App):
         Binding("]", "status_right", "Status ▶", show=False),
         Binding("shift+right", "status_right", show=False),
         Binding("c", "config", "Config", show=True),
+        Binding("g", "graph", "Graph", show=True),
         Binding("n", "new", "New", show=True),
         Binding("ctrl+q", "quit", "Quit", show=True),
     ]
@@ -705,6 +708,18 @@ class StxApp(App):
         for key, value in changes.items():
             setattr(self.config, key, value)
         save_config(self.config, self.config_path)
+
+    def action_graph(self) -> None:
+        if self._active_model is None:
+            return
+        assert self._active_workspace_id is not None
+        edges = list_edges(self.conn, self._active_workspace_id)
+        if not edges:
+            self.notify("No edges in workspace", severity="warning")
+            return
+        ws = get_workspace(self.conn, self._active_workspace_id)
+        path = write_graph(edges, ws.name, GraphFormat.dot)
+        self.notify(f"Wrote {path}")
 
     def action_new(self) -> None:
         if self._active_model is None:
