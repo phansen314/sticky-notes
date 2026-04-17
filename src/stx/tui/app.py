@@ -718,7 +718,8 @@ class StxApp(App):
             self.notify("No edges in workspace", severity="warning")
             return
         ws = get_workspace(self.conn, self._active_workspace_id)
-        path = write_graph(edges, ws.name, GraphFormat.dot)
+        out = Path("/tmp/stx-graph.dot")
+        path = write_graph(edges, ws.name, GraphFormat.dot, output=out)
         self.notify(f"Wrote {path}")
 
     def action_new(self) -> None:
