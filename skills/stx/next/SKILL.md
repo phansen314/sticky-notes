@@ -1,6 +1,6 @@
 ---
 name: next
-description: Use when the user wants to pick up the next actionable task from an stx workspace — surfaces the highest-priority ready task from the blocks DAG, shows its full context (description, group, edges, metadata, history), and optionally marks it in-progress. Trigger on: "what should I work on", "pick up next task", "what's next", "next task".
+description: Use when the user wants to pick up the next actionable task from an stx workspace — surfaces the highest-priority ready task from the blocks DAG, shows its full context (description, group, edges, metadata, history), and optionally offers to move it to an in-progress status. Trigger on: "what should I work on", "pick up next task", "what's next", "next task".
 ---
 
 Pick up the next actionable task from the active stx workspace.
@@ -8,7 +8,7 @@ Pick up the next actionable task from the active stx workspace.
 ## Step 1 — Get the ready frontier
 
 ```sh
-stx next --rank --json
+stx --json next --rank
 ```
 
 Parse the response:
@@ -26,7 +26,7 @@ Parse the response:
 ## Step 2 — Hydrate the top task (data only, no output yet)
 
 ```sh
-stx task show <task-id> --json
+stx --json task show <task-id>
 ```
 
 Collect:
@@ -39,12 +39,12 @@ Collect:
 - `edge_sources`: incoming edges — tasks/groups that must complete before this one
   (should be empty on the frontier; note any non-empty ones as unexpected blockers)
 - Metadata key/value pairs (branch, jira, owner, etc.)
-- Last 3 history entries
+- Last 3 history entries (ask user for more if relevant)
 
 ## Step 3 — Group context (data only, no output yet; skip if no group)
 
 ```sh
-stx group show "<group-title>" --json
+stx --json group show "<group-title>"
 ```
 
 Collect:
@@ -72,14 +72,12 @@ Present everything collected in Steps 1–4 as a single output:
   Group:     workspace → group → subgroup   (omit if no group)
   Due:       <date or —>
 
-  <first 10 lines of description rendered as Markdown — if longer, show
-   "… (N more lines)" and offer to display the rest on request.
-   User can ask for more or fewer lines.>
+  <description>                              (omit if empty; see truncation note)
 
   Metadata:  branch=feat/x  jira=PROJ-42    (omit if empty)
 
   Unlocks downstream:
-    task-MMMM  <title if known, else task-MMMM>
+    task-MMMM  (title if available, else just the id)
     task-PPPP  …
 
   Unexpected incoming blockers:             (omit if empty)
@@ -91,6 +89,10 @@ Present everything collected in Steps 1–4 as a single output:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
+**Description truncation** — render the first 10 lines as Markdown. If longer,
+append `… (N more lines)` and offer to display the rest on request. User can ask
+for a different limit.
+
 **Offer to start** — if `is_terminal=false` and `done=false`, offer to move the task
 to an in-progress status:
 
@@ -101,7 +103,7 @@ stx task mv <task-id> -S "<in-progress-status>"
 If the correct status name is unknown, list options first:
 
 ```sh
-stx status ls --json
+stx --json status ls
 ```
 
 **Do not move automatically** — wait for user confirmation. In non-interactive /
@@ -119,5 +121,5 @@ has pre-authorised status transitions.
   dependency.
 - **Different DAG edge kind** — pass `--edge-kind <kind>` to `stx next` if the
   workspace uses a kind other than `blocks`.
-- **User wants more candidates** — rerun with `stx next --rank --limit N --json` and
+- **User wants more candidates** — rerun with `stx --json next --rank --limit N` and
   let them choose from the top N.
