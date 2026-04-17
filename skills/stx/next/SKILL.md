@@ -1,14 +1,26 @@
 ---
 name: next
-description: Use when the user wants to pick up the next actionable task from an stx workspace — surfaces the highest-priority ready task from the blocks DAG, shows its full context (description, group, edges, metadata, history), and optionally offers to move it to an in-progress status. Trigger on: "what should I work on", "pick up next task", "what's next", "next task".
+description: Use when the user wants to pick up the next actionable task from an stx workspace — surfaces the highest-priority ready task from the dependency DAG (default edge kind `blocks`, configurable per workspace), shows its full context (description, group, edges, metadata, history), and optionally offers to move it to an in-progress status. Trigger on: "what should I work on", "pick up next task", "what's next", "next task".
 ---
 
 Pick up the next actionable task from the active stx workspace.
 
 ## Step 1 — Get the ready frontier
 
+Default edge kind is `blocks`. If the workspace uses a different kind (e.g.
+`spawns`, `depends-on`, project-specific kind), pass one or more `--edge-kind`
+flags. If the user explicitly named a kind in their request, forward it. If the
+user typically uses a non-default kind, ask once and remember.
+
 ```sh
+# Default — blocks DAG
 stx --json next --rank
+
+# Custom single kind
+stx --json next --rank --edge-kind spawns
+
+# Multiple kinds unioned into one DAG
+stx --json next --rank --edge-kind blocks --edge-kind spawns
 ```
 
 Parse the response:
@@ -54,8 +66,9 @@ Collect:
 
 ## Step 4 — Downstream gates (data only, no output yet)
 
-From the `stx next` output, find all entries in `blocked` whose `blocked_by` array
-contains this task's ID. These are the tasks directly gated on completing this one.
+From the same `stx next` output parsed in Step 1 (with whatever `--edge-kind` was
+used), find all entries in `blocked` whose `blocked_by` array contains this task's
+ID. These are the tasks directly gated on completing this one.
 `blocked_by` contains task IDs only — format them as `task-NNNN`. Titles are not
 available without additional lookups; show IDs unless you have the title from the
 `ready` or `blocked` lists already.
@@ -116,10 +129,10 @@ has pre-authorised status transitions.
   `stx workspace use <name>`.
 - **No tasks exist** — workspace is empty; suggest creating tasks or seeding from a
   plan.
-- **No blocking edges** — all tasks are on the frontier; `stx next --rank` still
+- **No dependency edges** — all tasks are on the frontier; `stx next --rank` still
   sorts by priority, due date, id — the result is correct, just unordered by
   dependency.
-- **Different DAG edge kind** — pass `--edge-kind <kind>` to `stx next` if the
-  workspace uses a kind other than `blocks`.
 - **User wants more candidates** — rerun with `stx --json next --rank --limit N` and
   let them choose from the top N.
+- **Mixed edge-kind conventions in one workspace** — run once per kind, or union
+  them via repeated `--edge-kind` flags (see Step 1).
