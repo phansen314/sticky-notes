@@ -376,10 +376,10 @@ def fire_hooks(
     meta_value: str | None = None,
     source_workspace: dict | None = None,
     target_workspace: dict | None = None,
-    hooks_path: Path = DEFAULT_HOOKS_PATH,
+    hooks_path: Path | None = None,
 ) -> None:
     """High-level entry: load → match → build payload → execute."""
-    hooks = load_hooks(hooks_path)
+    hooks = load_hooks(hooks_path if hooks_path is not None else DEFAULT_HOOKS_PATH)
     matched = match_hooks(hooks, event, timing, workspace_name)
     if not matched:
         return

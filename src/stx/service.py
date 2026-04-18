@@ -13,6 +13,7 @@ from typing import Any
 from . import repository as repo
 from .connection import transaction
 from .formatting import parse_task_num
+from .hooks import HookEvent, HookTiming, fire_hooks
 from .mappers import (
     group_to_detail,
     group_to_ref,
@@ -278,6 +279,41 @@ def _record_entity_changes(
         )
 
 
+def _workspace_name(conn: sqlite3.Connection, workspace_id: int) -> str | None:
+    ws = repo.get_workspace(conn, workspace_id)
+    return ws.name if ws is not None else None
+
+
+def _build_change_dict(old: Any, new_fields: dict[str, Any]) -> dict[str, Any]:
+    """Return {field: {"old": old_val, "new": new_val}} for fields whose value differs."""
+    result: dict[str, Any] = {}
+    for field, new_val in new_fields.items():
+        old_val = getattr(old, field, None)
+        if old_val != new_val:
+            result[field] = {"old": old_val, "new": new_val}
+    return result
+
+
+def _determine_task_events(changes: dict[str, Any]) -> list[HookEvent]:
+    """Return the list of HookEvents implied by a change dict ({field: {"old","new"}})."""
+    events: list[HookEvent] = []
+    specific: set[str] = set()
+    if "status_id" in changes:
+        events.append(HookEvent.TASK_MOVED)
+        specific.add("status_id")
+    if "done" in changes:
+        new_done = changes["done"]["new"]
+        events.append(HookEvent.TASK_DONE if new_done else HookEvent.TASK_UNDONE)
+        specific.add("done")
+    if "group_id" in changes:
+        new_group = changes["group_id"]["new"]
+        events.append(HookEvent.TASK_ASSIGNED if new_group is not None else HookEvent.TASK_UNASSIGNED)
+        specific.add("group_id")
+    if any(k not in specific for k in changes):
+        events.append(HookEvent.TASK_UPDATED)
+    return events
+
+
 def _record_edge_change(
     conn: sqlite3.Connection,
     from_type: str,
@@ -540,13 +576,31 @@ def create_task(
     if group_id is not None:
         fields["group_id"] = group_id
     _validate_task_fields(fields, workspace_id=workspace_id, conn=conn)
+    proposed = {
+        "workspace_id": workspace_id,
+        "title": title,
+        "status_id": status_id,
+        "description": description,
+        "priority": priority,
+        "due_date": due_date,
+        "start_date": start_date,
+        "finish_date": finish_date,
+        "group_id": group_id,
+    }
+    ws_name = _workspace_name(conn, workspace_id)
+    fire_hooks(
+        HookEvent.TASK_CREATED, HookTiming.PRE,
+        workspace_id=workspace_id, workspace_name=ws_name,
+        entity_type="task", entity_id=None, entity=None,
+        proposed=proposed,
+    )
     with transaction(conn), _friendly_errors():
         # Mirror the status-driven done auto-set from _update_task_body: a task
         # created directly into a terminal status starts as done=True so it
         # doesn't linger on the `stx next` frontier.
         status = repo.get_status(conn, status_id)
         initial_done = bool(status.is_terminal) if status is not None else False
-        return repo.insert_task(
+        task = repo.insert_task(
             conn,
             NewTask(
                 workspace_id=workspace_id,
@@ -561,6 +615,13 @@ def create_task(
                 done=initial_done,
             ),
         )
+    fire_hooks(
+        HookEvent.TASK_CREATED, HookTiming.POST,
+        workspace_id=workspace_id, workspace_name=ws_name,
+        entity_type="task", entity_id=task.id, entity=task,
+        proposed=proposed,
+    )
+    return task
 
 
 def get_task(conn: sqlite3.Connection, task_id: int) -> Task:
@@ -710,6 +771,17 @@ def update_task(
 ) -> Task:
     if not changes:
         return get_task(conn, task_id)
+    old = get_task(conn, task_id)
+    ws_name = _workspace_name(conn, old.workspace_id)
+    pre_changes = _build_change_dict(old, changes)
+    pre_events = _determine_task_events(pre_changes)
+    for event in pre_events:
+        fire_hooks(
+            event, HookTiming.PRE,
+            workspace_id=old.workspace_id, workspace_name=ws_name,
+            entity_type="task", entity_id=task_id, entity=old,
+            changes=pre_changes,
+        )
     parents: set[int] = set()
     with transaction(conn), _friendly_errors():
         result = _update_task_body(conn, task_id, changes, source,
@@ -721,6 +793,18 @@ def update_task(
     for gid in parents:
         with transaction(conn):
             _propagate_done_upward(conn, gid, "auto")
+    post_raw = {k: getattr(result, k) for k in changes}
+    if result.done != old.done:  # include auto-done from terminal status
+        post_raw["done"] = result.done
+    post_changes = _build_change_dict(old, post_raw)
+    post_events = _determine_task_events(post_changes)
+    for event in post_events:
+        fire_hooks(
+            event, HookTiming.POST,
+            workspace_id=old.workspace_id, workspace_name=ws_name,
+            entity_type="task", entity_id=task_id, entity=result,
+            changes=post_changes,
+        )
     return result
 
 
@@ -1168,8 +1252,23 @@ def move_task_to_workspace(
     *,
     source: str,
 ) -> Task:
+    old = get_task(conn, task_id)
+    src_ws = {"id": old.workspace_id, "name": _workspace_name(conn, old.workspace_id)}
+    tgt_ws = {"id": target_workspace_id, "name": _workspace_name(conn, target_workspace_id)}
+    transfer_changes = {
+        "workspace_id": {"old": old.workspace_id, "new": target_workspace_id},
+        "status_id": {"old": old.status_id, "new": target_status_id},
+    }
+    fire_hooks(
+        HookEvent.TASK_TRANSFERRED, HookTiming.PRE,
+        workspace_id=old.workspace_id, workspace_name=src_ws["name"],
+        entity_type="task", entity_id=task_id, entity=old,
+        changes=transfer_changes,
+        source_workspace=src_ws,
+        target_workspace=tgt_ws,
+    )
     with transaction(conn), _friendly_errors():
-        old, can_move, reason, _ = _validate_move_to_workspace(
+        old_inner, can_move, reason, _ = _validate_move_to_workspace(
             conn,
             task_id,
             target_workspace_id,
@@ -1182,13 +1281,13 @@ def move_task_to_workspace(
             conn,
             NewTask(
                 workspace_id=target_workspace_id,
-                title=old.title,
+                title=old_inner.title,
                 status_id=target_status_id,
-                description=old.description,
-                priority=old.priority,
-                due_date=old.due_date,
-                start_date=old.start_date,
-                finish_date=old.finish_date,
+                description=old_inner.description,
+                priority=old_inner.priority,
+                due_date=old_inner.due_date,
+                start_date=old_inner.start_date,
+                finish_date=old_inner.finish_date,
             ),
         )
 
@@ -1196,10 +1295,19 @@ def move_task_to_workspace(
 
         repo.update_task(conn, task_id, {"archived": True})
         _record_entity_changes(
-            conn, EntityType.TASK, task_id, old.workspace_id, old, {"archived": True}, source
+            conn, EntityType.TASK, task_id, old_inner.workspace_id, old_inner, {"archived": True}, source
         )
         # Refetch: `new` was built before metadata was attached.
-        return get_task(conn, new.id)
+        result = get_task(conn, new.id)
+    fire_hooks(
+        HookEvent.TASK_TRANSFERRED, HookTiming.POST,
+        workspace_id=old.workspace_id, workspace_name=src_ws["name"],
+        entity_type="task", entity_id=task_id, entity=result,
+        changes=transfer_changes,
+        source_workspace=src_ws,
+        target_workspace=tgt_ws,
+    )
+    return result
 
 
 # ---- Entity metadata ----
@@ -1414,7 +1522,20 @@ def set_task_meta(
     *,
     source: str = "cli",
 ) -> Task:
-    return _set_entity_meta(
+    normalized = _normalize_meta_key(key)
+    if len(value) > _META_VALUE_MAX:
+        raise ValueError(f"metadata value must be \u2264 {_META_VALUE_MAX} characters")
+    task = get_task(conn, task_id)
+    ws_name = _workspace_name(conn, task.workspace_id)
+    old_val = task.metadata.get(normalized)
+    if old_val != value:
+        fire_hooks(
+            HookEvent.TASK_META_SET, HookTiming.PRE,
+            workspace_id=task.workspace_id, workspace_name=ws_name,
+            entity_type="task", entity_id=task_id, entity=task,
+            meta_key=normalized, meta_value=value,
+        )
+    result = _set_entity_meta(
         conn,
         task_id,
         key,
@@ -1426,6 +1547,14 @@ def set_task_meta(
         entity_name="task",
         source=source,
     )
+    if old_val != value:
+        fire_hooks(
+            HookEvent.TASK_META_SET, HookTiming.POST,
+            workspace_id=task.workspace_id, workspace_name=ws_name,
+            entity_type="task", entity_id=task_id, entity=result,
+            meta_key=normalized, meta_value=value,
+        )
+    return result
 
 
 def remove_task_meta(
@@ -1435,7 +1564,17 @@ def remove_task_meta(
     *,
     source: str = "cli",
 ) -> str:
-    return _remove_entity_meta(
+    normalized = _normalize_meta_key(key)
+    task = get_task(conn, task_id)
+    ws_name = _workspace_name(conn, task.workspace_id)
+    if normalized in task.metadata:
+        fire_hooks(
+            HookEvent.TASK_META_REMOVED, HookTiming.PRE,
+            workspace_id=task.workspace_id, workspace_name=ws_name,
+            entity_type="task", entity_id=task_id, entity=task,
+            meta_key=normalized, meta_value=None,
+        )
+    old_value = _remove_entity_meta(
         conn,
         task_id,
         key,
@@ -1446,6 +1585,15 @@ def remove_task_meta(
         entity_name="task",
         source=source,
     )
+    if normalized in task.metadata:
+        updated = get_task(conn, task_id)
+        fire_hooks(
+            HookEvent.TASK_META_REMOVED, HookTiming.POST,
+            workspace_id=task.workspace_id, workspace_name=ws_name,
+            entity_type="task", entity_id=task_id, entity=updated,
+            meta_key=normalized, meta_value=None,
+        )
+    return old_value
 
 
 def replace_task_metadata(
@@ -1459,7 +1607,24 @@ def replace_task_metadata(
     or removed key emits a `meta.<key>` journal entry via
     `_replace_entity_metadata`.
     """
-    return _replace_entity_metadata(
+    task = get_task(conn, task_id)
+    ws_name = _workspace_name(conn, task.workspace_id)
+    normalized_new = {_normalize_meta_key(k): v for k, v in new_metadata.items()}
+    key_events: list[tuple[str, str | None, HookEvent]] = []
+    for k in set(task.metadata) | set(normalized_new):
+        old_v = task.metadata.get(k)
+        new_v = normalized_new.get(k)
+        if old_v != new_v:
+            event = HookEvent.TASK_META_SET if new_v is not None else HookEvent.TASK_META_REMOVED
+            key_events.append((k, new_v, event))
+    for k, new_v, event in key_events:
+        fire_hooks(
+            event, HookTiming.PRE,
+            workspace_id=task.workspace_id, workspace_name=ws_name,
+            entity_type="task", entity_id=task_id, entity=task,
+            meta_key=k, meta_value=new_v,
+        )
+    result = _replace_entity_metadata(
         conn,
         task_id,
         new_metadata,
@@ -1470,6 +1635,14 @@ def replace_task_metadata(
         entity_name="task",
         source=source,
     )
+    for k, new_v, event in key_events:
+        fire_hooks(
+            event, HookTiming.POST,
+            workspace_id=task.workspace_id, workspace_name=ws_name,
+            entity_type="task", entity_id=task_id, entity=result,
+            meta_key=k, meta_value=new_v,
+        )
+    return result
 
 
 # ---- Workspace metadata ----
@@ -2481,16 +2654,7 @@ def assign_task_to_group(
     """Assign a group to a task. The group must belong to the same workspace
     as the task; validation inside `_update_task_body` enforces this.
     """
-    parents: set[int] = set()
-    with transaction(conn), _friendly_errors():
-        get_task(conn, task_id)
-        get_group(conn, group_id)  # raises LookupError on miss
-        changes: dict[str, Any] = {"group_id": group_id}
-        result = _update_task_body(conn, task_id, changes, source, _parents_out=parents)
-    for gid in parents:
-        with transaction(conn):
-            _propagate_done_upward(conn, gid, "auto")
-    return result
+    return update_task(conn, task_id, {"group_id": group_id}, source)
 
 
 def unassign_task_from_group(
@@ -2718,9 +2882,17 @@ def archive_task(
     *,
     source: str,
 ) -> Task:
+    old = get_task(conn, task_id)
+    ws_name = _workspace_name(conn, old.workspace_id)
+    archive_changes = {"archived": {"old": old.archived, "new": True}}
+    fire_hooks(
+        HookEvent.TASK_ARCHIVED, HookTiming.PRE,
+        workspace_id=old.workspace_id, workspace_name=ws_name,
+        entity_type="task", entity_id=task_id, entity=old,
+        changes=archive_changes,
+    )
     parent_group: int | None = None
     with transaction(conn), _friendly_errors():
-        old = get_task(conn, task_id)
         updated = repo.update_task(conn, task_id, {"archived": True})
         _record_entity_changes(
             conn, EntityType.TASK, task_id, old.workspace_id, old, {"archived": True}, source
@@ -2731,6 +2903,12 @@ def archive_task(
     if parent_group is not None:
         with transaction(conn):
             _propagate_done_upward(conn, parent_group, "auto")
+    fire_hooks(
+        HookEvent.TASK_ARCHIVED, HookTiming.POST,
+        workspace_id=old.workspace_id, workspace_name=ws_name,
+        entity_type="task", entity_id=task_id, entity=updated,
+        changes=archive_changes,
+    )
     return updated
 
 
