@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.17.0] — 2026-04-18
+
 ### Changed
 
 - **Bulk queries exclude description column.** `list_tasks`, `list_tasks_filtered`,
