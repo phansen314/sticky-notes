@@ -1422,12 +1422,14 @@ def get_group_ancestry(
     """Return groups from root to the given group, inclusive."""
     rows = conn.execute(
         "WITH RECURSIVE ancestry AS ("
-        "  SELECT id, workspace_id, title, metadata, parent_id, archived, created_at, version, 0 AS depth "
+        "  SELECT id, workspace_id, title, metadata, parent_id, archived, created_at, version,"
+        "    (description IS NOT NULL) AS has_description, 0 AS depth "
         "  FROM groups WHERE id = ? "
         "  UNION ALL "
-        "  SELECT g.id, g.workspace_id, g.title, g.metadata, g.parent_id, g.archived, g.created_at, g.version, a.depth + 1 "
+        "  SELECT g.id, g.workspace_id, g.title, g.metadata, g.parent_id, g.archived, g.created_at, g.version,"
+        "    (g.description IS NOT NULL) AS has_description, a.depth + 1 "
         "  FROM groups g JOIN ancestry a ON g.id = a.parent_id"
-        ") SELECT id, workspace_id, title, metadata, parent_id, archived, created_at, version "
+        ") SELECT id, workspace_id, title, metadata, parent_id, archived, created_at, version, has_description "
         "FROM ancestry ORDER BY depth DESC",
         (group_id,),
     ).fetchall()
