@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-04-18
+
 ### Removed
 
 - **Pre-hooks.** stx hooks are now post-only observers — the write always
@@ -40,6 +42,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   affected IDs are included in the payload instead (see Changed section).
   Full event catalog, payload shapes, and recipe library in
   `skills/stx/references/hooks.md`.
+- **`stx graph` command.** Generates DOT or Mermaid graph files from workspace
+  edges. Flags: `--format dot|mermaid` (default: dot), `--kind` (filter by edge
+  kind), `--output` (explicit path; otherwise writes a temp file). TUI: press
+  `g` to generate a DOT file and display its path.
+- **TUI group filtering.** Selecting a group in the workspace tree filters the
+  kanban board to tasks under that group and its descendants.
 
 ### Fixed
 
@@ -50,6 +58,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **`archive_status --reassign-to` done-flip now uses a single bulk `UPDATE`**
   instead of N per-task `repo.update_task` calls. Behavior unchanged; each
   flip is still journaled individually.
+- **TUI refresh after writes.** Modal saves and kanban status moves now
+  unconditionally refresh the UI instead of relying on the data-version gate.
 
 ### Changed
 
@@ -65,7 +75,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **`archive_status --reassign-to` into a terminal status now auto-sets
   `done=True`** on all moved tasks, matching the per-task done-flip that
   `update_task` applies. Each flip is journaled with `source="auto"`.
-
 - **Metadata hook firing centralized.** `_set_entity_meta` /
   `_remove_entity_meta` / `_replace_entity_metadata` now fire `*.meta_set` /
   `*.meta_removed` hooks internally based on the passed `entity_type`, so the
@@ -73,22 +82,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   wrappers are thin delegates. Behavior unchanged for existing task-meta
   callers; centralization eliminates hook-firing boilerplate for the new
   group/workspace wrappers.
-
-## [0.16.0] — 2026-04-17
-
-### Added
-
-- **`stx graph` command.** Generates DOT or Mermaid graph files from workspace
-  edges. Flags: `--format dot|mermaid` (default: dot), `--kind` (filter by edge
-  kind), `--output` (explicit path; otherwise writes a temp file). TUI: press
-  `g` to generate a DOT file and display its path.
-- **TUI group filtering.** Selecting a group in the workspace tree filters the
-  kanban board to tasks under that group and its descendants.
-
-### Fixed
-
-- **TUI refresh after writes.** Modal saves and kanban status moves now
-  unconditionally refresh the UI instead of relying on the data-version gate.
 
 ## [0.15.0] — 2026-04-17
 
@@ -504,7 +497,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **`project edit --name/-n`** removed; use the new `project rename` instead. `project edit` now only handles description changes.
 - **Dropped `-P` / `-s` short flags** from `task create` / `task ls` / `task edit`. They case-collided with `-p` (project) and `-S` (status), making shift-key typos silently do the wrong thing. Long forms `--priority` and `--search` remain. Breaking for any script relying on the shorts.
 
-[Unreleased]: https://github.com/phansen314/stx/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/phansen314/stx/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/phansen314/stx/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/phansen314/stx/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/phansen314/stx/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/phansen314/stx/compare/v0.12.0...v0.13.0
