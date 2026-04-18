@@ -53,11 +53,12 @@ def row_to_status(row: Row) -> Status:
 
 
 def row_to_task(row: Row) -> Task:
+    keys = row.keys()
     return Task(
         id=row["id"],
         workspace_id=row["workspace_id"],
         title=row["title"],
-        description=row["description"],
+        description=row["description"] if "description" in keys else None,
         status_id=row["status_id"],
         priority=row["priority"],
         due_date=row["due_date"],
@@ -73,11 +74,12 @@ def row_to_task(row: Row) -> Task:
 
 
 def row_to_group(row: Row) -> Group:
+    keys = row.keys()
     return Group(
         id=row["id"],
         workspace_id=row["workspace_id"],
         title=row["title"],
-        description=row["description"],
+        description=row["description"] if "description" in keys else None,
         parent_id=row["parent_id"],
         archived=bool(row["archived"]),
         created_at=row["created_at"],

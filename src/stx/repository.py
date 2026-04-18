@@ -59,6 +59,19 @@ _GROUP_UPDATABLE: frozenset[str] = frozenset(
 )
 _EDGE_UPDATABLE: frozenset[str] = frozenset({"acyclic"})
 
+# ---- Column lists for bulk queries (omit description for memory/IO savings) ----
+
+_TASK_COLUMNS_NO_DESC = (
+    "id, workspace_id, title, status_id, priority, due_date, "
+    "archived, created_at, start_date, finish_date, group_id, "
+    "metadata, done, version"
+)
+
+_GROUP_COLUMNS_NO_DESC = (
+    "id, workspace_id, title, parent_id, archived, created_at, "
+    "metadata, version"
+)
+
 
 # ---- Internal helpers ----
 
@@ -328,7 +341,7 @@ def list_tasks(
     if not include_done:
         clauses.append("done = 0")
     rows = conn.execute(
-        f"SELECT * FROM tasks WHERE {' AND '.join(clauses)} ORDER BY id",  # noqa: S608
+        f"SELECT {_TASK_COLUMNS_NO_DESC} FROM tasks WHERE {' AND '.join(clauses)} ORDER BY id",  # noqa: S608
         (workspace_id,),
     ).fetchall()
     return tuple(row_to_task(r) for r in rows)
@@ -342,7 +355,7 @@ def list_tasks_by_status(
 ) -> tuple[Task, ...]:
     archive_clause = "" if include_archived else " AND archived = 0"
     rows = conn.execute(
-        f"SELECT * FROM tasks WHERE status_id = ?{archive_clause} ORDER BY id",
+        f"SELECT {_TASK_COLUMNS_NO_DESC} FROM tasks WHERE status_id = ?{archive_clause} ORDER BY id",
         (status_id,),
     ).fetchall()
     return tuple(row_to_task(r) for r in rows)
@@ -375,7 +388,7 @@ def list_tasks_filtered(
         params.append(f.group_id)
     where = " AND ".join(clauses)
     rows = conn.execute(
-        f"SELECT * FROM tasks WHERE {where} ORDER BY id",
+        f"SELECT {_TASK_COLUMNS_NO_DESC} FROM tasks WHERE {where} ORDER BY id",
         params,
     ).fetchall()
     return tuple(row_to_task(r) for r in rows)
@@ -431,10 +444,42 @@ def list_tasks_by_ids(
         return ()
     placeholders = ",".join("?" * len(task_ids))
     rows = conn.execute(
-        f"SELECT * FROM tasks WHERE id IN ({placeholders})",
+        f"SELECT {_TASK_COLUMNS_NO_DESC} FROM tasks WHERE id IN ({placeholders})",
         task_ids,
     ).fetchall()
     return tuple(row_to_task(r) for r in rows)
+
+
+def get_task_descriptions(
+    conn: sqlite3.Connection,
+    workspace_id: int,
+    *,
+    include_archived: bool = False,
+) -> dict[int, str]:
+    """Return {task_id: description} for tasks that have non-NULL descriptions."""
+    archive_clause = "" if include_archived else " AND archived = 0"
+    rows = conn.execute(
+        f"SELECT id, description FROM tasks "
+        f"WHERE workspace_id = ? AND description IS NOT NULL{archive_clause}",
+        (workspace_id,),
+    ).fetchall()
+    return {r["id"]: r["description"] for r in rows}
+
+
+def get_group_descriptions(
+    conn: sqlite3.Connection,
+    workspace_id: int,
+    *,
+    include_archived: bool = False,
+) -> dict[int, str]:
+    """Return {group_id: description} for groups that have non-NULL descriptions."""
+    archive_clause = "" if include_archived else " AND archived = 0"
+    rows = conn.execute(
+        f"SELECT id, description FROM groups "
+        f"WHERE workspace_id = ? AND description IS NOT NULL{archive_clause}",
+        (workspace_id,),
+    ).fetchall()
+    return {r["id"]: r["description"] for r in rows}
 
 
 # ---- Task metadata functions ----
@@ -1165,13 +1210,13 @@ def list_groups(
         archive_clause = " AND archived = 0"
     if parent_id is None:
         rows = conn.execute(
-            f"SELECT * FROM groups WHERE workspace_id = ? AND parent_id IS NULL"
+            f"SELECT {_GROUP_COLUMNS_NO_DESC} FROM groups WHERE workspace_id = ? AND parent_id IS NULL"
             f"{archive_clause} ORDER BY id",
             (workspace_id,),
         ).fetchall()
     else:
         rows = conn.execute(
-            f"SELECT * FROM groups WHERE workspace_id = ? AND parent_id = ?"
+            f"SELECT {_GROUP_COLUMNS_NO_DESC} FROM groups WHERE workspace_id = ? AND parent_id = ?"
             f"{archive_clause} ORDER BY id",
             (workspace_id, parent_id),
         ).fetchall()
@@ -1308,7 +1353,7 @@ def list_groups_by_workspace(
     if title is not None:
         params.append(title)
     rows = conn.execute(
-        f"SELECT * FROM groups "
+        f"SELECT {_GROUP_COLUMNS_NO_DESC} FROM groups "
         f"WHERE workspace_id = ?{archive_clause}{title_clause} "
         "ORDER BY id",
         params,
@@ -1338,7 +1383,7 @@ def list_child_groups(
 ) -> tuple[Group, ...]:
     archive_clause = "" if include_archived else " AND archived = 0"
     rows = conn.execute(
-        f"SELECT * FROM groups WHERE parent_id = ?{archive_clause} ORDER BY id",
+        f"SELECT {_GROUP_COLUMNS_NO_DESC} FROM groups WHERE parent_id = ?{archive_clause} ORDER BY id",
         (group_id,),
     ).fetchall()
     return tuple(row_to_group(r) for r in rows)
@@ -1375,12 +1420,12 @@ def get_group_ancestry(
     """Return groups from root to the given group, inclusive."""
     rows = conn.execute(
         "WITH RECURSIVE ancestry AS ("
-        "  SELECT id, workspace_id, title, description, metadata, parent_id, archived, created_at, version, 0 AS depth "
+        "  SELECT id, workspace_id, title, metadata, parent_id, archived, created_at, version, 0 AS depth "
         "  FROM groups WHERE id = ? "
         "  UNION ALL "
-        "  SELECT g.id, g.workspace_id, g.title, g.description, g.metadata, g.parent_id, g.archived, g.created_at, g.version, a.depth + 1 "
+        "  SELECT g.id, g.workspace_id, g.title, g.metadata, g.parent_id, g.archived, g.created_at, g.version, a.depth + 1 "
         "  FROM groups g JOIN ancestry a ON g.id = a.parent_id"
-        ") SELECT id, workspace_id, title, description, metadata, parent_id, archived, created_at, version "
+        ") SELECT id, workspace_id, title, metadata, parent_id, archived, created_at, version "
         "FROM ancestry ORDER BY depth DESC",
         (group_id,),
     ).fetchall()
