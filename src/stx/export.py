@@ -41,14 +41,15 @@ def _render_statuses_section(
 def _render_groups_section(
     conn: sqlite3.Connection,
     workspace_id: int,
+    groups: tuple,
+    group_desc_map: dict[int, str],
 ) -> list[str]:
-    all_refs = service.list_groups_for_workspace(conn, workspace_id)
-    if not all_refs:
+    if not groups:
         return []
 
-    group_by_id = {g.id: g for g in all_refs}
+    group_by_id = {g.id: g for g in groups}
     children_map: dict[int | None, list] = {}
-    for g in all_refs:
+    for g in groups:
         children_map.setdefault(g.parent_id, []).append(g)
 
     # Build group_id → task list from workspace tasks
@@ -65,8 +66,9 @@ def _render_groups_section(
         g = group_by_id[gid]
         prefix = "  " * indent + "- "
         lines.append(f"{prefix}**{_md_escape(g.title)}** ({format_group_num(g.id)})")
-        if g.description:
-            lines.append(f"  {'  ' * indent}  {_md_escape(g.description)}")
+        desc = group_desc_map.get(gid)
+        if desc:
+            lines.append(f"  {'  ' * indent}  {_md_escape(desc)}")
         for tid in task_ids_by_group.get(gid, []):
             t = task_by_id.get(tid)
             if t:
@@ -109,8 +111,9 @@ def _render_tasks_section(
 
 def _render_descriptions_section(
     tasks: tuple,
+    desc_map: dict[int, str],
 ) -> list[str]:
-    described = [(t.id, t.title, t.description) for t in tasks if t.description]
+    described = [(t.id, t.title, desc_map[t.id]) for t in tasks if t.id in desc_map]
     if not described:
         return []
     lines = ["### Descriptions", ""]
@@ -234,13 +237,22 @@ def export_full_json(conn: sqlite3.Connection) -> dict:
                 dataclasses.asdict(s)
                 for s in service.list_statuses(conn, bid, include_archived=True)
             )
-            tasks.extend(
-                dataclasses.asdict(t) for t in service.list_tasks(conn, bid, include_archived=True)
+
+            task_desc_map = repo.get_task_descriptions(
+                conn, bid, include_archived=True,
             )
-            groups.extend(
-                dataclasses.asdict(g)
-                for g in service.list_groups_for_workspace(conn, bid, include_archived=True)
+            for t in service.list_tasks(conn, bid, include_archived=True):
+                d = dataclasses.asdict(t)
+                d["description"] = task_desc_map.get(t.id)
+                tasks.append(d)
+
+            group_desc_map = repo.get_group_descriptions(
+                conn, bid, include_archived=True,
             )
+            for g in service.list_groups_for_workspace(conn, bid, include_archived=True):
+                d = dataclasses.asdict(g)
+                d["description"] = group_desc_map.get(g.id)
+                groups.append(d)
 
         edges = list(repo.list_all_edge_rows(conn))
         journal = [dataclasses.asdict(h) for h in repo.list_all_journal(conn)]
@@ -286,10 +298,13 @@ def export_markdown(conn: sqlite3.Connection) -> str:
         for t in tasks:
             tasks_by_status.setdefault(t.status_id, []).append(t)
 
+        task_desc_map = repo.get_task_descriptions(conn, bid)
+        group_desc_map = repo.get_group_descriptions(conn, bid)
+
         lines += _render_statuses_section(statuses, tasks_by_status)
-        lines += _render_groups_section(conn, bid)
+        lines += _render_groups_section(conn, bid, groups, group_desc_map)
         lines += _render_tasks_section(statuses, tasks_by_status)
-        lines += _render_descriptions_section(tasks)
+        lines += _render_descriptions_section(tasks, task_desc_map)
         lines += _render_group_metadata_section(conn, bid)
         lines += _render_task_metadata_section(tasks)
         lines += _render_edges_section(
