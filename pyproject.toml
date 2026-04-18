@@ -12,7 +12,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "pytest-cov>=6.0", "pytest-asyncio>=1.0", "pytest-xdist>=3.0", "ruff>=0.9", "mypy>=1.0"]
+dev = ["pytest>=8.0", "pytest-cov>=6.0", "pytest-asyncio>=1.0", "pytest-xdist>=3.0", "ruff>=0.9", "mypy>=1.0", "jsonschema>=4.0"]
 
 [project.scripts]
 stx = "stx.__main__:main"

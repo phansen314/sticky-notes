@@ -71,6 +71,18 @@ class ConflictError(ValueError):
     """
 
 
+class HookRejectionError(Exception):
+    """Raised when a pre-hook rejects an operation."""
+
+    def __init__(self, hook_name: str, event: str, stderr_output: str, exit_code: int):
+        self.hook_name = hook_name
+        self.event = event
+        self.stderr_output = stderr_output
+        self.exit_code = exit_code
+        reason = stderr_output.strip() or f"exit code {exit_code}"
+        super().__init__(f"pre-hook rejected {event}: {reason} (hook: {hook_name})")
+
+
 # ---- Pre-insert types (no id, no created_at) ----
 
 
