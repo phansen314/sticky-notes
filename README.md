@@ -158,6 +158,41 @@ stx task transfer task-0001 --to ops --status Backlog
 stx task transfer task-0001 --to ops --status Backlog --dry-run
 ```
 
+## Hooks
+
+Run shell commands on any stx mutation. Hooks are post-commit observers — the write always proceeds; hooks observe committed state and are fire-and-forget. Each hook receives a JSON payload on stdin describing the event.
+
+Config lives at `~/.config/stx/hooks.toml`. Commands execute via `shell=True` — trust model matches git hooks (anyone who can write the file can run arbitrary code as you).
+
+```toml
+# ~/.config/stx/hooks.toml
+
+# Desktop notification when a task is marked done.
+[[hooks]]
+event = "task.done"
+timing = "post"
+name = "notify-done"
+command = '''jq -r '"✓ " + .entity.title + " done"' | xargs -I{} notify-send "stx" "{}"'''
+
+# JSONL audit log for every task update.
+[[hooks]]
+event = "task.updated"
+timing = "post"
+name = "audit-log"
+command = "jq -c '{ts: now|strftime(\"%FT%T\"), event, entity: .entity.title, changes}' >> ~/.local/share/stx/activity.jsonl"
+```
+
+Discoverability:
+
+```sh
+stx hook events                      # list all 29 valid events
+stx hook ls                          # list configured hooks (filters: --event --timing --workspace)
+stx hook validate                    # schema-check hooks.toml (exit 4 if invalid)
+stx hook schema                      # print the full JSON Schema
+```
+
+See [`skills/stx/references/hooks.md`](skills/stx/references/hooks.md) for the full event catalog, payload shapes, recipe library, and gotchas.
+
 ## TUI
 
 Launch with `stx tui` (or `stx tui --db path/to/db`).

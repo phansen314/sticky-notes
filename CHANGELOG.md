@@ -7,10 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [0.16.0] — 2026-04-17
+## [0.16.0] — 2026-04-18
+
+### Removed
+
+- **Pre-hooks.** stx hooks are now post-only observers — the write always
+  proceeds; hooks observe committed state after the transaction. Pre-hook
+  veto semantics, `HookRejectionError`, `EXIT_HOOK_REJECTED` (exit code 7),
+  and `PRE_HOOK_TIMEOUT_SECONDS` have been removed. `timing = "pre"` in
+  `hooks.toml` now raises a config error with a migration hint: change
+  `timing` to `"post"` or omit it (defaults to `"post"`).
+
+- **`group.done` field and rollup propagation.** The `groups.done` column,
+  `compute_group_done_state`, and `_propagate_done_upward` have been removed.
+  The field was never rendered in the CLI or TUI, was not consulted by
+  `stx next`, and the planned `stx group done/undone` CLI was never built.
+  `group.done` no longer appears in JSON output or hook payloads.
+  Migration 023 drops the column from existing databases.
 
 ### Added
 
+- **`stx hook` commands.** Read-only hook management: `ls` (with `--workspace`,
+  `--globals-only`, `--event`, `--timing`, `--path` filters), `events` (list
+  all valid hook event names), `validate` (check `hooks.toml` for schema
+  errors; exits 4 on invalid config while still emitting the structured error
+  list), `schema` (print the bundled JSON Schema; supports `--output`
+  / `--overwrite`). All support `--json`/`--text`.
+- **Hooks fire on group, workspace, status, and edge mutations.** Every
+  create/update/archive and metadata set/remove/replace on these entities now
+  emits `group.*` / `workspace.*` / `status.*` / `edge.*` events at pre + post
+  timings, matching the task-event wiring already in place. Cascade-archive
+  of a group or workspace emits only the top-level `*_ARCHIVED` event —
+  per-entity hooks for bulk-affected descendants are intentionally skipped;
+  affected IDs are included in the payload instead (see Changed section).
+  Full event catalog, payload shapes, and recipe library in
+  `skills/stx/references/hooks.md`.
 - **`stx graph` command.** Generates DOT or Mermaid graph files from workspace
   edges. Flags: `--format dot|mermaid` (default: dot), `--kind` (filter by edge
   kind), `--output` (explicit path; otherwise writes a temp file). TUI: press
@@ -20,8 +51,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Bulk archive TOCTOU regression.** ID reads for
+  `cascade_archive_group`, `cascade_archive_workspace`, and `archive_status`
+  bulk paths are now inside the transaction before the bulk writes, restoring
+  journal and payload consistency under concurrent writers.
+- **`archive_status --reassign-to` done-flip now uses a single bulk `UPDATE`**
+  instead of N per-task `repo.update_task` calls. Behavior unchanged; each
+  flip is still journaled individually.
 - **TUI refresh after writes.** Modal saves and kanban status moves now
   unconditionally refresh the UI instead of relying on the data-version gate.
+
+### Changed
+
+- **Bulk archive events carry affected ID lists.** `status.archived`,
+  `group.archived`, and `workspace.archived` payloads now include optional
+  fields when the event was triggered by a bulk operation:
+  `archived_task_ids` (`archive_status --force`, cascade group/workspace),
+  `archived_group_ids` (cascade group/workspace),
+  `archived_status_ids` (cascade workspace),
+  `reassigned_task_ids` + `reassigned_to` (`archive_status --reassign-to`).
+  Fields are absent for single-entity archives. Fixes `task.archived` /
+  `task.moved` hooks silently missing bulk-affected tasks.
+- **`archive_status --reassign-to` into a terminal status now auto-sets
+  `done=True`** on all moved tasks, matching the per-task done-flip that
+  `update_task` applies. Each flip is journaled with `source="auto"`.
+- **Metadata hook firing centralized.** `_set_entity_meta` /
+  `_remove_entity_meta` / `_replace_entity_metadata` now fire `*.meta_set` /
+  `*.meta_removed` hooks internally based on the passed `entity_type`, so the
+  per-entity `set_*_meta` / `remove_*_meta` / `replace_*_metadata` service
+  wrappers are thin delegates. Behavior unchanged for existing task-meta
+  callers; centralization eliminates hook-firing boilerplate for the new
+  group/workspace wrappers.
 
 ## [0.15.0] — 2026-04-17
 
@@ -437,7 +497,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **`project edit --name/-n`** removed; use the new `project rename` instead. `project edit` now only handles description changes.
 - **Dropped `-P` / `-s` short flags** from `task create` / `task ls` / `task edit`. They case-collided with `-p` (project) and `-S` (status), making shift-key typos silently do the wrong thing. Long forms `--priority` and `--search` remain. Breaking for any script relying on the shorts.
 
-[Unreleased]: https://github.com/phansen314/stx/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/phansen314/stx/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/phansen314/stx/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/phansen314/stx/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/phansen314/stx/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/phansen314/stx/compare/v0.12.0...v0.13.0

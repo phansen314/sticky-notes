@@ -13,6 +13,7 @@ from typing import Any
 from . import repository as repo
 from .connection import transaction
 from .formatting import parse_task_num
+from .hooks import HookEvent, fire_hooks
 from .mappers import (
     group_to_detail,
     group_to_ref,
@@ -278,6 +279,67 @@ def _record_entity_changes(
         )
 
 
+def _workspace_name(conn: sqlite3.Connection, workspace_id: int) -> str | None:
+    ws = repo.get_workspace(conn, workspace_id)
+    return ws.name if ws is not None else None
+
+
+# Map EntityType → hook payload entity_type string ("task", "group", ...).
+# Kept separate from EntityType itself so the journal enum and the hook
+# payload vocabulary can evolve independently.
+_HOOK_ENTITY_TYPE: dict[EntityType, str] = {
+    EntityType.TASK: "task",
+    EntityType.GROUP: "group",
+    EntityType.WORKSPACE: "workspace",
+    EntityType.STATUS: "status",
+    EntityType.EDGE: "edge",
+}
+
+# Per-entity metadata event pairs used by generic meta helpers.
+_META_SET_EVENT: dict[EntityType, HookEvent] = {
+    EntityType.TASK: HookEvent.TASK_META_SET,
+    EntityType.GROUP: HookEvent.GROUP_META_SET,
+    EntityType.WORKSPACE: HookEvent.WORKSPACE_META_SET,
+    EntityType.EDGE: HookEvent.EDGE_META_SET,
+}
+_META_REMOVED_EVENT: dict[EntityType, HookEvent] = {
+    EntityType.TASK: HookEvent.TASK_META_REMOVED,
+    EntityType.GROUP: HookEvent.GROUP_META_REMOVED,
+    EntityType.WORKSPACE: HookEvent.WORKSPACE_META_REMOVED,
+    EntityType.EDGE: HookEvent.EDGE_META_REMOVED,
+}
+
+
+def _build_change_dict(old: Any, new_fields: dict[str, Any]) -> dict[str, Any]:
+    """Return {field: {"old": old_val, "new": new_val}} for fields whose value differs."""
+    result: dict[str, Any] = {}
+    for field, new_val in new_fields.items():
+        old_val = getattr(old, field, None)
+        if old_val != new_val:
+            result[field] = {"old": old_val, "new": new_val}
+    return result
+
+
+def _determine_task_events(changes: dict[str, Any]) -> list[HookEvent]:
+    """Return the list of HookEvents implied by a change dict ({field: {"old","new"}})."""
+    events: list[HookEvent] = []
+    specific: set[str] = set()
+    if "status_id" in changes:
+        events.append(HookEvent.TASK_MOVED)
+        specific.add("status_id")
+    if "done" in changes:
+        new_done = changes["done"]["new"]
+        events.append(HookEvent.TASK_DONE if new_done else HookEvent.TASK_UNDONE)
+        specific.add("done")
+    if "group_id" in changes:
+        new_group = changes["group_id"]["new"]
+        events.append(HookEvent.TASK_ASSIGNED if new_group is not None else HookEvent.TASK_UNASSIGNED)
+        specific.add("group_id")
+    if any(k not in specific for k in changes):
+        events.append(HookEvent.TASK_UPDATED)
+    return events
+
+
 def _record_edge_change(
     conn: sqlite3.Connection,
     from_type: str,
@@ -334,8 +396,16 @@ def _record_edge_change(
 
 
 def create_workspace(conn: sqlite3.Connection, name: str) -> Workspace:
+    proposed = {"name": name}
     with transaction(conn), _friendly_errors():
-        return repo.insert_workspace(conn, NewWorkspace(name=name))
+        result = repo.insert_workspace(conn, NewWorkspace(name=name))
+    fire_hooks(
+        HookEvent.WORKSPACE_CREATED,
+        workspace_id=result.id, workspace_name=result.name,
+        entity_type="workspace", entity_id=result.id, entity=result,
+        proposed=proposed,
+    )
+    return result
 
 
 def get_workspace(conn: sqlite3.Connection, workspace_id: int) -> Workspace:
@@ -371,14 +441,26 @@ def update_workspace(
     changes: dict[str, Any],
     source: str = "cli",
 ) -> Workspace:
+    if not changes:
+        return get_workspace(conn, workspace_id)
+    old = get_workspace(conn, workspace_id)
+    pre_changes = _build_change_dict(old, changes)
+    if not pre_changes:
+        return old
     with transaction(conn), _friendly_errors():
-        old = repo.get_workspace(conn, workspace_id)
         result = repo.update_workspace(conn, workspace_id, changes)
-        if old is not None:
-            _record_entity_changes(
-                conn, EntityType.WORKSPACE, workspace_id, workspace_id, old, changes, source
-            )
-        return result
+        _record_entity_changes(
+            conn, EntityType.WORKSPACE, workspace_id, workspace_id, old, changes, source
+        )
+    post_raw = {k: getattr(result, k) for k in changes}
+    post_changes = _build_change_dict(old, post_raw)
+    fire_hooks(
+        HookEvent.WORKSPACE_UPDATED,
+        workspace_id=old.id, workspace_name=result.name,
+        entity_type="workspace", entity_id=workspace_id, entity=result,
+        changes=post_changes,
+    )
+    return result
 
 
 # ---- Status ----
@@ -389,8 +471,17 @@ def create_status(
     workspace_id: int,
     name: str,
 ) -> Status:
+    ws_name = _workspace_name(conn, workspace_id)
+    proposed = {"workspace_id": workspace_id, "name": name}
     with transaction(conn), _friendly_errors():
-        return repo.insert_status(conn, NewStatus(workspace_id=workspace_id, name=name))
+        result = repo.insert_status(conn, NewStatus(workspace_id=workspace_id, name=name))
+    fire_hooks(
+        HookEvent.STATUS_CREATED,
+        workspace_id=workspace_id, workspace_name=ws_name,
+        entity_type="status", entity_id=result.id, entity=result,
+        proposed=proposed,
+    )
+    return result
 
 
 def get_status(conn: sqlite3.Connection, status_id: int) -> Status:
@@ -429,6 +520,13 @@ def update_status(
     changes: dict[str, Any],
     source: str = "cli",
 ) -> Status:
+    if not changes:
+        return get_status(conn, status_id)
+    old = get_status(conn, status_id)
+    pre_changes = _build_change_dict(old, changes)
+    if not pre_changes:
+        return old
+    ws_name = _workspace_name(conn, old.workspace_id)
     with transaction(conn), _friendly_errors():
         if changes.get("archived") is True:
             active_tasks = repo.list_tasks_by_status(conn, status_id)
@@ -436,13 +534,19 @@ def update_status(
                 raise ValueError(
                     f"status has {len(active_tasks)} active task(s); move or archive them first"
                 )
-        old = repo.get_status(conn, status_id)
         result = repo.update_status(conn, status_id, changes)
-        if old is not None:
-            _record_entity_changes(
-                conn, EntityType.STATUS, status_id, old.workspace_id, old, changes, source
-            )
-        return result
+        _record_entity_changes(
+            conn, EntityType.STATUS, status_id, old.workspace_id, old, changes, source
+        )
+    post_raw = {k: getattr(result, k) for k in changes}
+    post_changes = _build_change_dict(old, post_raw)
+    fire_hooks(
+        HookEvent.STATUS_UPDATED,
+        workspace_id=old.workspace_id, workspace_name=ws_name,
+        entity_type="status", entity_id=status_id, entity=result,
+        changes=post_changes,
+    )
+    return result
 
 
 def archive_status(
@@ -454,9 +558,21 @@ def archive_status(
     source: str = "cli",
 ) -> Status:
     """Archive a status, optionally handling active tasks via reassign or force-archive."""
+    pre = get_status(conn, status_id)
+    ws_name = _workspace_name(conn, pre.workspace_id)
+    archive_changes = {"archived": {"old": pre.archived, "new": True}}
     with transaction(conn), _friendly_errors():
         old = repo.get_status(conn, status_id)
         active_tasks = repo.list_tasks_by_status(conn, status_id)
+        if reassign_to_status_id is not None and active_tasks:
+            hook_extras: dict = {
+                "reassigned_task_ids": [t.id for t in active_tasks],
+                "reassigned_to": reassign_to_status_id,
+            }
+        elif force and active_tasks:
+            hook_extras = {"archived_task_ids": [t.id for t in active_tasks]}
+        else:
+            hook_extras = {}
         if active_tasks:
             if reassign_to_status_id is not None:
                 target = repo.get_status(conn, reassign_to_status_id)
@@ -482,6 +598,26 @@ def archive_status(
                         {"status_id": reassign_to_status_id},
                         source,
                     )
+                if target.is_terminal:
+                    conn.execute(
+                        "UPDATE tasks SET done = 1, version = version + 1 "
+                        "WHERE status_id = :sid AND archived = 0 AND done = 0",
+                        {"sid": reassign_to_status_id},
+                    )
+                    for task in active_tasks:
+                        if not task.done:
+                            repo.insert_journal_entry(
+                                conn,
+                                NewJournalEntry(
+                                    entity_type=EntityType.TASK,
+                                    entity_id=task.id,
+                                    workspace_id=task.workspace_id,
+                                    field="done",
+                                    old_value=str(False),
+                                    new_value=str(True),
+                                    source="auto",
+                                ),
+                            )
             elif force:
                 repo.archive_tasks_by_status(conn, status_id)
                 for task in active_tasks:
@@ -510,7 +646,14 @@ def archive_status(
                 {"archived": True},
                 source,
             )
-        return result
+    fire_hooks(
+        HookEvent.STATUS_ARCHIVED,
+        workspace_id=pre.workspace_id, workspace_name=ws_name,
+        entity_type="status", entity_id=status_id, entity=result,
+        changes=archive_changes,
+        **hook_extras,
+    )
+    return result
 
 
 # ---- Task ----
@@ -540,13 +683,25 @@ def create_task(
     if group_id is not None:
         fields["group_id"] = group_id
     _validate_task_fields(fields, workspace_id=workspace_id, conn=conn)
+    proposed = {
+        "workspace_id": workspace_id,
+        "title": title,
+        "status_id": status_id,
+        "description": description,
+        "priority": priority,
+        "due_date": due_date,
+        "start_date": start_date,
+        "finish_date": finish_date,
+        "group_id": group_id,
+    }
+    ws_name = _workspace_name(conn, workspace_id)
     with transaction(conn), _friendly_errors():
         # Mirror the status-driven done auto-set from _update_task_body: a task
         # created directly into a terminal status starts as done=True so it
         # doesn't linger on the `stx next` frontier.
         status = repo.get_status(conn, status_id)
         initial_done = bool(status.is_terminal) if status is not None else False
-        return repo.insert_task(
+        task = repo.insert_task(
             conn,
             NewTask(
                 workspace_id=workspace_id,
@@ -561,6 +716,20 @@ def create_task(
                 done=initial_done,
             ),
         )
+    fire_hooks(
+        HookEvent.TASK_CREATED,
+        workspace_id=workspace_id, workspace_name=ws_name,
+        entity_type="task", entity_id=task.id, entity=task,
+        proposed=proposed,
+    )
+    if task.done:
+        fire_hooks(
+            HookEvent.TASK_DONE,
+            workspace_id=workspace_id, workspace_name=ws_name,
+            entity_type="task", entity_id=task.id, entity=task,
+            changes={"done": {"old": False, "new": True}},
+        )
+    return task
 
 
 def get_task(conn: sqlite3.Connection, task_id: int) -> Task:
@@ -710,17 +879,26 @@ def update_task(
 ) -> Task:
     if not changes:
         return get_task(conn, task_id)
-    parents: set[int] = set()
+    old = get_task(conn, task_id)
+    ws_name = _workspace_name(conn, old.workspace_id)
+    pre_changes = _build_change_dict(old, changes)
+    if not pre_changes:
+        return old
     with transaction(conn), _friendly_errors():
         result = _update_task_body(conn, task_id, changes, source,
-                                   expected_version=expected_version,
-                                   _parents_out=parents)
-    # Post-commit propagation: each rollup runs in its own fresh transaction
-    # so it reads the fully-committed state (including concurrent agents'
-    # task writes that committed while this transaction was open).
-    for gid in parents:
-        with transaction(conn):
-            _propagate_done_upward(conn, gid, "auto")
+                                   expected_version=expected_version)
+    post_raw = {k: getattr(result, k) for k in changes}
+    if result.done != old.done:  # include auto-done from terminal status
+        post_raw["done"] = result.done
+    post_changes = _build_change_dict(old, post_raw)
+    post_events = _determine_task_events(post_changes)
+    for event in post_events:
+        fire_hooks(
+            event,
+            workspace_id=old.workspace_id, workspace_name=ws_name,
+            entity_type="task", entity_id=task_id, entity=result,
+            changes=post_changes,
+        )
     return result
 
 
@@ -753,7 +931,6 @@ def _update_task_body(
     source: str,
     *,
     expected_version: int | None = None,
-    _parents_out: set[int] | None = None,
 ) -> Task:
     """Inner body of update_task. Assumes the caller holds a transaction.
 
@@ -763,15 +940,8 @@ def _update_task_body(
 
     `expected_version` — when provided, the first DB write uses CAS
     (``WHERE version = expected_version``). Subsequent writes within the same
-    body (auto-done flip, propagation) do NOT use CAS; the first write already
-    bumped the version, and those are unconditional follow-ups in the same
-    transaction.
-
-    `_parents_out` — when provided, affected parent group IDs are added to
-    this set instead of propagating inline. The caller must propagate in a
-    separate post-commit transaction so the rollup reads see committed state
-    from concurrent agents. When None, falls back to inline propagation
-    (snapshot-isolated — correct for single-agent use, stale under concurrency).
+    body (auto-done flip) do NOT use CAS; the first write already bumped the
+    version, and those are unconditional follow-ups in the same transaction.
     """
     old = get_task(conn, task_id)
     _validate_task_update(conn, old, changes)
@@ -805,64 +975,7 @@ def _update_task_body(
                     source="auto",
                 ),
             )
-    # Propagate done up to parent groups whenever something that affects the
-    # parent rollup changed: done itself, archived (changes child count),
-    # group_id (moved between parents — both parents need recompute).
-    if updated.done != old.done or updated.archived != old.archived or updated.group_id != old.group_id:
-        if old.group_id is not None:
-            if _parents_out is not None:
-                _parents_out.add(old.group_id)
-            else:
-                _propagate_done_upward(conn, old.group_id, "auto")
-        if updated.group_id is not None and updated.group_id != old.group_id:
-            if _parents_out is not None:
-                _parents_out.add(updated.group_id)
-            else:
-                _propagate_done_upward(conn, updated.group_id, "auto")
     return updated
-
-
-def _propagate_done_upward(
-    conn: sqlite3.Connection,
-    group_id: int,
-    source: str,
-) -> None:
-    """Walk from `group_id` up the parent chain, recomputing each group's
-    `done` rollup. Stops once a recompute makes no change or the root is
-    reached. Archived groups are skipped.
-
-    **Must be called in a separate transaction from the entity write that
-    triggered the rollup.** Running inside the same transaction causes
-    SQLite's snapshot isolation to hide concurrent agents' committed task
-    writes, producing a stale rollup result. Post-commit callers see the
-    fully-committed state from all connections.
-
-    The early-exit on no-change is correct: if a group's done state didn't
-    flip, its parent's child set is unchanged so the parent can't have flipped
-    either.
-    """
-    current_id: int | None = group_id
-    while current_id is not None:
-        group = repo.get_group(conn, current_id)
-        if group is None or group.archived:
-            return
-        new_done = repo.compute_group_done_state(conn, current_id)
-        if new_done == group.done:
-            return
-        repo.update_group(conn, current_id, {"done": new_done})
-        repo.insert_journal_entry(
-            conn,
-            NewJournalEntry(
-                entity_type=EntityType.GROUP,
-                entity_id=current_id,
-                workspace_id=group.workspace_id,
-                field="done",
-                old_value=str(group.done),
-                new_value=str(new_done),
-                source=source,
-            ),
-        )
-        current_id = group.parent_id
 
 
 def move_task(
@@ -1168,8 +1281,15 @@ def move_task_to_workspace(
     *,
     source: str,
 ) -> Task:
+    old = get_task(conn, task_id)
+    src_ws = {"id": old.workspace_id, "name": _workspace_name(conn, old.workspace_id)}
+    tgt_ws = {"id": target_workspace_id, "name": _workspace_name(conn, target_workspace_id)}
+    transfer_changes = {
+        "workspace_id": {"old": old.workspace_id, "new": target_workspace_id},
+        "status_id": {"old": old.status_id, "new": target_status_id},
+    }
     with transaction(conn), _friendly_errors():
-        old, can_move, reason, _ = _validate_move_to_workspace(
+        old_inner, can_move, reason, _ = _validate_move_to_workspace(
             conn,
             task_id,
             target_workspace_id,
@@ -1182,13 +1302,13 @@ def move_task_to_workspace(
             conn,
             NewTask(
                 workspace_id=target_workspace_id,
-                title=old.title,
+                title=old_inner.title,
                 status_id=target_status_id,
-                description=old.description,
-                priority=old.priority,
-                due_date=old.due_date,
-                start_date=old.start_date,
-                finish_date=old.finish_date,
+                description=old_inner.description,
+                priority=old_inner.priority,
+                due_date=old_inner.due_date,
+                start_date=old_inner.start_date,
+                finish_date=old_inner.finish_date,
             ),
         )
 
@@ -1196,10 +1316,19 @@ def move_task_to_workspace(
 
         repo.update_task(conn, task_id, {"archived": True})
         _record_entity_changes(
-            conn, EntityType.TASK, task_id, old.workspace_id, old, {"archived": True}, source
+            conn, EntityType.TASK, task_id, old_inner.workspace_id, old_inner, {"archived": True}, source
         )
         # Refetch: `new` was built before metadata was attached.
-        return get_task(conn, new.id)
+        result = get_task(conn, new.id)
+    fire_hooks(
+        HookEvent.TASK_TRANSFERRED,
+        workspace_id=old.workspace_id, workspace_name=src_ws["name"],
+        entity_type="task", entity_id=result.id, entity=result,
+        changes=transfer_changes,
+        source_workspace=src_ws,
+        target_workspace=tgt_ws,
+    )
+    return result
 
 
 # ---- Entity metadata ----
@@ -1275,18 +1404,27 @@ def _set_entity_meta(
 ) -> Any:
     """Generic entity-metadata write. Validates the key and value length,
     persists via `setter`, and returns the new entity built from the old
-    one — skipping a redundant re-fetch.
+    one — skipping a redundant re-fetch. Fires meta_set hooks around the
+    write when the value actually changes.
     """
     normalized = _normalize_meta_key(key)
     if len(value) > _META_VALUE_MAX:
         raise ValueError(f"metadata value must be \u2264 {_META_VALUE_MAX} characters")
+    pre_entity = fetcher(conn, entity_id)
+    if pre_entity is None:
+        raise LookupError(f"{entity_name} {entity_id} not found")
+    hook_event = _META_SET_EVENT.get(entity_type)
+    hook_type_name = _HOOK_ENTITY_TYPE.get(entity_type)
+    pre_ws_id = workspace_id_of(pre_entity)
+    pre_ws_name = _workspace_name(conn, pre_ws_id)
     with transaction(conn), _friendly_errors():
         old_entity = fetcher(conn, entity_id)
         if old_entity is None:
             raise LookupError(f"{entity_name} {entity_id} not found")
         old_value = old_entity.metadata.get(normalized)
         setter(conn, entity_id, normalized, value)
-        if old_value != value:
+        changed = old_value != value
+        if changed:
             repo.insert_journal_entry(
                 conn,
                 NewJournalEntry(
@@ -1299,10 +1437,18 @@ def _set_entity_meta(
                     source=source,
                 ),
             )
-        return dataclasses.replace(
+        result = dataclasses.replace(
             old_entity,
             metadata={**old_entity.metadata, normalized: value},
         )
+    if changed and hook_event is not None:
+        fire_hooks(
+            hook_event,
+            workspace_id=pre_ws_id, workspace_name=pre_ws_name,
+            entity_type=hook_type_name, entity_id=entity_id, entity=result,
+            meta_key=normalized, meta_value=value,
+        )
+    return result
 
 
 def _remove_entity_meta(
@@ -1319,9 +1465,19 @@ def _remove_entity_meta(
 ) -> str:
     """Generic entity-metadata removal. Raises ``LookupError`` if the key
     isn't present on the entity. Returns the old value atomically so
-    callers don't need a separate read.
+    callers don't need a separate read. Fires meta_removed hooks around
+    the write.
     """
     normalized = _normalize_meta_key(key)
+    pre_entity = fetcher(conn, entity_id)
+    if pre_entity is None:
+        raise LookupError(f"{entity_name} {entity_id} not found")
+    if normalized not in pre_entity.metadata:
+        raise LookupError(f"metadata key {key!r} not found on {entity_name} {entity_id}")
+    hook_event = _META_REMOVED_EVENT.get(entity_type)
+    hook_type_name = _HOOK_ENTITY_TYPE.get(entity_type)
+    pre_ws_id = workspace_id_of(pre_entity)
+    pre_ws_name = _workspace_name(conn, pre_ws_id)
     with transaction(conn), _friendly_errors():
         old = fetcher(conn, entity_id)
         if old is None:
@@ -1342,7 +1498,15 @@ def _remove_entity_meta(
                 source=source,
             ),
         )
-        return old_value
+    if hook_event is not None:
+        new_entity = fetcher(conn, entity_id)
+        fire_hooks(
+            hook_event,
+            workspace_id=pre_ws_id, workspace_name=pre_ws_name,
+            entity_type=hook_type_name, entity_id=entity_id, entity=new_entity,
+            meta_key=normalized, meta_value=None,
+        )
+    return old_value
 
 
 def _replace_entity_metadata(
@@ -1373,6 +1537,24 @@ def _replace_entity_metadata(
                 f"metadata value for key {key!r} must be \u2264 {_META_VALUE_MAX} characters"
             )
         normalized[key] = value
+    pre_entity = fetcher(conn, entity_id)
+    if pre_entity is None:
+        raise LookupError(f"{entity_name} {entity_id} not found")
+    pre_ws_id = workspace_id_of(pre_entity)
+    pre_ws_name = _workspace_name(conn, pre_ws_id)
+    hook_type_name = _HOOK_ENTITY_TYPE.get(entity_type)
+    set_event = _META_SET_EVENT.get(entity_type)
+    removed_event = _META_REMOVED_EVENT.get(entity_type)
+    # Collect (key, new_value, event) for keys that actually change so we can
+    # fire one hook per key before and after the bulk write.
+    key_deltas: list[tuple[str, str | None, HookEvent]] = []
+    for k in set(pre_entity.metadata) | set(normalized):
+        old_v = pre_entity.metadata.get(k)
+        new_v = normalized.get(k)
+        if old_v != new_v:
+            event = set_event if new_v is not None else removed_event
+            if event is not None:
+                key_deltas.append((k, new_v, event))
     with transaction(conn), _friendly_errors():
         old_entity = fetcher(conn, entity_id)
         if old_entity is None:
@@ -1396,7 +1578,15 @@ def _replace_entity_metadata(
                         source=source,
                     ),
                 )
-        return dataclasses.replace(old_entity, metadata=dict(normalized))
+        result = dataclasses.replace(old_entity, metadata=dict(normalized))
+    for k, new_v, event in key_deltas:
+        fire_hooks(
+            event,
+            workspace_id=pre_ws_id, workspace_name=pre_ws_name,
+            entity_type=hook_type_name, entity_id=entity_id, entity=result,
+            meta_key=k, meta_value=new_v,
+        )
+    return result
 
 
 # ---- Task metadata ----
@@ -1456,8 +1646,8 @@ def replace_task_metadata(
     source: str,
 ) -> Task:
     """Atomically replace a task's entire metadata blob. Each added, changed,
-    or removed key emits a `meta.<key>` journal entry via
-    `_replace_entity_metadata`.
+    or removed key emits a `meta.<key>` journal entry and a meta_set /
+    meta_removed hook via ``_replace_entity_metadata``.
     """
     return _replace_entity_metadata(
         conn,
@@ -1715,6 +1905,11 @@ def add_edge(
     if acyclic is None:
         acyclic = _default_acyclic(kind)
     acyclic_int = 1 if acyclic else 0
+    proposed_edge = {
+        "from_type": from_type, "from_id": from_id,
+        "to_type": to_type, "to_id": to_id,
+        "kind": kind, "acyclic": bool(acyclic),
+    }
     with transaction(conn), _friendly_errors():
         from_ws, from_archived = _resolve_edge_node(conn, from_type, from_id)
         to_ws, to_archived = _resolve_edge_node(conn, to_type, to_id)
@@ -1780,6 +1975,24 @@ def add_edge(
                 acyclic=acyclic_int,
                 source=source,
             )
+    # Re-read post-commit so the entity dict carries the fresh version (stale
+    # snapshot would violate the edgeEntity schema under concurrent writers).
+    post_entity = _edge_entity_snapshot(
+        conn, from_type, from_id, to_type, to_id, kind
+    ) or {
+        "from_type": from_type, "from_id": from_id,
+        "to_type": to_type, "to_id": to_id,
+        "workspace_id": from_ws, "kind": kind,
+        "acyclic": bool(acyclic_int), "metadata": {},
+        "archived": False, "version": 0,
+    }
+    fire_hooks(
+        HookEvent.EDGE_CREATED,
+        workspace_id=from_ws, workspace_name=_workspace_name(conn, from_ws),
+        entity_type="edge", entity_id=from_id,
+        entity=post_entity,
+        proposed=proposed_edge,
+    )
     return kind
 
 
@@ -1802,6 +2015,20 @@ def archive_edge(
     from_type, from_id = src
     to_type, to_id = dst
     kind = _normalize_edge_kind(kind)
+    pre_row = repo.get_edge_detail_row(conn, from_type, from_id, to_type, to_id, kind)
+    if pre_row is not None and not pre_row["archived"]:
+        pre_ws = pre_row["workspace_id"]
+        pre_entity = {
+            "from_type": from_type, "from_id": from_id,
+            "to_type": to_type, "to_id": to_id,
+            "workspace_id": pre_ws, "kind": kind,
+            "acyclic": bool(pre_row["acyclic"]),
+            "metadata": repo.get_edge_metadata(conn, from_type, from_id, to_type, to_id, kind),
+            "archived": False, "version": int(pre_row["version"]),
+        }
+    else:
+        pre_entity = None
+        pre_ws = None
     with transaction(conn), _friendly_errors():
         active = repo.get_active_edge(conn, from_type, from_id, to_type, to_id, kind)
         if active is None:
@@ -1826,6 +2053,18 @@ def archive_edge(
             kind=kind,
             acyclic=active[1],
             source=source,
+        )
+    if pre_entity is not None:
+        # Re-read post-commit for fresh `version`. `_edge_entity_snapshot` skips
+        # archived rows, so read the row directly.
+        post_row = repo.get_edge_detail_row(conn, from_type, from_id, to_type, to_id, kind)
+        post_version = int(post_row["version"]) if post_row is not None else pre_entity["version"] + 1
+        fire_hooks(
+            HookEvent.EDGE_ARCHIVED,
+            workspace_id=pre_ws, workspace_name=_workspace_name(conn, pre_ws),
+            entity_type="edge", entity_id=from_id,
+            entity={**pre_entity, "archived": True, "version": post_version},
+            changes={"archived": {"old": False, "new": True}},
         )
     return kind
 
@@ -1886,6 +2125,32 @@ def get_edge_meta(
     return meta[normalized]
 
 
+def _edge_entity_snapshot(
+    conn: sqlite3.Connection,
+    from_type: str, from_id: int,
+    to_type: str, to_id: int,
+    kind: str,
+    *,
+    metadata: dict[str, str] | None = None,
+) -> dict | None:
+    """Build an edge-entity dict shaped like `edgeEntity` in the hook schema,
+    for inclusion in hook payloads. Returns None if the edge is not active.
+    """
+    row = repo.get_edge_detail_row(conn, from_type, from_id, to_type, to_id, kind)
+    if row is None or row["archived"]:
+        return None
+    if metadata is None:
+        metadata = repo.get_edge_metadata(conn, from_type, from_id, to_type, to_id, kind)
+    return {
+        "from_type": from_type, "from_id": from_id,
+        "to_type": to_type, "to_id": to_id,
+        "workspace_id": row["workspace_id"], "kind": kind,
+        "acyclic": bool(row["acyclic"]),
+        "metadata": metadata,
+        "archived": False, "version": int(row["version"]),
+    }
+
+
 def set_edge_meta(
     conn: sqlite3.Connection,
     from_type: str,
@@ -1901,11 +2166,18 @@ def set_edge_meta(
     if len(value) > _META_VALUE_MAX:
         raise ValueError(f"metadata value must be \u2264 {_META_VALUE_MAX} characters")
     workspace_id = repo.get_edge_workspace_id(conn, from_type, from_id, to_type, to_id, kind)
+    changed: bool = False
+    pre_snapshot: dict | None = None
     with transaction(conn), _friendly_errors():
         old_meta = repo.get_edge_metadata(conn, from_type, from_id, to_type, to_id, kind)
-        old_value = old_meta.get(normalized)
+        old_value_inside = old_meta.get(normalized)
+        changed = old_value_inside != value
+        if changed:
+            pre_snapshot = _edge_entity_snapshot(
+                conn, from_type, from_id, to_type, to_id, kind, metadata=old_meta
+            )
         repo.set_edge_metadata_key(conn, from_type, from_id, to_type, to_id, kind, normalized, value)
-        if old_value != value:
+        if changed:
             repo.insert_journal_entry(
                 conn,
                 NewJournalEntry(
@@ -1913,11 +2185,26 @@ def set_edge_meta(
                     entity_id=from_id,
                     workspace_id=workspace_id,
                     field=f"meta.{normalized}",
-                    old_value=old_value,
+                    old_value=old_value_inside,
                     new_value=value,
                     source=source,
                 ),
             )
+    if changed and pre_snapshot is not None:
+        # Re-read post-commit so `version` reflects the write (stale pre_snapshot
+        # version would violate the edgeEntity schema invariant).
+        post_snapshot = _edge_entity_snapshot(
+            conn, from_type, from_id, to_type, to_id, kind
+        ) or {
+            **pre_snapshot,
+            "metadata": {**pre_snapshot["metadata"], normalized: value},
+        }
+        fire_hooks(
+            HookEvent.EDGE_META_SET,
+            workspace_id=workspace_id, workspace_name=_workspace_name(conn, workspace_id),
+            entity_type="edge", entity_id=from_id, entity=post_snapshot,
+            meta_key=normalized, meta_value=value,
+        )
 
 
 def remove_edge_meta(
@@ -1932,6 +2219,15 @@ def remove_edge_meta(
 ) -> str:
     normalized = _normalize_meta_key(key)
     workspace_id = repo.get_edge_workspace_id(conn, from_type, from_id, to_type, to_id, kind)
+    pre_meta = repo.get_edge_metadata(conn, from_type, from_id, to_type, to_id, kind)
+    if normalized not in pre_meta:
+        raise LookupError(
+            f"metadata key {key!r} not found on edge "
+            f"({from_type}:{from_id} → {to_type}:{to_id} [{kind}])"
+        )
+    pre_snapshot = _edge_entity_snapshot(
+        conn, from_type, from_id, to_type, to_id, kind, metadata=pre_meta
+    )
     with transaction(conn), _friendly_errors():
         old_meta = repo.get_edge_metadata(conn, from_type, from_id, to_type, to_id, kind)
         if normalized not in old_meta:
@@ -1953,7 +2249,16 @@ def remove_edge_meta(
                 source=source,
             ),
         )
-        return old_value
+    if pre_snapshot is not None:
+        post_meta = {k: v for k, v in pre_snapshot["metadata"].items() if k != normalized}
+        fire_hooks(
+            HookEvent.EDGE_META_REMOVED,
+            workspace_id=workspace_id, workspace_name=_workspace_name(conn, workspace_id),
+            entity_type="edge", entity_id=from_id,
+            entity={**pre_snapshot, "metadata": post_meta},
+            meta_key=normalized, meta_value=None,
+        )
+    return old_value
 
 
 def replace_edge_metadata(
@@ -1975,6 +2280,17 @@ def replace_edge_metadata(
             raise ValueError(f"metadata value for key {k!r} must be \u2264 {_META_VALUE_MAX} characters")
         normalized[k] = value
     workspace_id = repo.get_edge_workspace_id(conn, from_type, from_id, to_type, to_id, kind)
+    pre_meta = repo.get_edge_metadata(conn, from_type, from_id, to_type, to_id, kind)
+    key_deltas: list[tuple[str, str | None, HookEvent]] = []
+    for k in set(pre_meta) | set(normalized):
+        old_v = pre_meta.get(k)
+        new_v = normalized.get(k)
+        if old_v != new_v:
+            event = HookEvent.EDGE_META_SET if new_v is not None else HookEvent.EDGE_META_REMOVED
+            key_deltas.append((k, new_v, event))
+    pre_snapshot = _edge_entity_snapshot(
+        conn, from_type, from_id, to_type, to_id, kind, metadata=pre_meta
+    ) if key_deltas else None
     with transaction(conn), _friendly_errors():
         old_meta = repo.get_edge_metadata(conn, from_type, from_id, to_type, to_id, kind)
         repo.replace_edge_metadata(conn, from_type, from_id, to_type, to_id, kind, json.dumps(normalized))
@@ -1994,6 +2310,15 @@ def replace_edge_metadata(
                         source=source,
                     ),
                 )
+    if pre_snapshot is not None:
+        post_snapshot = {**pre_snapshot, "metadata": dict(normalized)}
+        for k, new_v, event in key_deltas:
+            fire_hooks(
+                event,
+                workspace_id=workspace_id, workspace_name=_workspace_name(conn, workspace_id),
+                entity_type="edge", entity_id=from_id, entity=post_snapshot,
+                meta_key=k, meta_value=new_v,
+            )
 
 
 # ---- Edge detail / edit / log ----
@@ -2070,6 +2395,9 @@ def update_edge(
         normalized_changes["acyclic"] = 1 if changes["acyclic"] else 0
     if not normalized_changes:
         raise ValueError("no valid fields to update")
+    pre_entity: dict | None = None
+    pre_ws_id: int | None = None
+    pre_changes: dict | None = None
     with transaction(conn), _friendly_errors():
         row = repo.get_edge_detail_row(conn, from_type, from_id, to_type, to_id, kind)
         if row is None or row["archived"]:
@@ -2080,12 +2408,22 @@ def update_edge(
         old_acyclic = int(row["acyclic"])
         new_acyclic = normalized_changes["acyclic"]
         if new_acyclic == old_acyclic:
-            # No-op — skip write and journal.
+            # No-op — skip write, journal, and hooks.
             history = repo.list_journal_for_edge(conn, from_type, from_id, to_type, to_id)
             endpoint = f"{from_type}:{from_id}\u2192{to_type}:{to_id}"
             return row_to_edge_detail(
                 row, history=_filter_edge_history(history, endpoint, kind)
             )
+        pre_ws_id = workspace_id
+        pre_entity = {
+            "from_type": from_type, "from_id": from_id,
+            "to_type": to_type, "to_id": to_id,
+            "workspace_id": pre_ws_id, "kind": kind,
+            "acyclic": bool(old_acyclic),
+            "metadata": repo.get_edge_metadata(conn, from_type, from_id, to_type, to_id, kind),
+            "archived": False, "version": int(row["version"]),
+        }
+        pre_changes = {"acyclic": {"old": bool(old_acyclic), "new": bool(new_acyclic)}}
         repo.update_edge(
             conn, from_type, from_id, to_type, to_id, kind, normalized_changes
         )
@@ -2133,7 +2471,20 @@ def update_edge(
                 source=source,
             ),
         )
-    return get_edge_detail(conn, src, dst, kind=kind)
+    result = get_edge_detail(conn, src, dst, kind=kind)
+    if pre_entity is not None and pre_changes is not None:
+        # Re-read post-commit so `version` reflects the write.
+        post_entity = _edge_entity_snapshot(
+            conn, from_type, from_id, to_type, to_id, kind
+        ) or {**pre_entity, "acyclic": bool(new_acyclic)}
+        fire_hooks(
+            HookEvent.EDGE_UPDATED,
+            workspace_id=pre_ws_id, workspace_name=_workspace_name(conn, pre_ws_id),
+            entity_type="edge", entity_id=from_id,
+            entity=post_entity,
+            changes=pre_changes,
+        )
+    return result
 
 
 def list_journal_for_edge(
@@ -2183,6 +2534,13 @@ def create_group(
     description: str | None = None,
 ) -> Group:
     _validate_title(title, kind="group")
+    ws_name = _workspace_name(conn, workspace_id)
+    proposed = {
+        "workspace_id": workspace_id,
+        "title": title,
+        "description": description,
+        "parent_id": parent_id,
+    }
     with transaction(conn), _friendly_errors():
         get_workspace(conn, workspace_id)
         if parent_id is not None:
@@ -2195,7 +2553,7 @@ def create_group(
                 )
             if parent.archived:
                 raise ValueError(f"parent group {parent_id} is archived")
-        return repo.insert_group(
+        result = repo.insert_group(
             conn,
             NewGroup(
                 workspace_id=workspace_id,
@@ -2204,6 +2562,13 @@ def create_group(
                 parent_id=parent_id,
             ),
         )
+    fire_hooks(
+        HookEvent.GROUP_CREATED,
+        workspace_id=workspace_id, workspace_name=ws_name,
+        entity_type="group", entity_id=result.id, entity=result,
+        proposed=proposed,
+    )
+    return result
 
 
 def get_group(conn: sqlite3.Connection, group_id: int) -> Group:
@@ -2438,7 +2803,11 @@ def update_group(
 ) -> Group:
     if "title" in changes:
         _validate_title(changes["title"], kind="group")
-    parents: set[int] = set()
+    if not changes:
+        return get_group(conn, group_id)
+    pre_old = get_group(conn, group_id)
+    pre_changes = _build_change_dict(pre_old, changes)
+    ws_name = _workspace_name(conn, pre_old.workspace_id)
     with transaction(conn), _friendly_errors():
         if "parent_id" in changes:
             new_parent = changes["parent_id"]
@@ -2451,20 +2820,15 @@ def update_group(
             _record_entity_changes(
                 conn, EntityType.GROUP, group_id, old.workspace_id, old, changes, source
             )
-            # Collect parents needing rollup after commit so the propagation
-            # reads fresh committed state from concurrent agents.
-            if (
-                result.done != old.done
-                or result.archived != old.archived
-                or result.parent_id != old.parent_id
-            ):
-                if old.parent_id is not None:
-                    parents.add(old.parent_id)
-                if result.parent_id is not None:
-                    parents.add(result.parent_id)
-    for gid in parents:
-        with transaction(conn):
-            _propagate_done_upward(conn, gid, "auto")
+    post_raw = {k: getattr(result, k) for k in changes}
+    post_changes = _build_change_dict(pre_old, post_raw)
+    if post_changes:
+        fire_hooks(
+            HookEvent.GROUP_UPDATED,
+            workspace_id=pre_old.workspace_id, workspace_name=ws_name,
+            entity_type="group", entity_id=group_id, entity=result,
+            changes=post_changes,
+        )
     return result
 
 
@@ -2481,16 +2845,7 @@ def assign_task_to_group(
     """Assign a group to a task. The group must belong to the same workspace
     as the task; validation inside `_update_task_body` enforces this.
     """
-    parents: set[int] = set()
-    with transaction(conn), _friendly_errors():
-        get_task(conn, task_id)
-        get_group(conn, group_id)  # raises LookupError on miss
-        changes: dict[str, Any] = {"group_id": group_id}
-        result = _update_task_body(conn, task_id, changes, source, _parents_out=parents)
-    for gid in parents:
-        with transaction(conn):
-            _propagate_done_upward(conn, gid, "auto")
-    return result
+    return update_task(conn, task_id, {"group_id": group_id}, source)
 
 
 def unassign_task_from_group(
@@ -2718,19 +3073,20 @@ def archive_task(
     *,
     source: str,
 ) -> Task:
-    parent_group: int | None = None
+    old = get_task(conn, task_id)
+    ws_name = _workspace_name(conn, old.workspace_id)
+    archive_changes = {"archived": {"old": old.archived, "new": True}}
     with transaction(conn), _friendly_errors():
-        old = get_task(conn, task_id)
         updated = repo.update_task(conn, task_id, {"archived": True})
         _record_entity_changes(
             conn, EntityType.TASK, task_id, old.workspace_id, old, {"archived": True}, source
         )
-        parent_group = old.group_id
-    # Post-commit: archiving removes this task from the rollup count; a fresh
-    # transaction sees the correct child set including concurrent agents' writes.
-    if parent_group is not None:
-        with transaction(conn):
-            _propagate_done_upward(conn, parent_group, "auto")
+    fire_hooks(
+        HookEvent.TASK_ARCHIVED,
+        workspace_id=old.workspace_id, workspace_name=ws_name,
+        entity_type="task", entity_id=task_id, entity=updated,
+        changes=archive_changes,
+    )
     return updated
 
 
@@ -2763,7 +3119,12 @@ def cascade_archive_group(
     *,
     source: str,
 ) -> Group:
-    parent_group: int | None = None
+    # Design carve-out: bulk-archived tasks here do NOT fire TASK_ARCHIVED hooks.
+    # Per-task post-hooks on a large subtree would be expensive and the GROUP_ARCHIVED
+    # event is the correct signal for this operation.
+    pre = get_group(conn, group_id)
+    ws_name = _workspace_name(conn, pre.workspace_id)
+    archive_changes = {"archived": {"old": pre.archived, "new": True}}
     with transaction(conn), _friendly_errors():
         group = get_group(conn, group_id)
         task_ids = repo.list_active_task_ids_in_group_subtree(conn, group_id)
@@ -2774,14 +3135,19 @@ def cascade_archive_group(
         _record_bulk_archive(
             conn, EntityType.GROUP, descendant_group_ids, group.workspace_id, source
         )
-        # parent group itself is journaled via update_group below
         result = repo.update_group(conn, group_id, {"archived": True})
-        parent_group = group.parent_id
-    # Post-commit: the just-archived root's child slot is freed; propagate in a
-    # fresh transaction so the rollup sees the correct sibling state.
-    if parent_group is not None:
-        with transaction(conn):
-            _propagate_done_upward(conn, parent_group, "auto")
+    group_hook_extras: dict = {}
+    if task_ids:
+        group_hook_extras["archived_task_ids"] = list(task_ids)
+    if descendant_group_ids:
+        group_hook_extras["archived_group_ids"] = list(descendant_group_ids)
+    fire_hooks(
+        HookEvent.GROUP_ARCHIVED,
+        workspace_id=pre.workspace_id, workspace_name=ws_name,
+        entity_type="group", entity_id=group_id, entity=result,
+        changes=archive_changes,
+        **group_hook_extras,
+    )
     return result
 
 
@@ -2791,6 +3157,10 @@ def cascade_archive_workspace(
     *,
     source: str,
 ) -> Workspace:
+    # Design carve-out: bulk-archived tasks/groups here do NOT fire per-entity hooks.
+    # WORKSPACE_ARCHIVED is the correct signal for consumers.
+    pre = get_workspace(conn, workspace_id)
+    archive_changes = {"archived": {"old": pre.archived, "new": True}}
     with transaction(conn), _friendly_errors():
         task_ids = repo.list_active_task_ids_in_workspace(conn, workspace_id)
         group_ids = repo.list_active_group_ids_in_workspace(conn, workspace_id)
@@ -2801,4 +3171,19 @@ def cascade_archive_workspace(
         _record_bulk_archive(conn, EntityType.GROUP, group_ids, workspace_id, source)
         repo.archive_statuses_in_workspace(conn, workspace_id)
         _record_bulk_archive(conn, EntityType.STATUS, status_ids, workspace_id, source)
-        return repo.update_workspace(conn, workspace_id, {"archived": True})
+        result = repo.update_workspace(conn, workspace_id, {"archived": True})
+    ws_hook_extras: dict = {}
+    if task_ids:
+        ws_hook_extras["archived_task_ids"] = list(task_ids)
+    if group_ids:
+        ws_hook_extras["archived_group_ids"] = list(group_ids)
+    if status_ids:
+        ws_hook_extras["archived_status_ids"] = list(status_ids)
+    fire_hooks(
+        HookEvent.WORKSPACE_ARCHIVED,
+        workspace_id=pre.id, workspace_name=pre.name,
+        entity_type="workspace", entity_id=workspace_id, entity=result,
+        changes=archive_changes,
+        **ws_hook_extras,
+    )
+    return result

@@ -40,7 +40,6 @@ class GroupField(StrEnum):
     DESCRIPTION = "description"
     PARENT_ID = "parent_id"
     ARCHIVED = "archived"
-    DONE = "done"
 
 
 class WorkspaceField(StrEnum):
@@ -69,6 +68,7 @@ class ConflictError(ValueError):
     The caller read a row at version N but another writer has since bumped it.
     The typical response is to re-fetch the row and retry the operation.
     """
+
 
 
 # ---- Pre-insert types (no id, no created_at) ----
@@ -106,7 +106,6 @@ class NewGroup:
     title: str
     description: str | None = None
     parent_id: int | None = None
-    done: bool = False
 
 
 @dataclass(frozen=True)
@@ -173,7 +172,6 @@ class Group:
     archived: bool
     created_at: int
     metadata: dict[str, str]
-    done: bool = False
     version: int = 0
 
 

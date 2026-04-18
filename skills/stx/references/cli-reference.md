@@ -618,6 +618,35 @@ stx config del active_workspace
 
 ---
 
+## `stx hook` Subcommands
+
+Read-only inspection of the hooks engine's configuration and event surface. Hooks themselves live in `~/.config/stx/hooks.toml` (see `src/stx/hooks.py`); these commands don't mutate that file.
+
+| Subcommand | Args | Description |
+|---|---|---|
+| `ls` | `[--workspace NAME \| --globals-only] [--event NAME] [--timing post] [--path FILE]` | List configured hooks with optional filters. |
+| `events` | — | List every valid `HookEvent` value (declaration order, grouped by entity). |
+| `validate` | `[--path FILE]` | Report schema errors in `hooks.toml`. Exits 0 when valid, exit 4 when invalid (the structured error list is still emitted — JSON consumers get the full `data.errors` payload before the nonzero exit). |
+| `schema` | `[-o FILE] [--overwrite]` | Print the bundled `hook_events.schema.json` (JSON Schema draft 2020-12). `--output` writes to a file instead of stdout; `--overwrite` is required if the destination already exists. |
+
+**Filtering notes on `ls`:** `--event` must be a valid event name (invalid → exit 4 with the valid list). `--timing post` is the only valid value. `--workspace` on `ls` is an exact match against each hook's `workspace` field in the config file; it is **unrelated** to the global `-w/--workspace` flag and the active workspace. `--globals-only` restricts to hooks without a `workspace` field and is mutually exclusive with `--workspace`.
+
+**Broken configs on `ls`:** if `hooks.toml` fails to parse or has invalid entries, `ls` exits 4 with a message pointing at `stx hook validate` for the full error list.
+
+**Path override:** `--path` on `ls` and `validate` points at an alternate `hooks.toml` (default: `~/.config/stx/hooks.toml`). Missing file is treated as an empty config.
+
+```
+stx hook events
+stx hook ls
+stx hook ls --event task.created --timing post
+stx hook ls --globals-only
+stx hook ls --workspace myws --path /tmp/staged-hooks.toml
+stx hook validate                            # exit 0 if valid, 4 otherwise
+stx hook schema -o /tmp/hook-events.schema.json --overwrite
+```
+
+---
+
 ## `stx tui [--db PATH]`
 
 Launches the Textual TUI interface. No JSON output. Useful for interactive exploration — not scripted workflows.
