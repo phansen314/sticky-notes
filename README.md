@@ -158,6 +158,49 @@ stx task transfer task-0001 --to ops --status Backlog
 stx task transfer task-0001 --to ops --status Backlog --dry-run
 ```
 
+## Hooks
+
+Run shell commands on any stx mutation. Pre-hooks can veto writes by exiting non-zero; post-hooks are fire-and-forget. Hooks receive a JSON payload on stdin describing the event.
+
+Config lives at `~/.config/stx/hooks.toml`. Commands execute via `shell=True` — trust model matches git hooks (anyone who can write the file can run arbitrary code as you).
+
+```toml
+# ~/.config/stx/hooks.toml
+
+# Pre-hook: block task creation without a description on the "work" workspace.
+[[hooks]]
+event = "task.created"
+timing = "pre"
+workspace = "work"
+name = "require-description"
+command = '''
+read payload
+desc=$(echo "$payload" | jq -r '.proposed.description // ""')
+if [ -z "$desc" ]; then
+  echo "description required" >&2
+  exit 1
+fi
+'''
+
+# Post-hook: desktop notification when any task is marked done.
+[[hooks]]
+event = "task.done"
+timing = "post"
+name = "notify-done"
+command = '''jq -r '"✓ " + .entity.title + " done"' | xargs -I{} notify-send "stx" "{}"'''
+```
+
+Discoverability:
+
+```sh
+stx hook events                      # list all 29 valid events
+stx hook ls                          # list configured hooks (filters: --event --timing --workspace)
+stx hook validate                    # schema-check hooks.toml (exit 4 if invalid)
+stx hook schema                      # print the full JSON Schema
+```
+
+See [`skills/stx/references/hooks.md`](skills/stx/references/hooks.md) for the full event catalog, payload shapes, recipe library, and gotchas.
+
 ## TUI
 
 Launch with `stx tui` (or `stx tui --db path/to/db`).

@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **`stx hook` commands.** Read-only hook management: `ls` (with `--workspace`,
+  `--globals-only`, `--event`, `--timing`, `--path` filters), `events` (list
+  all valid hook event names), `validate` (check `hooks.toml` for schema
+  errors; exits 4 on invalid config while still emitting the structured error
+  list), `schema` (print the bundled JSON Schema; supports `--output`
+  / `--overwrite`). All support `--json`/`--text`.
+- **Hooks fire on group, workspace, status, and edge mutations.** Every
+  create/update/archive and metadata set/remove/replace on these entities now
+  emits `group.*` / `workspace.*` / `status.*` / `edge.*` events at pre + post
+  timings, matching the task-event wiring already in place. Cascade-archive
+  of a group or workspace emits only the top-level `*_ARCHIVED` event —
+  per-entity hooks for bulk-archived descendants are intentionally skipped.
+  Full event catalog, payload shapes, and recipe library in
+  `skills/stx/references/hooks.md`.
+
+### Changed
+
+- **Metadata hook firing centralized.** `_set_entity_meta` /
+  `_remove_entity_meta` / `_replace_entity_metadata` now fire `*.meta_set` /
+  `*.meta_removed` hooks internally based on the passed `entity_type`, so the
+  per-entity `set_*_meta` / `remove_*_meta` / `replace_*_metadata` service
+  wrappers are thin delegates. Behavior unchanged for existing task-meta
+  callers; centralization eliminates hook-firing boilerplate for the new
+  group/workspace wrappers.
+
 ## [0.16.0] — 2026-04-17
 
 ### Added

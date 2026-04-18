@@ -138,6 +138,20 @@ Entry point: `stx tui` (or `stx tui --db path/to/db`).
 
 **Config:** `~/.config/stx/tui.toml` — theme, show_archived, confirm_archive, default_priority, status_order, auto_refresh_seconds, active_workspace. Loaded via `TuiConfig` dataclass in `tui/config.py`. Status order is editable from the CLI via `stx status order <status_1> <status_2> ...` (scoped to the active workspace / `-w` override) or interactively via `shift+left/right` on a focused kanban column. Theme and `auto_refresh_seconds` are also editable in-TUI via the settings modal (`c` key, `tui/screens/config_modal.py`).
 
+## Hooks
+
+Event-driven shell hooks fire on every entity mutation. User-facing docs + recipes in `skills/stx/references/hooks.md`; CLI commands (`hook ls|events|validate|schema`) in `skills/stx/references/cli-reference.md`.
+
+- **Engine**: `src/stx/hooks.py` — 29 events in 5 payload categories (`created`, `updated`, `archived`, `meta`, `transferred`). Config path defaults to `~/.config/stx/hooks.toml`. Pre-hooks: `subprocess.run` with 10s timeout (`PRE_HOOK_TIMEOUT_SECONDS`), non-zero exit raises `HookRejectionError` → CLI exit code 7 (`EXIT_HOOK_REJECTED`). Post-hooks: `subprocess.Popen` with `start_new_session=True`, stdout/stderr to DEVNULL, never raises back.
+- **Schema**: `src/stx/hook_events.schema.json` (JSON Schema draft 2020-12). Bundled with the package; read via `load_event_schema()` or `stx hook schema`. 5 entity `$defs`: `taskEntity`, `groupEntity`, `workspaceEntity`, `statusEntity`, `edgeEntity`. `test_hooks.py::TestSchemaConformance` validates `build_payload` output against the schema for every (event, category) pair.
+- **Service integration pattern** (`src/stx/service.py`):
+  - **Non-meta create/update/archive** — explicit `fire_hooks(event, HookTiming.PRE, ...)` before `with transaction`, explicit `fire_hooks(..., POST, ...)` after commit. Pre-hook payload is a pre-tx snapshot — may be stale under concurrent writers, but optimistic-locking (version CAS) catches real conflicts.
+  - **Metadata set/remove/replace** — centralized in `_set_entity_meta` / `_remove_entity_meta` / `_replace_entity_metadata`. Those helpers fire hooks based on the passed `entity_type` via `_META_SET_EVENT` / `_META_REMOVED_EVENT` / `_HOOK_ENTITY_TYPE` lookup tables. The per-entity `set_*_meta` / `remove_*_meta` / `replace_*_metadata` wrappers are one-line delegates.
+  - **Edge metadata (composite PK)** — can't use the generic helpers. `set_edge_meta` / `remove_edge_meta` / `replace_edge_metadata` inline pre + post firing; `_edge_entity_snapshot` builds the `edgeEntity`-shaped dict and is re-called post-commit for fresh `version`.
+  - **`update_edge` and `set_edge_meta`** fire pre-hooks *inside* the transaction (before the write) to keep pre/post symmetric under races — trade-off: pre-hook subprocess runs while the SQLite write lock is held, acceptable for single-writer use.
+- **Cascade-archive carve-out**: `cascade_archive_group` and `cascade_archive_workspace` emit only the top-level `*_ARCHIVED` event. Per-entity hooks for bulk-archived descendants are intentionally skipped — running N subprocesses per bulk archive would defeat the purpose of the cascade operation.
+- **Archive payloads report honest `old`**: `archive_task`, `archive_status`, `cascade_archive_group`, `cascade_archive_workspace` all read `pre.archived` for the `changes.archived.old` field, so repeat-archive payloads correctly report `old=True` instead of lying.
+
 ## Key Design Conventions
 
 - **Separate pre-insert and persisted types** — `NewTask` (no `id`/`created_at`) vs `Task` (full row). Never use `None` as a stand-in for "not yet assigned."

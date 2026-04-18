@@ -3137,3 +3137,265 @@ class TestGraphCommand:
         assert data["ok"] is True
         assert data["data"]["format"] == "dot"
         assert data["data"]["path"] is not None
+
+
+# ---- Hook CLI ----
+
+
+@pytest.fixture
+def hooks_file(tmp_path: Path) -> Path:
+    return tmp_path / "hooks.toml"
+
+
+def _write_hooks_toml(path: Path, body: str) -> None:
+    path.write_text(body)
+
+
+class TestHookLs:
+    def test_empty_missing_file(self, cli, hooks_file):
+        out, _ = cli("hook", "ls", "--path", str(hooks_file))
+        assert "no hooks" in out
+
+    def test_empty_array(self, cli, hooks_file):
+        _write_hooks_toml(hooks_file, "hooks = []\n")
+        out, _ = cli("hook", "ls", "--path", str(hooks_file))
+        assert "no hooks" in out
+
+    def test_populated(self, cli, hooks_file):
+        _write_hooks_toml(
+            hooks_file,
+            '[[hooks]]\nevent = "task.created"\ntiming = "post"\ncommand = "echo hi"\nname = "greet"\n',
+        )
+        out, _ = cli("hook", "ls", "--path", str(hooks_file))
+        assert "[task.created]" in out
+        assert "[post]" in out
+        assert "[name='greet']" in out
+        assert "echo hi" in out
+
+    def test_disabled_marker(self, cli, hooks_file):
+        _write_hooks_toml(
+            hooks_file,
+            '[[hooks]]\nevent = "task.created"\ntiming = "post"\ncommand = "x"\nenabled = false\n',
+        )
+        out, _ = cli("hook", "ls", "--path", str(hooks_file))
+        assert "[disabled]" in out
+
+    def test_filter_event(self, cli, hooks_file):
+        _write_hooks_toml(
+            hooks_file,
+            '[[hooks]]\nevent = "task.created"\ntiming = "post"\ncommand = "a"\n'
+            '[[hooks]]\nevent = "task.archived"\ntiming = "post"\ncommand = "b"\n',
+        )
+        out, _ = cli("hook", "ls", "--path", str(hooks_file), "--event", "task.created")
+        assert "command=\"a\"" not in out  # raw toml not echoed
+        assert "[task.created]" in out
+        assert "[task.archived]" not in out
+
+    def test_filter_timing(self, cli, hooks_file):
+        _write_hooks_toml(
+            hooks_file,
+            '[[hooks]]\nevent = "task.created"\ntiming = "pre"\ncommand = "pre-cmd"\n'
+            '[[hooks]]\nevent = "task.created"\ntiming = "post"\ncommand = "post-cmd"\n',
+        )
+        out, _ = cli("hook", "ls", "--path", str(hooks_file), "--timing", "pre")
+        assert "pre-cmd" in out
+        assert "post-cmd" not in out
+
+    def test_filter_workspace(self, cli, hooks_file):
+        _write_hooks_toml(
+            hooks_file,
+            '[[hooks]]\nevent = "task.created"\ntiming = "post"\ncommand = "glob"\n'
+            '[[hooks]]\nevent = "task.created"\ntiming = "post"\ncommand = "ws"\nworkspace = "myws"\n',
+        )
+        out, _ = cli("hook", "ls", "--path", str(hooks_file), "--workspace", "myws")
+        assert "ws" in out
+        assert "[workspace=myws]" in out
+
+    def test_invalid_event_filter(self, cli, hooks_file):
+        cli(
+            "hook", "ls", "--path", str(hooks_file), "--event", "bogus.event",
+            expect_exit=4,
+        )
+
+    def test_load_error_exits_4(self, cli, hooks_file):
+        _write_hooks_toml(
+            hooks_file,
+            '[[hooks]]\nevent = "task.created"\ntiming = "post"\n',  # missing command
+        )
+        cli("hook", "ls", "--path", str(hooks_file), expect_exit=4)
+
+    def test_load_error_message_points_at_validate(self, cli, hooks_file):
+        _write_hooks_toml(
+            hooks_file,
+            '[[hooks]]\nevent = "task.created"\ntiming = "post"\n',  # missing command
+        )
+        _, err = cli("hook", "ls", "--path", str(hooks_file), expect_exit=4)
+        assert "hooks config invalid" in err
+        assert "stx hook validate" in err
+
+    def test_globals_only(self, cli, hooks_file):
+        _write_hooks_toml(
+            hooks_file,
+            '[[hooks]]\nevent = "task.created"\ntiming = "post"\ncommand = "glob"\n'
+            '[[hooks]]\nevent = "task.created"\ntiming = "post"\ncommand = "scoped"\nworkspace = "myws"\n',
+        )
+        out, _ = cli("hook", "ls", "--path", str(hooks_file), "--globals-only")
+        assert "glob" in out
+        assert "scoped" not in out
+
+    def test_globals_only_mutex_with_workspace(self, cli, hooks_file):
+        # argparse exits 2 on mutually exclusive violation
+        cli(
+            "hook", "ls", "--path", str(hooks_file),
+            "--globals-only", "--workspace", "x",
+            expect_exit=2,
+        )
+
+    def test_json_output(self, cli, hooks_file, monkeypatch):
+        monkeypatch.setattr("stx.cli._stdout_is_tty", lambda: False)
+        _write_hooks_toml(
+            hooks_file,
+            '[[hooks]]\nevent = "task.created"\ntiming = "post"\ncommand = "echo hi"\n',
+        )
+        out, _ = cli("hook", "ls", "--path", str(hooks_file))
+        data = json.loads(out)
+        assert data["ok"] is True
+        assert len(data["data"]) == 1
+        assert data["data"][0]["event"] == "task.created"
+        assert data["data"][0]["timing"] == "post"
+
+
+class TestHookEvents:
+    def test_lists_all_events(self, cli):
+        from stx.hooks import HookEvent
+
+        out, _ = cli("hook", "events")
+        for e in HookEvent:
+            assert e.value in out
+
+    def test_count_matches_enum(self, cli, monkeypatch):
+        from stx.hooks import HookEvent
+
+        monkeypatch.setattr("stx.cli._stdout_is_tty", lambda: False)
+        out, _ = cli("hook", "events")
+        data = json.loads(out)
+        assert set(data["data"]) == {e.value for e in HookEvent}
+
+
+class TestHookValidate:
+    def test_valid_config(self, cli, hooks_file):
+        _write_hooks_toml(
+            hooks_file,
+            '[[hooks]]\nevent = "task.created"\ntiming = "post"\ncommand = "echo"\n',
+        )
+        out, _ = cli("hook", "validate", "--path", str(hooks_file))
+        assert "valid" in out
+
+    def test_missing_file_is_valid(self, cli, hooks_file):
+        out, _ = cli("hook", "validate", "--path", str(hooks_file))
+        assert "valid" in out
+
+    def test_invalid_config(self, cli, hooks_file):
+        _write_hooks_toml(
+            hooks_file,
+            '[[hooks]]\nevent = "bogus"\ntiming = "post"\ncommand = "x"\n',
+        )
+        out, _ = cli("hook", "validate", "--path", str(hooks_file))
+        assert "error" in out.lower()
+        assert "bogus" in out
+
+    def test_json_output_invalid(self, cli, hooks_file, monkeypatch):
+        monkeypatch.setattr("stx.cli._stdout_is_tty", lambda: False)
+        _write_hooks_toml(
+            hooks_file,
+            '[[hooks]]\nevent = "bogus"\ntiming = "post"\ncommand = "x"\n',
+        )
+        out, _ = cli("hook", "validate", "--path", str(hooks_file))
+        data = json.loads(out)
+        assert data["ok"] is True
+        assert data["data"]["valid"] is False
+        assert len(data["data"]["errors"]) >= 1
+
+    def test_json_output_valid(self, cli, hooks_file, monkeypatch):
+        monkeypatch.setattr("stx.cli._stdout_is_tty", lambda: False)
+        _write_hooks_toml(
+            hooks_file,
+            '[[hooks]]\nevent = "task.created"\ntiming = "post"\ncommand = "echo"\n',
+        )
+        out, _ = cli("hook", "validate", "--path", str(hooks_file))
+        data = json.loads(out)
+        assert data["ok"] is True
+        assert data["data"]["valid"] is True
+        assert data["data"]["errors"] == []
+
+    def test_invalid_exits_4(self, cli, hooks_file):
+        _write_hooks_toml(
+            hooks_file,
+            '[[hooks]]\nevent = "bogus"\ntiming = "post"\ncommand = "x"\n',
+        )
+        cli("hook", "validate", "--path", str(hooks_file), expect_exit=4)
+
+    def test_valid_exits_0(self, cli, hooks_file):
+        _write_hooks_toml(
+            hooks_file,
+            '[[hooks]]\nevent = "task.created"\ntiming = "post"\ncommand = "echo"\n',
+        )
+        cli("hook", "validate", "--path", str(hooks_file), expect_exit=0)
+
+    def test_invalid_json_mode_still_emits_payload_with_exit_4(
+        self, cli, hooks_file, monkeypatch
+    ):
+        monkeypatch.setattr("stx.cli._stdout_is_tty", lambda: False)
+        _write_hooks_toml(
+            hooks_file,
+            '[[hooks]]\nevent = "bogus"\ntiming = "post"\ncommand = "x"\n',
+        )
+        out, _ = cli("hook", "validate", "--path", str(hooks_file), expect_exit=4)
+        data = json.loads(out)
+        # payload still fully structured despite nonzero exit
+        assert data["ok"] is True
+        assert data["data"]["valid"] is False
+        assert len(data["data"]["errors"]) >= 1
+
+
+class TestHookSchema:
+    def test_emits_json_schema(self, cli):
+        out, _ = cli("hook", "schema")
+        schema = json.loads(out)
+        assert schema.get("$schema", "").startswith("https://json-schema.org")
+
+    def test_contains_event_list(self, cli):
+        from stx.hooks import HookEvent
+
+        out, _ = cli("hook", "schema")
+        # Every event should appear somewhere in the schema text.
+        for e in HookEvent:
+            assert e.value in out
+
+    def test_json_mode_wraps_envelope(self, cli, monkeypatch):
+        monkeypatch.setattr("stx.cli._stdout_is_tty", lambda: False)
+        out, _ = cli("hook", "schema")
+        data = json.loads(out)
+        assert data["ok"] is True
+        assert "$schema" in data["data"]
+
+    def test_output_writes_file(self, cli, tmp_path: Path):
+        dest = tmp_path / "out.schema.json"
+        cli("hook", "schema", "--output", str(dest))
+        content = dest.read_text()
+        schema = json.loads(content)
+        assert schema.get("$schema", "").startswith("https://json-schema.org")
+
+    def test_output_requires_overwrite_when_exists(self, cli, tmp_path: Path):
+        dest = tmp_path / "out.schema.json"
+        dest.write_text("stale")
+        cli("hook", "schema", "--output", str(dest), expect_exit=4)
+        assert dest.read_text() == "stale"
+
+    def test_output_overwrite(self, cli, tmp_path: Path):
+        dest = tmp_path / "out.schema.json"
+        dest.write_text("stale")
+        cli("hook", "schema", "--output", str(dest), "--overwrite")
+        assert dest.read_text() != "stale"
+        schema = json.loads(dest.read_text())
+        assert "$schema" in schema

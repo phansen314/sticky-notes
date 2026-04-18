@@ -7,6 +7,7 @@ from __future__ import annotations
 from dataclasses import fields
 
 from .formatting import format_group_num, format_priority, format_task_num, format_timestamp
+from .hooks import HookConfig
 from .models import JournalEntry, Status, Workspace
 from .service_models import (
     ArchivePreview,
@@ -330,6 +331,37 @@ def format_next_tasks(view: NextTasksView) -> str:
                 f"  {format_task_num(entry.task.id)}  {format_priority(entry.task.priority)} "
                 f"{entry.task.title}  (blocked by: {blockers})"
             )
+    return "\n".join(lines)
+
+
+def format_hook_list(hooks: tuple[HookConfig, ...]) -> str:
+    if not hooks:
+        return "no hooks"
+    lines: list[str] = []
+    for h in hooks:
+        parts = [f"[{h.event.value}]", f"[{h.timing.value}]"]
+        if h.workspace is not None:
+            parts.append(f"[workspace={h.workspace}]")
+        if h.name is not None:
+            parts.append(f"[name='{h.name}']")
+        if not h.enabled:
+            parts.append("[disabled]")
+        parts.append(h.command)
+        lines.append(" ".join(parts))
+    return "\n".join(lines)
+
+
+def format_hook_events(events: list[str]) -> str:
+    if not events:
+        return "no events"
+    return "\n".join(events)
+
+
+def format_hook_validation(errors: list[str], path: str) -> str:
+    if not errors:
+        return f"hooks config valid: {path}"
+    lines = [f"hooks config has {len(errors)} error(s) in {path}:"]
+    lines.extend(f"  {e}" for e in errors)
     return "\n".join(lines)
 
 

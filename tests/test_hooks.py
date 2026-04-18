@@ -266,6 +266,41 @@ class _FakeTask:
     version: int = 0
 
 
+@dataclasses.dataclass(frozen=True)
+class _FakeGroup:
+    id: int
+    title: str
+    workspace_id: int = 1
+    description: str | None = None
+    parent_id: int | None = None
+    archived: bool = False
+    created_at: int = 0
+    metadata: dict = dataclasses.field(default_factory=dict)
+    done: bool = False
+    version: int = 0
+
+
+@dataclasses.dataclass(frozen=True)
+class _FakeWorkspace:
+    id: int
+    name: str
+    archived: bool = False
+    created_at: int = 0
+    metadata: dict = dataclasses.field(default_factory=dict)
+    version: int = 0
+
+
+@dataclasses.dataclass(frozen=True)
+class _FakeStatus:
+    id: int
+    name: str
+    workspace_id: int = 1
+    archived: bool = False
+    created_at: int = 0
+    is_terminal: bool = False
+    version: int = 0
+
+
 class TestBuildPayload:
     def _created_payload(self, entity: object = None, proposed: dict | None = None) -> dict:
         raw = build_payload(
@@ -584,6 +619,61 @@ def _full_task_entity() -> dict:
     return _serialize_entity(_FakeTask(id=1, title="t"))  # type: ignore[return-value]
 
 
+def _full_group_entity() -> dict:
+    return _serialize_entity(_FakeGroup(id=1, title="g"))  # type: ignore[return-value]
+
+
+def _full_workspace_entity() -> dict:
+    return _serialize_entity(_FakeWorkspace(id=1, name="ws"))  # type: ignore[return-value]
+
+
+def _full_status_entity() -> dict:
+    return _serialize_entity(_FakeStatus(id=1, name="todo"))  # type: ignore[return-value]
+
+
+def _full_edge_entity() -> dict:
+    return {
+        "from_type": "task", "from_id": 1,
+        "to_type": "task", "to_id": 2,
+        "workspace_id": 1, "kind": "blocks",
+        "acyclic": True, "metadata": {},
+        "archived": False, "version": 0,
+    }
+
+
+# (event, entity_type_name, entity_factory) — for parametrized conformance tests.
+_CREATED_CASES = [
+    (HookEvent.TASK_CREATED, "task", _full_task_entity),
+    (HookEvent.GROUP_CREATED, "group", _full_group_entity),
+    (HookEvent.WORKSPACE_CREATED, "workspace", _full_workspace_entity),
+    (HookEvent.STATUS_CREATED, "status", _full_status_entity),
+    (HookEvent.EDGE_CREATED, "edge", _full_edge_entity),
+]
+
+_UPDATED_CASES = [
+    (HookEvent.TASK_UPDATED, "task", _full_task_entity, {"title": {"old": "a", "new": "b"}}),
+    (HookEvent.GROUP_UPDATED, "group", _full_group_entity, {"title": {"old": "a", "new": "b"}}),
+    (HookEvent.WORKSPACE_UPDATED, "workspace", _full_workspace_entity, {"name": {"old": "a", "new": "b"}}),
+    (HookEvent.STATUS_UPDATED, "status", _full_status_entity, {"name": {"old": "a", "new": "b"}}),
+    (HookEvent.EDGE_UPDATED, "edge", _full_edge_entity, {"acyclic": {"old": False, "new": True}}),
+]
+
+_ARCHIVED_CASES = [
+    (HookEvent.TASK_ARCHIVED, "task", _full_task_entity),
+    (HookEvent.GROUP_ARCHIVED, "group", _full_group_entity),
+    (HookEvent.WORKSPACE_ARCHIVED, "workspace", _full_workspace_entity),
+    (HookEvent.STATUS_ARCHIVED, "status", _full_status_entity),
+    (HookEvent.EDGE_ARCHIVED, "edge", _full_edge_entity),
+]
+
+_META_CASES = [
+    (HookEvent.TASK_META_SET, "task", _full_task_entity),
+    (HookEvent.GROUP_META_SET, "group", _full_group_entity),
+    (HookEvent.WORKSPACE_META_SET, "workspace", _full_workspace_entity),
+    (HookEvent.EDGE_META_SET, "edge", _full_edge_entity),
+]
+
+
 class TestSchemaConformance:
     def test_schema_loads(self) -> None:
         schema = load_event_schema()
@@ -640,6 +730,79 @@ class TestSchemaConformance:
             entity=_full_task_entity(),
             meta_key="tag",
             meta_value="urgent",
+        ))
+        _validate_payload(schema, payload)
+
+    @pytest.mark.parametrize(
+        "event,entity_type,entity_factory",
+        _CREATED_CASES,
+        ids=[c[1] for c in _CREATED_CASES],
+    )
+    def test_created_payload_all_entities(
+        self, event: HookEvent, entity_type: str, entity_factory: object
+    ) -> None:
+        schema = load_event_schema()
+        payload = json.loads(build_payload(
+            event, HookTiming.POST,
+            workspace_id=1, workspace_name="ws",
+            entity_type=entity_type, entity_id=1,
+            entity=entity_factory(),  # type: ignore[misc]
+            proposed={"k": "v"},
+        ))
+        _validate_payload(schema, payload)
+
+    @pytest.mark.parametrize(
+        "event,entity_type,entity_factory,changes",
+        _UPDATED_CASES,
+        ids=[c[1] for c in _UPDATED_CASES],
+    )
+    def test_updated_payload_all_entities(
+        self, event: HookEvent, entity_type: str,
+        entity_factory: object, changes: dict,
+    ) -> None:
+        schema = load_event_schema()
+        payload = json.loads(build_payload(
+            event, HookTiming.POST,
+            workspace_id=1, workspace_name="ws",
+            entity_type=entity_type, entity_id=1,
+            entity=entity_factory(),  # type: ignore[misc]
+            changes=changes,
+        ))
+        _validate_payload(schema, payload)
+
+    @pytest.mark.parametrize(
+        "event,entity_type,entity_factory",
+        _ARCHIVED_CASES,
+        ids=[c[1] for c in _ARCHIVED_CASES],
+    )
+    def test_archived_payload_all_entities(
+        self, event: HookEvent, entity_type: str, entity_factory: object
+    ) -> None:
+        schema = load_event_schema()
+        payload = json.loads(build_payload(
+            event, HookTiming.POST,
+            workspace_id=1, workspace_name="ws",
+            entity_type=entity_type, entity_id=1,
+            entity=entity_factory(),  # type: ignore[misc]
+            changes={"archived": {"old": False, "new": True}},
+        ))
+        _validate_payload(schema, payload)
+
+    @pytest.mark.parametrize(
+        "event,entity_type,entity_factory",
+        _META_CASES,
+        ids=[c[1] for c in _META_CASES],
+    )
+    def test_meta_payload_all_entities(
+        self, event: HookEvent, entity_type: str, entity_factory: object
+    ) -> None:
+        schema = load_event_schema()
+        payload = json.loads(build_payload(
+            event, HookTiming.POST,
+            workspace_id=1, workspace_name="ws",
+            entity_type=entity_type, entity_id=1,
+            entity=entity_factory(),  # type: ignore[misc]
+            meta_key="tag", meta_value="v",
         ))
         _validate_payload(schema, payload)
 

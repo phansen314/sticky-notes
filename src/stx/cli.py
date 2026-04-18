@@ -38,10 +38,16 @@ EXIT_HOOK_REJECTED = 7
 
 @dataclass(frozen=True)
 class Ok:
-    """Command result. JSON: {"ok": true, "data": to_dict(data)}"""
+    """Command result. JSON: {"ok": true, "data": to_dict(data)}
+
+    `exit_code` lets a handler signal a non-zero process exit while still
+    emitting its full structured payload (data + text). Used by commands like
+    `hook validate` that report findings *and* want CI-friendly exit codes.
+    """
 
     data: object
     text: str
+    exit_code: int = 0
 
 
 type CmdResult = Ok
@@ -1436,6 +1442,84 @@ def cmd_config_del(
     )
 
 
+# ---- Hook subcommands ----
+
+
+def cmd_hook_ls(conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext) -> CmdResult:
+    from .hooks import DEFAULT_HOOKS_PATH, HookEvent, HookTiming, load_hooks, validate_hooks_config
+
+    hooks_path = Path(args.path) if args.path else DEFAULT_HOOKS_PATH
+    try:
+        hooks = load_hooks(hooks_path)
+    except ValueError as exc:
+        errors = validate_hooks_config(hooks_path)
+        if errors:
+            detail = "\n".join(f"  {e}" for e in errors)
+            raise ValueError(
+                f"hooks config invalid ({len(errors)} error(s)) — run 'stx hook validate' for details:\n{detail}"
+            ) from exc
+        raise
+
+    if args.event is not None:
+        try:
+            event = HookEvent(args.event)
+        except ValueError as exc:
+            valid = ", ".join(e.value for e in HookEvent)
+            raise ValueError(
+                f"invalid event '{args.event}'. Valid values: {valid}"
+            ) from exc
+        hooks = tuple(h for h in hooks if h.event == event)
+    if args.timing is not None:
+        timing = HookTiming(args.timing)
+        hooks = tuple(h for h in hooks if h.timing == timing)
+    if args.workspace_filter is not None:
+        hooks = tuple(h for h in hooks if h.workspace == args.workspace_filter)
+    if args.globals_only:
+        hooks = tuple(h for h in hooks if h.workspace is None)
+
+    return Ok(data=hooks, text=presenters.format_hook_list(hooks))
+
+
+def cmd_hook_events(
+    conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext
+) -> CmdResult:
+    from .hooks import HookEvent
+
+    events = [e.value for e in HookEvent]
+    return Ok(data=events, text=presenters.format_hook_events(events))
+
+
+def cmd_hook_validate(
+    conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext
+) -> CmdResult:
+    from .hooks import DEFAULT_HOOKS_PATH, validate_hooks_config
+
+    hooks_path = Path(args.path) if args.path else DEFAULT_HOOKS_PATH
+    errors = validate_hooks_config(hooks_path)
+    return Ok(
+        data={"valid": not errors, "errors": errors, "path": str(hooks_path)},
+        text=presenters.format_hook_validation(errors, str(hooks_path)),
+        exit_code=EXIT_VALIDATION if errors else 0,
+    )
+
+
+def cmd_hook_schema(
+    conn: sqlite3.Connection, args: argparse.Namespace, ctx: RunContext
+) -> CmdResult:
+    from .hooks import load_event_schema
+
+    schema = load_event_schema()
+    content = json.dumps(schema, indent=2)
+    if args.output:
+        output_path = _prepare_export_output(Path(args.output), args.overwrite)
+        output_path.write_text(content)
+        return Ok(
+            data={"output_path": str(args.output), "bytes": len(content.encode())},
+            text=f"wrote {args.output}",
+        )
+    return Ok(data=schema, text=content)
+
+
 # ---- Parser ----
 
 
@@ -1498,6 +1582,10 @@ HANDLERS: dict[str, CommandHandler] = {
     "config_get": cmd_config_get,
     "config_set": cmd_config_set,
     "config_del": cmd_config_del,
+    "hook_ls": cmd_hook_ls,
+    "hook_events": cmd_hook_events,
+    "hook_validate": cmd_hook_validate,
+    "hook_schema": cmd_hook_schema,
     "export": cmd_export,
     "backup": cmd_backup,
     "info": cmd_info,
@@ -1970,6 +2058,59 @@ def build_parser() -> argparse.ArgumentParser:
     p_cfg_del.set_defaults(command="config_del")
     p_cfg_del.add_argument("key", help="config key name")
 
+    # ---- Hook subcommands ----
+
+    p_hook = sub.add_parser("hook", help="hook configuration management (read-only)")
+    hook_sub = p_hook.add_subparsers()
+
+    p_hook_ls = hook_sub.add_parser("ls", help="list hooks from hooks.toml")
+    p_hook_ls.set_defaults(command="hook_ls")
+    p_hook_ws = p_hook_ls.add_mutually_exclusive_group()
+    p_hook_ws.add_argument(
+        "--workspace",
+        dest="workspace_filter",
+        default=None,
+        help="filter to hooks with this workspace value (exact match; unrelated to global -w)",
+    )
+    p_hook_ws.add_argument(
+        "--globals-only",
+        action="store_true",
+        help="show only hooks with no workspace set (config-file globals)",
+    )
+    p_hook_ls.add_argument(
+        "--event", default=None, help="filter by event name (e.g. task.created)"
+    )
+    p_hook_ls.add_argument(
+        "--timing", choices=["pre", "post"], default=None, help="filter by timing"
+    )
+    p_hook_ls.add_argument(
+        "--path",
+        default=None,
+        help="hooks.toml path (default: ~/.config/stx/hooks.toml)",
+    )
+
+    p_hook_events = hook_sub.add_parser("events", help="list all valid hook event names")
+    p_hook_events.set_defaults(command="hook_events")
+
+    p_hook_validate = hook_sub.add_parser(
+        "validate", help="validate hooks.toml; exits 0 if valid"
+    )
+    p_hook_validate.set_defaults(command="hook_validate")
+    p_hook_validate.add_argument(
+        "--path", default=None, help="hooks.toml path (default: ~/.config/stx/hooks.toml)"
+    )
+
+    p_hook_schema = hook_sub.add_parser(
+        "schema", help="print hook_events.schema.json to stdout"
+    )
+    p_hook_schema.set_defaults(command="hook_schema")
+    p_hook_schema.add_argument(
+        "-o", "--output", default=None, help="write to file instead of stdout"
+    )
+    p_hook_schema.add_argument(
+        "--overwrite", action="store_true", help="overwrite destination file if it exists"
+    )
+
     # ---- Export ----
 
     p_export = sub.add_parser("export", help="export database as JSON (default) or markdown (--md)")
@@ -2077,6 +2218,8 @@ def main(argv: list[str] | None = None) -> None:
             sys.stdout.write(result.text)
             if not result.text.endswith("\n"):
                 sys.stdout.write("\n")
+        if result.exit_code != 0:
+            raise SystemExit(result.exit_code)
     except KeyboardInterrupt:
         raise SystemExit(130)
     except sqlite3.OperationalError as exc:
