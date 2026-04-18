@@ -6,9 +6,7 @@ build/
 .idea/
 .pytest_cache/
 tmp/
-.coverage
-.coverage.*
-coverage.json
+coverage/
 uv.lock
 settings.local.json
 /.claude/

@@ -21,16 +21,20 @@ stx-tui = "stx.tui:main"
 [tool.pytest.ini_options]
 pythonpath = ["tests"]
 asyncio_mode = "auto"
-addopts = "-n auto --cov-report=term-missing"
+addopts = "-n auto --cov-report=term-missing --cov-report=html:coverage/html"
 
 [tool.coverage.run]
 source_pkgs = ["stx"]
 branch = true
 parallel = true
+data_file = "coverage/.coverage"
 
 [tool.coverage.report]
 show_missing = true
 skip_empty = true
+
+[tool.coverage.html]
+directory = "coverage/html"
 
 [tool.ruff]
 target-version = "py312"
